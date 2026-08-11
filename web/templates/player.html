@@ -1,0 +1,1781 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     플레이어 헤더
+============================== -->
+
+<div class="player-header">
+
+    <div class="profile">
+
+        <div class="tier-circle">
+            🏆
+        </div>
+
+        <div>
+
+            <h1>
+                {{ player.discord_nickname }}
+            </h1>
+
+            <h3>
+                {{ player.riot_name or "-" }}
+            </h3>
+
+            <div class="tier">
+                {{ player.tier or "-" }}
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="rating-box">
+
+        <div class="rating-title">
+            레이팅
+        </div>
+
+        <div class="rating-score">
+            ⭐ {{ player.rating }}
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     전체 랭킹 요약
+============================== -->
+
+<div class="player-rank-summary">
+
+    <div class="player-rank-card">
+
+        <div class="player-rank-label">
+            🏆 현재 순위
+        </div>
+
+        <div class="player-rank-value">
+            #{{ player_rank }}
+        </div>
+
+    </div>
+
+
+    <div class="player-rank-card">
+
+        <div class="player-rank-label">
+            👥 전체 플레이어
+        </div>
+
+        <div class="player-rank-value">
+            {{ total_player_count }}명
+        </div>
+
+    </div>
+
+
+    <div class="player-rank-card">
+
+        <div class="player-rank-label">
+            📊 랭킹 위치
+        </div>
+
+        <div class="player-rank-value">
+            상위 {{ top_percent }}%
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     현재 시즌
+============================== -->
+
+{% if active_season %}
+
+<div class="player-season-section">
+
+    <div class="player-season-header">
+
+        <div>
+
+            <h2>
+                🏆 {{ active_season.season_name }} 개인 기록
+            </h2>
+
+            <p>
+                현재 시즌 기준 기록입니다.
+            </p>
+
+        </div>
+
+        <a
+            href="/season"
+            class="player-season-link"
+        >
+            시즌 전체 보기 →
+        </a>
+
+    </div>
+
+
+    {% if season_stats %}
+
+    <div class="player-season-grid">
+
+        <div class="player-season-card">
+
+            <div class="player-season-label">
+                시즌 순위
+            </div>
+
+            <div class="player-season-value">
+                #{{ season_rank }}
+            </div>
+
+            <div class="player-season-sub">
+                전체 {{ season_player_count }}명
+            </div>
+
+        </div>
+
+
+        <div class="player-season-card">
+
+            <div class="player-season-label">
+                시즌 레이팅
+            </div>
+
+            <div
+                class="
+                    player-season-value
+                    player-season-rating
+                "
+            >
+                ⭐ {{ season_stats.rating }}
+            </div>
+
+        </div>
+
+
+        <div class="player-season-card">
+
+            <div class="player-season-label">
+                시즌 전적
+            </div>
+
+            <div class="player-season-value">
+
+                {{ season_stats.wins }}승
+                {{ season_stats.losses }}패
+
+            </div>
+
+            <div class="player-season-sub">
+                승률 {{ season_win_rate }}%
+            </div>
+
+        </div>
+
+
+        <div class="player-season-card">
+
+            <div class="player-season-label">
+                시즌 MVP
+            </div>
+
+            <div class="player-season-value">
+                ⭐ {{ season_stats.mvp }}회
+            </div>
+
+        </div>
+
+
+        <div class="player-season-card">
+
+            <div class="player-season-label">
+                현재 흐름
+            </div>
+
+            <div class="player-season-value">
+
+                {% if season_stats.win_streak > 0 %}
+
+                    🔥 {{ season_stats.win_streak }}연승
+
+                {% elif season_stats.lose_streak > 0 %}
+
+                    💀 {{ season_stats.lose_streak }}연패
+
+                {% else %}
+
+                    -
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+
+        <div class="player-season-card">
+
+            <div class="player-season-label">
+                최고 연승
+            </div>
+
+            <div class="player-season-value">
+                {{ season_stats.best_win_streak }}연승
+            </div>
+
+        </div>
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        현재 시즌에 아직 경기 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+{% endif %}
+
+
+<!-- ==============================
+     전체 기록
+============================== -->
+
+<div class="stats-grid">
+
+    <div class="stat-card">
+
+        <h3>
+            전체 전적
+        </h3>
+
+        <p>
+            {{ player.wins }}승
+            {{ player.losses }}패
+            <br>
+            승률 {{ win_rate }}%
+        </p>
+
+    </div>
+
+
+    <div class="stat-card">
+
+        <h3>
+            주 포지션
+        </h3>
+
+        <p>
+            {{ player.main_position or "-" }}
+        </p>
+
+    </div>
+
+
+    <div class="stat-card">
+
+        <h3>
+            부 포지션
+        </h3>
+
+        <p>
+            {{ player.sub_position or "-" }}
+        </p>
+
+    </div>
+
+
+    <div class="stat-card">
+
+        <h3>
+            전체 MVP
+        </h3>
+
+        <p>
+            {{ player.mvp }}회
+        </p>
+
+    </div>
+
+
+    <div class="stat-card">
+
+        <h3>
+            현재 흐름
+        </h3>
+
+        <p>
+
+            {% if player.win_streak > 0 %}
+
+                🔥 {{ player.win_streak }}연승
+
+            {% elif player.lose_streak > 0 %}
+
+                💀 {{ player.lose_streak }}연패
+
+            {% else %}
+
+                -
+
+            {% endif %}
+
+        </p>
+
+    </div>
+
+
+    <div class="stat-card">
+
+        <h3>
+            최고 연승
+        </h3>
+
+        <p>
+            {{ player.best_win_streak }}연승
+        </p>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최근 5경기 폼
+============================== -->
+
+<div class="recent-form-section">
+
+    <div class="recent-form-header">
+
+        <h2>
+            🔥 최근 폼
+        </h2>
+
+        <p>
+            최근 5경기 기준
+        </p>
+
+    </div>
+
+
+    <div class="recent-form-grid">
+
+        <div class="recent-form-card">
+
+            <div class="recent-form-label">
+                최근 전적
+            </div>
+
+            <div class="recent-form-value">
+
+                {{ recent_5_win_count }}승
+                {{ recent_5_loss_count }}패
+
+            </div>
+
+        </div>
+
+
+        <div class="recent-form-card">
+
+            <div class="recent-form-label">
+                최근 승률
+            </div>
+
+            <div class="recent-form-value">
+                {{ recent_5_win_rate }}%
+            </div>
+
+        </div>
+
+
+        <div class="recent-form-card">
+
+            <div class="recent-form-label">
+                최근 레이팅 변화
+            </div>
+
+            <div
+                class="
+                    recent-form-value
+
+                    {% if recent_5_rating_change > 0 %}
+                        recent-form-positive
+
+                    {% elif recent_5_rating_change < 0 %}
+                        recent-form-negative
+
+                    {% else %}
+                        recent-form-neutral
+                    {% endif %}
+                "
+            >
+
+                {% if recent_5_rating_change > 0 %}
+
+                    +{{ recent_5_rating_change }} LP
+
+                {% elif recent_5_rating_change < 0 %}
+
+                    {{ recent_5_rating_change }} LP
+
+                {% else %}
+
+                    0 LP
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    {% if recent_matches %}
+
+    <div class="recent-form-results">
+
+        {% for match in recent_matches %}
+
+            {% if match.won %}
+
+                <a
+                    href="/match/{{ match.match_id }}"
+                    class="
+                        recent-form-result
+                        recent-form-win
+                    "
+                    title="경기 #{{ match.match_id }}"
+                >
+                    W
+                </a>
+
+            {% else %}
+
+                <a
+                    href="/match/{{ match.match_id }}"
+                    class="
+                        recent-form-result
+                        recent-form-loss
+                    "
+                    title="경기 #{{ match.match_id }}"
+                >
+                    L
+                </a>
+
+            {% endif %}
+
+        {% endfor %}
+
+    </div>
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 최근 경기 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<hr style="margin:45px 0;border:1px solid #2d323c;">
+
+
+<!-- ==============================
+     포지션별 성적
+============================== -->
+
+<div class="position-section">
+
+    <div class="position-section-header">
+
+        <h2>
+            🎯 포지션별 성적
+        </h2>
+
+        <p>
+            실제 경기 포지션 기준
+        </p>
+
+    </div>
+
+
+    {% if position_stats %}
+
+    <div class="position-stats-grid">
+
+        {% for stat in position_stats %}
+
+        <div class="position-stat-card">
+
+            <div class="position-stat-top">
+
+                <div class="position-name">
+
+                    {% if stat.position == "TOP" %}
+
+                        🛡️ TOP
+
+                    {% elif stat.position == "JUNGLE" %}
+
+                        🌲 JUNGLE
+
+                    {% elif stat.position == "MID" %}
+
+                        ⚔️ MID
+
+                    {% elif stat.position == "ADC" %}
+
+                        🏹 ADC
+
+                    {% elif stat.position == "SUPPORT" %}
+
+                        💚 SUPPORT
+
+                    {% elif stat.position == "UNKNOWN" %}
+
+                        🎮 미기록
+
+                    {% else %}
+
+                        🎮 {{ stat.position }}
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="position-games">
+                    {{ stat.games }}경기
+                </div>
+
+            </div>
+
+
+            <div class="position-record">
+
+                <span class="position-wins">
+                    {{ stat.wins }}승
+                </span>
+
+                <span class="position-losses">
+                    {{ stat.losses }}패
+                </span>
+
+            </div>
+
+
+            <div class="position-winrate">
+
+                <div class="position-winrate-label">
+                    승률
+                </div>
+
+                <div class="position-winrate-value">
+                    {{ stat.win_rate }}%
+                </div>
+
+            </div>
+
+
+            <div class="position-progress">
+
+                <div
+                    class="position-progress-bar"
+                    style="width:{{ stat.win_rate }}%;"
+                ></div>
+
+            </div>
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 포지션별 경기 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<hr style="margin:45px 0;border:1px solid #2d323c;">
+
+
+<!-- ==============================
+     듀오
+============================== -->
+
+<div class="duo-section">
+
+    <div class="duo-section-header">
+
+        <h2>
+            👥 자주 함께한 플레이어
+        </h2>
+
+        <p>
+            같은 팀으로 가장 많이 플레이한 TOP 5
+        </p>
+
+    </div>
+
+
+    {% if duo_players %}
+
+    <div class="duo-list">
+
+        {% for duo in duo_players %}
+
+        {% if duo.player_id %}
+
+        <a
+            href="/player/{{ duo.player_id }}"
+            class="duo-player-link"
+        >
+
+        {% endif %}
+
+
+        <div class="duo-card">
+
+            <div class="duo-rank">
+
+                {% if loop.index == 1 %}
+
+                    🥇
+
+                {% elif loop.index == 2 %}
+
+                    🥈
+
+                {% elif loop.index == 3 %}
+
+                    🥉
+
+                {% else %}
+
+                    {{ loop.index }}
+
+                {% endif %}
+
+            </div>
+
+
+            <div class="duo-player-info">
+
+                <div class="duo-player-name">
+
+                    {{
+                        duo.discord_nickname
+                        or "알 수 없는 플레이어"
+                    }}
+
+                </div>
+
+
+                <div class="duo-player-sub">
+
+                    {{ duo.tier or "-" }}
+
+                    {% if duo.riot_name %}
+
+                        · {{ duo.riot_name }}
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <div class="duo-games">
+
+                <div class="duo-label">
+                    함께한 경기
+                </div>
+
+                <div class="duo-value">
+                    {{ duo.games }}경기
+                </div>
+
+            </div>
+
+
+            <div class="duo-record">
+
+                <div class="duo-label">
+                    함께한 전적
+                </div>
+
+                <div class="duo-value">
+
+                    {{ duo.wins }}승
+                    {{ duo.losses }}패
+
+                </div>
+
+            </div>
+
+
+            <div class="duo-winrate">
+
+                <div class="duo-label">
+                    듀오 승률
+                </div>
+
+                <div class="duo-winrate-value">
+                    {{ duo.win_rate }}%
+                </div>
+
+            </div>
+
+        </div>
+
+
+        {% if duo.player_id %}
+
+        </a>
+
+        {% endif %}
+
+        {% endfor %}
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 함께 플레이한 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<hr style="margin:45px 0;border:1px solid #2d323c;">
+
+
+<!-- ==============================
+     상대 전적
+============================== -->
+
+<div class="opponent-section">
+
+    <div class="opponent-section-header">
+
+        <h2>
+            ⚔️ 자주 만난 상대
+        </h2>
+
+        <p>
+            상대 팀으로 가장 많이 만난 TOP 5
+        </p>
+
+    </div>
+
+
+    {% if opponent_players %}
+
+    <div class="opponent-list">
+
+        {% for opponent in opponent_players %}
+
+        {% if opponent.player_id %}
+
+        <a
+            href="/player/{{ opponent.player_id }}"
+            class="opponent-player-link"
+        >
+
+        {% endif %}
+
+
+        <div class="opponent-card">
+
+            <div class="opponent-rank">
+
+                {% if loop.index == 1 %}
+
+                    🥇
+
+                {% elif loop.index == 2 %}
+
+                    🥈
+
+                {% elif loop.index == 3 %}
+
+                    🥉
+
+                {% else %}
+
+                    {{ loop.index }}
+
+                {% endif %}
+
+            </div>
+
+
+            <div class="opponent-player-info">
+
+                <div class="opponent-player-name">
+
+                    {{
+                        opponent.discord_nickname
+                        or "알 수 없는 플레이어"
+                    }}
+
+                </div>
+
+
+                <div class="opponent-player-sub">
+
+                    {{ opponent.tier or "-" }}
+
+                    {% if opponent.riot_name %}
+
+                        · {{ opponent.riot_name }}
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <div class="opponent-games">
+
+                <div class="opponent-label">
+                    맞대결
+                </div>
+
+                <div class="opponent-value">
+                    {{ opponent.games }}경기
+                </div>
+
+            </div>
+
+
+            <div class="opponent-record">
+
+                <div class="opponent-label">
+                    상대 전적
+                </div>
+
+                <div class="opponent-value">
+
+                    {{ opponent.wins }}승
+                    {{ opponent.losses }}패
+
+                </div>
+
+            </div>
+
+
+            <div class="opponent-winrate">
+
+                <div class="opponent-label">
+                    상대 승률
+                </div>
+
+                <div class="opponent-winrate-value">
+                    {{ opponent.win_rate }}%
+                </div>
+
+            </div>
+
+        </div>
+
+
+        {% if opponent.player_id %}
+
+        </a>
+
+        {% endif %}
+
+        {% endfor %}
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 상대 전적 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<hr style="margin:45px 0;border:1px solid #2d323c;">
+
+
+<!-- ==============================
+     최근 20경기 요약
+============================== -->
+
+<div class="recent-summary-section">
+
+    <h2>
+        최근 20경기
+    </h2>
+
+
+    {% if recent_results %}
+
+    <div class="recent-summary">
+
+        <div class="recent-record">
+
+            <strong>
+
+                {{ recent_win_count }}승
+                {{ recent_loss_count }}패
+
+            </strong>
+
+            (승률 {{ recent_win_rate }}%)
+
+        </div>
+
+
+        <div class="recent-strip">
+
+            {% for game in recent_results %}
+
+                {% if game.won %}
+
+                    <div
+                        class="strip-win"
+                        title="경기 #{{ game.match_id }} 승리"
+                    ></div>
+
+                {% else %}
+
+                    <div
+                        class="strip-lose"
+                        title="경기 #{{ game.match_id }} 패배"
+                    ></div>
+
+                {% endif %}
+
+            {% endfor %}
+
+        </div>
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 최근 20경기 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<hr style="margin:45px 0;border:1px solid #2d323c;">
+
+
+<!-- ==============================
+     레이팅 변화
+============================== -->
+
+<div class="rating-history-section">
+
+    <div class="rating-history-header">
+
+        <h2>
+            📈 레이팅 변화
+        </h2>
+
+        <p>
+            최근 최대 20경기의 레이팅 흐름
+        </p>
+
+    </div>
+
+
+    {% if rating_history %}
+
+        {% set highest_rating =
+            rating_history
+            | map(attribute='rating_after')
+            | max
+        %}
+
+        {% set lowest_rating =
+            rating_history
+            | map(attribute='rating_after')
+            | min
+        %}
+
+        {% set latest_rating =
+            player.rating
+        %}
+
+        {% set rating_diff =
+            recent_20_rating_change
+        %}
+
+
+        <div class="rating-summary-grid">
+
+            <div class="rating-summary-card">
+
+                <div class="rating-summary-label">
+                    🏆 최고 레이팅
+                </div>
+
+                <div class="rating-summary-value">
+                    {{ highest_rating }}
+                </div>
+
+            </div>
+
+
+            <div class="rating-summary-card">
+
+                <div class="rating-summary-label">
+                    📉 최저 레이팅
+                </div>
+
+                <div class="rating-summary-value">
+                    {{ lowest_rating }}
+                </div>
+
+            </div>
+
+
+            <div class="rating-summary-card">
+
+                <div class="rating-summary-label">
+                    📈 최근 20경기 변화
+                </div>
+
+                <div
+                    class="
+                        rating-summary-value
+
+                        {% if rating_diff > 0 %}
+                            rating-up
+
+                        {% elif rating_diff < 0 %}
+                            rating-down
+
+                        {% else %}
+                            rating-neutral
+                        {% endif %}
+                    "
+                >
+
+                    {% if rating_diff > 0 %}
+
+                        +{{ rating_diff }}
+
+                    {% else %}
+
+                        {{ rating_diff }}
+
+                    {% endif %}
+
+                    LP
+
+                </div>
+
+            </div>
+
+
+            <div class="rating-summary-card">
+
+                <div class="rating-summary-label">
+                    ⭐ 현재 레이팅
+                </div>
+
+                <div class="rating-summary-value">
+                    {{ latest_rating }}
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="rating-chart-card">
+
+            <canvas id="ratingChart"></canvas>
+
+        </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 그래프로 표시할 경기 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<!-- ==============================
+     최근 20경기 LP 변화
+============================== -->
+
+<div class="lp-chart-section">
+
+    <div class="lp-chart-header">
+
+        <div>
+
+            <h2>
+                📊 최근 20경기 LP 변화
+            </h2>
+
+            <p>
+                경기별 레이팅 증감과 승패를 한눈에 확인합니다.
+            </p>
+
+        </div>
+
+
+        <div
+            class="
+                lp-chart-total
+
+                {% if recent_20_rating_change > 0 %}
+                    lp-chart-total-positive
+
+                {% elif recent_20_rating_change < 0 %}
+                    lp-chart-total-negative
+                {% endif %}
+            "
+        >
+
+            {% if recent_20_rating_change > 0 %}
+
+                +{{ recent_20_rating_change }} LP
+
+            {% else %}
+
+                {{ recent_20_rating_change }} LP
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    {% if recent_results %}
+
+    <div class="lp-chart-card">
+
+        <canvas id="lpChangeChart"></canvas>
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+
+        아직 LP 변화로 표시할 경기 기록이 없습니다.
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<!-- ==============================
+     최근 경기
+============================== -->
+
+<h2 style="margin-top:45px;">
+    최근 경기
+</h2>
+
+
+{% if recent_matches %}
+
+    {% for match in recent_matches %}
+
+    <a
+        href="/match/{{ match.match_id }}"
+        class="match-link"
+    >
+
+        <div class="match-card">
+
+            <div class="match-result">
+
+                {% if match.won %}
+
+                    <span class="win-badge">
+                        🟦 승리
+                    </span>
+
+                {% else %}
+
+                    <span class="lose-badge">
+                        🟥 패배
+                    </span>
+
+                {% endif %}
+
+            </div>
+
+
+            <div>
+
+                {% if match.team == "blue" %}
+
+                    <strong class="blue-team">
+                        🔵 블루팀
+                    </strong>
+
+                {% elif match.team == "red" %}
+
+                    <strong class="red-team">
+                        🔴 레드팀
+                    </strong>
+
+                {% else %}
+
+                    <strong>
+                        팀 미기록
+                    </strong>
+
+                {% endif %}
+
+            </div>
+
+
+            <div>
+
+                {% if match.rating_change >= 0 %}
+
+                    <span class="lp-plus">
+
+                        +{{ match.rating_change }}
+
+                    </span>
+
+                {% else %}
+
+                    <span class="lp-minus">
+
+                        {{ match.rating_change }}
+
+                    </span>
+
+                {% endif %}
+
+                LP
+
+            </div>
+
+
+            <div>
+
+                {{ match.rating_before }}
+                →
+                {{ match.rating_after }}
+
+            </div>
+
+
+            <div>
+                {{ match.match_date }}
+            </div>
+
+        </div>
+
+    </a>
+
+    {% endfor %}
+
+
+{% else %}
+
+<div class="empty-match-card">
+
+    아직 저장된 경기 기록이 없습니다.
+
+</div>
+
+{% endif %}
+
+
+<!-- ==============================
+     Chart.js
+============================== -->
+
+{% if rating_history or recent_results %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+{% endif %}
+
+
+<!-- ==============================
+     레이팅 선 그래프
+============================== -->
+
+{% if rating_history %}
+
+<script>
+
+const ratingLabels = [
+    {% for match in rating_history %}
+        {{ match.match_date | tojson }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const ratingValues = [
+    {% for match in rating_history %}
+        {{ match.rating_after }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const ratingAverage = (
+    ratingValues.reduce(
+        (sum, value) => sum + value,
+        0
+    )
+    / ratingValues.length
+);
+
+const ratingHighest = Math.max(
+    ...ratingValues
+);
+
+const ratingLowest = Math.min(
+    ...ratingValues
+);
+
+const ratingPointColors =
+    ratingValues.map(
+        value => {
+
+            if (value === ratingHighest) {
+                return "#4ade80";
+            }
+
+            if (value === ratingLowest) {
+                return "#f87171";
+            }
+
+            return "#4cc2ff";
+        }
+    );
+
+const ratingPointRadius =
+    ratingValues.map(
+        value => {
+
+            if (
+                value === ratingHighest
+                || value === ratingLowest
+            ) {
+                return 7;
+            }
+
+            return 4;
+        }
+    );
+
+const ratingContext =
+    document.getElementById(
+        "ratingChart"
+    );
+
+new Chart(
+    ratingContext,
+    {
+        type: "line",
+
+        data: {
+            labels: ratingLabels,
+
+            datasets: [
+                {
+                    label: "레이팅",
+                    data: ratingValues,
+
+                    borderColor: "#4cc2ff",
+                    backgroundColor: "rgba(76,194,255,0.15)",
+
+                    borderWidth: 3,
+                    tension: 0.35,
+                    fill: true,
+
+                    pointRadius: ratingPointRadius,
+                    pointHoverRadius: 8,
+                    pointBackgroundColor: ratingPointColors,
+                    pointBorderColor: ratingPointColors,
+                    pointBorderWidth: 2
+                },
+
+                {
+                    label: "평균 레이팅",
+
+                    data:
+                        ratingValues.map(
+                            () => ratingAverage
+                        ),
+
+                    borderColor: "#7f8b9c",
+                    borderWidth: 2,
+                    borderDash: [7, 7],
+
+                    fill: false,
+
+                    pointRadius: 0,
+                    pointHoverRadius: 0
+                }
+            ]
+        },
+
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+
+            interaction: {
+                intersect: false,
+                mode: "index"
+            },
+
+            plugins: {
+                legend: {
+                    display: false
+                },
+
+                tooltip: {
+                    backgroundColor: "#171b23",
+                    borderColor: "#3b4555",
+                    borderWidth: 1,
+                    titleColor: "#ffffff",
+                    bodyColor: "#ffffff",
+                    padding: 12,
+
+                    callbacks: {
+                        label: function(context) {
+
+                            if (
+                                context.datasetIndex === 1
+                            ) {
+                                return (
+                                    "평균 : "
+                                    + context.parsed.y.toFixed(1)
+                                );
+                            }
+
+                            return (
+                                "레이팅 : "
+                                + context.parsed.y
+                            );
+                        },
+
+                        afterLabel: function(context) {
+
+                            if (
+                                context.datasetIndex !== 0
+                            ) {
+                                return "";
+                            }
+
+                            const value =
+                                context.parsed.y;
+
+                            if (
+                                value === ratingHighest
+                            ) {
+                                return "🏆 최고 레이팅";
+                            }
+
+                            if (
+                                value === ratingLowest
+                            ) {
+                                return "📉 최저 레이팅";
+                            }
+
+                            return "";
+                        }
+                    }
+                }
+            },
+
+            scales: {
+                x: {
+                    ticks: {
+                        color: "#9ca3af",
+                        autoSkip: true,
+                        maxTicksLimit: 8
+                    },
+
+                    grid: {
+                        color: "rgba(60,70,85,0.35)"
+                    }
+                },
+
+                y: {
+                    ticks: {
+                        color: "#9ca3af"
+                    },
+
+                    grid: {
+                        color: "rgba(60,70,85,0.35)"
+                    }
+                }
+            }
+        }
+    }
+);
+
+</script>
+
+{% endif %}
+
+
+<!-- ==============================
+     LP 변화 막대 그래프
+============================== -->
+
+{% if recent_results %}
+
+<script>
+
+const lpLabels = [
+    {% for match in recent_results %}
+        "#{{ match.match_id }}"
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const lpChanges = [
+    {% for match in recent_results %}
+        {{ match.rating_change or 0 }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const lpWins = [
+    {% for match in recent_results %}
+        {{ "true" if match.won else "false" }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const lpDates = [
+    {% for match in recent_results %}
+        {{ match.match_date | tojson }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const lpBefore = [
+    {% for match in recent_results %}
+        {{ match.rating_before }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const lpAfter = [
+    {% for match in recent_results %}
+        {{ match.rating_after }}
+        {% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+const lpColors =
+    lpWins.map(
+        won => (
+            won
+            ? "#4ade80"
+            : "#f87171"
+        )
+    );
+
+const lpChartContext =
+    document.getElementById(
+        "lpChangeChart"
+    );
+
+new Chart(
+    lpChartContext,
+    {
+        type: "bar",
+
+        data: {
+            labels: lpLabels,
+
+            datasets: [
+                {
+                    label: "LP 변화",
+                    data: lpChanges,
+
+                    backgroundColor: lpColors,
+                    borderColor: lpColors,
+                    borderWidth: 1,
+
+                    borderRadius: 5,
+                    borderSkipped: false
+                }
+            ]
+        },
+
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+
+            interaction: {
+                intersect: false,
+                mode: "index"
+            },
+
+            plugins: {
+                legend: {
+                    display: false
+                },
+
+                tooltip: {
+                    backgroundColor: "#171b23",
+                    borderColor: "#3b4555",
+                    borderWidth: 1,
+                    titleColor: "#ffffff",
+                    bodyColor: "#ffffff",
+                    padding: 12,
+
+                    callbacks: {
+                        title: function(items) {
+
+                            const index =
+                                items[0].dataIndex;
+
+                            return (
+                                lpLabels[index]
+                                + " · "
+                                + lpDates[index]
+                            );
+                        },
+
+                        label: function(context) {
+
+                            const index =
+                                context.dataIndex;
+
+                            const change =
+                                lpChanges[index];
+
+                            const result =
+                                lpWins[index]
+                                ? "승리"
+                                : "패배";
+
+                            const sign =
+                                change > 0
+                                ? "+"
+                                : "";
+
+                            return [
+                                result,
+                                "LP 변화 : "
+                                    + sign
+                                    + change,
+                                "레이팅 : "
+                                    + lpBefore[index]
+                                    + " → "
+                                    + lpAfter[index]
+                            ];
+                        }
+                    }
+                }
+            },
+
+            scales: {
+                x: {
+                    ticks: {
+                        color: "#9ca3af",
+                        autoSkip: true,
+                        maxTicksLimit: 10
+                    },
+
+                    grid: {
+                        display: false
+                    }
+                },
+
+                y: {
+                    beginAtZero: true,
+
+                    ticks: {
+                        color: "#9ca3af"
+                    },
+
+                    grid: {
+                        color: "rgba(60,70,85,0.35)"
+                    }
+                }
+            }
+        }
+    }
+);
+
+</script>
+
+{% endif %}
+
+{% endblock %}

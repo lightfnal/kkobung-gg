@@ -1,0 +1,3071 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- =====================================================
+     서버 통계 전체 영역
+===================================================== -->
+
+<div id="statsPageArea">
+
+<!-- ==============================
+     페이지 헤더
+============================== -->
+
+<div class="stats-page-header">
+
+    <h1>
+        📊 서버 통계
+    </h1>
+
+    <p>
+        꼬붕.gg에 누적된 내전 기록을 기준으로 서버 전체 흐름을 확인합니다.
+    </p>
+
+</div>
+
+
+<!-- ==============================
+     전체 요약
+============================== -->
+
+<div class="stats-summary-grid">
+
+    <div class="stats-summary-card">
+
+        <div class="stats-summary-label">
+            👥 등록 플레이어
+        </div>
+
+        <div
+            id="statsPlayerCount"
+            class="stats-summary-value"
+        >
+            {{ player_count }}
+        </div>
+
+    </div>
+
+
+    <div class="stats-summary-card">
+
+        <div class="stats-summary-label">
+            🎮 누적 경기
+        </div>
+
+        <div
+            id="statsMatchCount"
+            class="stats-summary-value"
+        >
+            {{ match_count }}
+        </div>
+
+    </div>
+
+
+    <div class="stats-summary-card">
+
+        <div class="stats-summary-label">
+            ⭐ 평균 레이팅
+        </div>
+
+        <div
+            id="statsAverageRating"
+            class="stats-summary-value"
+        >
+            {{ average_rating }}
+        </div>
+
+    </div>
+
+
+    <div class="stats-summary-card">
+
+        <div class="stats-summary-label">
+            🏅 누적 MVP
+        </div>
+
+        <div
+            id="statsTotalMvp"
+            class="stats-summary-value"
+        >
+            {{ total_mvp }}
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     블루 / 레드 승률
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🔵 블루 vs 레드 🔴
+        </h2>
+
+        <p>
+            전체 완료 경기 기준 진영별 승률
+        </p>
+
+    </div>
+
+
+    <div class="stats-side-card">
+
+        <div class="stats-side-team stats-side-blue">
+
+            <div class="stats-side-name">
+                BLUE
+            </div>
+
+            <div
+                id="statsBlueWinRate"
+                class="stats-side-rate"
+            >
+                {{ blue_win_rate }}%
+            </div>
+
+            <div
+                id="statsBlueWins"
+                class="stats-side-wins"
+            >
+                {{ blue_wins }}승
+            </div>
+
+        </div>
+
+
+        <div class="stats-side-center">
+            VS
+        </div>
+
+
+        <div class="stats-side-team stats-side-red">
+
+            <div class="stats-side-name">
+                RED
+            </div>
+
+            <div
+                id="statsRedWinRate"
+                class="stats-side-rate"
+            >
+                {{ red_win_rate }}%
+            </div>
+
+            <div
+                id="statsRedWins"
+                class="stats-side-wins"
+            >
+                {{ red_wins }}승
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최근 20경기 진영 흐름
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            📈 최근 20경기 진영 흐름
+        </h2>
+
+        <p>
+            최근 완료 경기 기준 블루 / 레드 승리 흐름
+        </p>
+
+    </div>
+
+
+    <div id="statsRecentSideArea">
+
+        {% if recent_side_results %}
+
+        <div class="recent-side-summary">
+
+            <div class="recent-side-card recent-side-blue">
+
+                <span>
+                    🔵 BLUE
+                </span>
+
+                <strong>
+                    {{ recent_blue_wins }}승
+                </strong>
+
+                <div>
+                    {{ recent_blue_win_rate }}%
+                </div>
+
+            </div>
+
+
+            <div class="recent-side-center">
+
+                최근
+
+                <strong>
+                    {{ recent_side_game_count }}
+                </strong>
+
+                경기
+
+            </div>
+
+
+            <div class="recent-side-card recent-side-red">
+
+                <span>
+                    🔴 RED
+                </span>
+
+                <strong>
+                    {{ recent_red_wins }}승
+                </strong>
+
+                <div>
+                    {{ recent_red_win_rate }}%
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="recent-side-track">
+
+            <div
+                class="recent-side-blue-fill"
+                style="width:{{ recent_blue_win_rate }}%;"
+            ></div>
+
+            <div
+                class="recent-side-red-fill"
+                style="width:{{ recent_red_win_rate }}%;"
+            ></div>
+
+        </div>
+
+
+        <div class="recent-side-strip">
+
+            {% for match in recent_side_results %}
+
+                {% if match.winner|lower == "blue" %}
+
+                    <a
+                        href="/match/{{ match.id }}"
+                        class="recent-side-result recent-side-result-blue"
+                        title="경기 #{{ match.id }} · 블루 승리"
+                    >
+                        B
+                    </a>
+
+                {% elif match.winner|lower == "red" %}
+
+                    <a
+                        href="/match/{{ match.id }}"
+                        class="recent-side-result recent-side-result-red"
+                        title="경기 #{{ match.id }} · 레드 승리"
+                    >
+                        R
+                    </a>
+
+                {% endif %}
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            최근 경기 데이터가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     레이팅 TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            👑 레이팅 TOP 5
+        </h2>
+
+        <p>
+            현재 공개 레이팅 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsTopRatingArea">
+
+        {% if top_rating_players %}
+
+        <div class="stats-list">
+
+            {% for player in top_rating_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+
+                    {% if loop.index == 1 %}
+                        🥇
+                    {% elif loop.index == 2 %}
+                        🥈
+                    {% elif loop.index == 3 %}
+                        🥉
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        전적
+                    </span>
+
+                    <strong>
+                        {{ player.wins }}승
+                        {{ player.losses }}패
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        MVP
+                    </span>
+
+                    <strong>
+                        {{ player.mvp }}회
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-rating">
+                    ⭐ {{ player.rating }}
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            등록된 플레이어가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     MVP TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            ⭐ MVP TOP 5
+        </h2>
+
+        <p>
+            누적 MVP 횟수 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsTopMvpArea">
+
+        {% if top_mvp_players %}
+
+        <div class="stats-list">
+
+            {% for player in top_mvp_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+
+                    {% if loop.index == 1 %}
+                        🥇
+                    {% elif loop.index == 2 %}
+                        🥈
+                    {% elif loop.index == 3 %}
+                        🥉
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        MVP
+                    </span>
+
+                    <strong>
+                        {{ player.mvp }}회
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        전적
+                    </span>
+
+                    <strong>
+                        {{ player.wins }}승
+                        {{ player.losses }}패
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-rating">
+                    ⭐ {{ player.rating }}
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            MVP 기록이 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최다 참가 TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🔥 최다 참가 TOP 5
+        </h2>
+
+        <p>
+            실제 경기 참가 횟수 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsMostActiveArea">
+
+        {% if most_active_players %}
+
+        <div class="stats-list">
+
+            {% for player in most_active_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+                    {{ loop.index }}
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        경기
+                    </span>
+
+                    <strong>
+                        {{ player.games }}
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        승률
+                    </span>
+
+                    <strong>
+                        {{ player.win_rate }}%
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-rating">
+                    ⭐ {{ player.rating }}
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            경기 참가 기록이 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     승률 TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🏹 승률 TOP 5
+        </h2>
+
+        <p>
+            최소 3경기 이상 플레이 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsTopWinrateArea">
+
+        {% if top_winrate_players %}
+
+        <div class="stats-list">
+
+            {% for player in top_winrate_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+
+                    {% if loop.index == 1 %}
+                        🥇
+                    {% elif loop.index == 2 %}
+                        🥈
+                    {% elif loop.index == 3 %}
+                        🥉
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        전적
+                    </span>
+
+                    <strong>
+                        {{ player.wins }}승
+                        {{ player.losses }}패
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-winrate-value">
+                    {{ player.win_rate }}%
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            승률 데이터가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최근 상승세 TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🚀 최근 상승세 TOP 5
+        </h2>
+
+        <p>
+            최근 최대 5경기 레이팅 변화 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsTrendingArea">
+
+        {% if top_trending_players %}
+
+        <div class="stats-list">
+
+            {% for player in top_trending_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+
+                    {% if loop.index == 1 %}
+                        🥇
+                    {% elif loop.index == 2 %}
+                        🥈
+                    {% elif loop.index == 3 %}
+                        🥉
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        최근 전적
+                    </span>
+
+                    <strong>
+                        {{ player.recent_wins }}승
+                        {{ player.recent_losses }}패
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        최근 승률
+                    </span>
+
+                    <strong>
+                        {{ player.recent_win_rate }}%
+                    </strong>
+
+                </div>
+
+
+                <div
+                    class="
+                        stats-trending-value
+
+                        {% if player.recent_rating_change > 0 %}
+                            stats-trending-positive
+
+                        {% elif player.recent_rating_change < 0 %}
+                            stats-trending-negative
+                        {% endif %}
+                    "
+                >
+
+                    {% if player.recent_rating_change > 0 %}
+                        +{{ player.recent_rating_change }} LP
+                    {% else %}
+                        {{ player.recent_rating_change }} LP
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            최근 경기 데이터가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최근 하락세 TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🚨 최근 하락세 TOP 5
+        </h2>
+
+        <p>
+            최근 최대 5경기 레이팅 변화 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsDecliningArea">
+
+        {% if top_declining_players %}
+
+        <div class="stats-list">
+
+            {% for player in top_declining_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+
+                    {% if loop.index == 1 %}
+                        📉
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        최근 전적
+                    </span>
+
+                    <strong>
+                        {{ player.recent_wins }}승
+                        {{ player.recent_losses }}패
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        최근 승률
+                    </span>
+
+                    <strong>
+                        {{ player.recent_win_rate }}%
+                    </strong>
+
+                </div>
+
+
+                <div
+                    class="
+                        stats-declining-value
+
+                        {% if player.recent_rating_change < 0 %}
+                            stats-declining-negative
+
+                        {% elif player.recent_rating_change > 0 %}
+                            stats-declining-positive
+                        {% endif %}
+                    "
+                >
+
+                    {% if player.recent_rating_change > 0 %}
+                        +{{ player.recent_rating_change }} LP
+                    {% else %}
+                        {{ player.recent_rating_change }} LP
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            최근 경기 데이터가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최고 연승 TOP 5
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🔥 최고 연승 TOP 5
+        </h2>
+
+        <p>
+            역대 최고 연승 기록
+        </p>
+
+    </div>
+
+
+    <div id="statsStreakArea">
+
+        {% if top_streak_players %}
+
+        <div class="stats-list">
+
+            {% for player in top_streak_players %}
+
+            <div class="stats-player-row">
+
+                <div class="stats-rank">
+
+                    {% if loop.index == 1 %}
+                        🥇
+                    {% elif loop.index == 2 %}
+                        🥈
+                    {% elif loop.index == 3 %}
+                        🥉
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+
+                </div>
+
+
+                <div>
+
+                    <a
+                        href="/player/{{ player.id }}"
+                        class="stats-player-name"
+                    >
+                        {{ player.discord_nickname }}
+                    </a>
+
+                    <div class="stats-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+                            · {{ player.riot_name }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="stats-cell">
+
+                    <span>
+                        현재
+                    </span>
+
+                    <strong>
+                        {{ player.win_streak }}연승
+                    </strong>
+
+                </div>
+
+
+                <div class="stats-streak-value">
+                    🔥 {{ player.best_win_streak }}연승
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            연승 기록이 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     포지션 통계
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🎯 포지션 통계
+        </h2>
+
+        <p>
+            전체 경기의 실제 배정 포지션 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsPositionArea">
+
+        {% if position_stats %}
+
+        <div class="stats-grid-two">
+
+            {% for stat in position_stats %}
+
+            <div class="stats-data-card">
+
+                <div class="stats-data-top">
+
+                    <div class="stats-data-title">
+
+                        {% if stat.position == "TOP" %}
+                            🛡️ TOP
+                        {% elif stat.position == "JUNGLE" %}
+                            🌲 JUNGLE
+                        {% elif stat.position == "MID" %}
+                            ⚔️ MID
+                        {% elif stat.position == "ADC" %}
+                            🏹 ADC
+                        {% elif stat.position == "SUPPORT" %}
+                            💚 SUPPORT
+                        {% else %}
+                            🎮 {{ stat.position }}
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="stats-data-value">
+                        {{ stat.win_rate }}%
+                    </div>
+
+                </div>
+
+
+                <div class="stats-data-sub">
+
+                    {{ stat.games }}경기 ·
+                    {{ stat.wins }}승
+                    {{ stat.losses }}패
+
+                </div>
+
+
+                <div class="stats-progress">
+
+                    <div
+                        class="stats-progress-fill"
+                        style="width:{{ stat.win_rate }}%;"
+                    ></div>
+
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            포지션 기록이 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     티어 분포
+============================== -->
+
+<div class="stats-section">
+
+    <div class="stats-section-header">
+
+        <h2>
+            🏅 티어 분포
+        </h2>
+
+        <p>
+            등록 플레이어의 현재 티어 기준
+        </p>
+
+    </div>
+
+
+    <div id="statsTierArea">
+
+        {% if tier_stats %}
+
+        <div class="stats-tier-list">
+
+            {% for stat in tier_stats %}
+
+            <div class="stats-tier-row">
+
+                <div class="stats-tier-name">
+                    {{ stat.tier }}
+                </div>
+
+
+                <div class="stats-tier-count">
+                    {{ stat.player_count }}명
+                </div>
+
+
+                <div class="stats-tier-rating">
+                    평균 {{ stat.average_rating }}
+                </div>
+
+
+                <div>
+
+                    <div class="stats-tier-percent">
+                        {{ stat.percentage }}%
+                    </div>
+
+                    <div class="stats-tier-bar">
+
+                        <div
+                            class="stats-tier-fill"
+                            style="width:{{ stat.percentage }}%;"
+                        ></div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            티어 데이터가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     하단
+============================== -->
+
+<div class="stats-back">
+
+    <a href="/">
+        ← 홈으로
+    </a>
+
+</div>
+
+</div>
+
+
+<!-- ==============================
+     API 오류
+============================== -->
+
+<div
+    id="statsApiError"
+    class="empty-match-card"
+    style="display:none;"
+>
+    서버 통계 데이터를 불러오지 못했습니다.
+</div>
+
+
+<!-- =====================================================
+     서버 통계 실시간 자동 갱신
+===================================================== -->
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        const apiError =
+            document.getElementById(
+                "statsApiError"
+            );
+
+
+        let isRefreshing =
+            false;
+
+
+        let pageClosed =
+            false;
+
+
+        /* =====================================================
+           HTML Escape
+        ===================================================== */
+
+        function escapeHtml(
+            value
+        ){
+
+            if(
+                value === null
+                ||
+                value === undefined
+            ){
+                return "";
+            }
+
+
+            return String(
+                value
+            )
+            .replaceAll(
+                "&",
+                "&amp;"
+            )
+            .replaceAll(
+                "<",
+                "&lt;"
+            )
+            .replaceAll(
+                ">",
+                "&gt;"
+            )
+            .replaceAll(
+                '"',
+                "&quot;"
+            )
+            .replaceAll(
+                "'",
+                "&#039;"
+            );
+
+        }
+
+
+        /* =====================================================
+           숫자 안전 처리
+        ===================================================== */
+
+        function safeNumber(
+            value
+        ){
+
+            const number =
+                Number(
+                    value
+                );
+
+
+            if(
+                !Number.isFinite(
+                    number
+                )
+            ){
+                return 0;
+            }
+
+
+            return number;
+
+        }
+
+
+        /* =====================================================
+           순위 표시
+        ===================================================== */
+
+        function getRankText(
+            index
+        ){
+
+            if(
+                index === 0
+            ){
+                return "🥇";
+            }
+
+
+            if(
+                index === 1
+            ){
+                return "🥈";
+            }
+
+
+            if(
+                index === 2
+            ){
+                return "🥉";
+            }
+
+
+            return String(
+                index + 1
+            );
+
+        }
+
+
+        /* =====================================================
+           플레이어 기본 정보
+        ===================================================== */
+
+        function getPlayerMainHtml(
+            player
+        ){
+
+            const playerId =
+                safeNumber(
+                    player.id
+                );
+
+
+            const nickname =
+                escapeHtml(
+                    player.discord_nickname
+                    || "알 수 없는 플레이어"
+                );
+
+
+            const tier =
+                escapeHtml(
+                    player.tier
+                    || "-"
+                );
+
+
+            const riotName =
+                escapeHtml(
+                    player.riot_name
+                    || ""
+                );
+
+
+            let subText =
+                tier;
+
+
+            if(
+                riotName
+            ){
+
+                subText +=
+                    " · "
+                    + riotName;
+
+            }
+
+
+            let nameHtml =
+                `
+                <span class="stats-player-name">
+                    ${nickname}
+                </span>
+                `;
+
+
+            if(
+                playerId > 0
+            ){
+
+                nameHtml =
+                    `
+                    <a
+                        href="/player/${playerId}"
+                        class="stats-player-name"
+                    >
+                        ${nickname}
+                    </a>
+                    `;
+
+            }
+
+
+            return `
+                <div>
+
+                    ${nameHtml}
+
+                    <div class="stats-player-sub">
+                        ${subText}
+                    </div>
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           일반 TOP 리스트
+        ===================================================== */
+
+        function renderStandardPlayerList(
+            targetId,
+            players,
+            type,
+            emptyText
+        ){
+
+            const target =
+                document.getElementById(
+                    targetId
+                );
+
+
+            if(
+                !target
+            ){
+                return;
+            }
+
+
+            if(
+                !Array.isArray(
+                    players
+                )
+                ||
+                players.length === 0
+            ){
+
+                target.innerHTML =
+                    `
+                    <div class="empty-match-card">
+                        ${emptyText}
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            const rows =
+                players.map(
+                    function(
+                        player,
+                        index
+                    ){
+
+                        const wins =
+                            safeNumber(
+                                player.wins
+                            );
+
+                        const losses =
+                            safeNumber(
+                                player.losses
+                            );
+
+                        const rating =
+                            safeNumber(
+                                player.rating
+                            );
+
+                        const mvp =
+                            safeNumber(
+                                player.mvp
+                            );
+
+                        const games =
+                            safeNumber(
+                                player.games
+                            );
+
+                        const winRate =
+                            safeNumber(
+                                player.win_rate
+                            );
+
+                        const winStreak =
+                            safeNumber(
+                                player.win_streak
+                            );
+
+                        const bestWinStreak =
+                            safeNumber(
+                                player.best_win_streak
+                            );
+
+
+                        let rightHtml =
+                            "";
+
+
+                        if(
+                            type === "rating"
+                        ){
+
+                            rightHtml =
+                                `
+                                <div class="stats-cell">
+
+                                    <span>
+                                        전적
+                                    </span>
+
+                                    <strong>
+                                        ${wins}승 ${losses}패
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-cell">
+
+                                    <span>
+                                        MVP
+                                    </span>
+
+                                    <strong>
+                                        ${mvp}회
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-rating">
+                                    ⭐ ${rating}
+                                </div>
+                                `;
+
+                        }
+
+
+                        else if(
+                            type === "mvp"
+                        ){
+
+                            rightHtml =
+                                `
+                                <div class="stats-cell">
+
+                                    <span>
+                                        MVP
+                                    </span>
+
+                                    <strong>
+                                        ${mvp}회
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-cell">
+
+                                    <span>
+                                        전적
+                                    </span>
+
+                                    <strong>
+                                        ${wins}승 ${losses}패
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-rating">
+                                    ⭐ ${rating}
+                                </div>
+                                `;
+
+                        }
+
+
+                        else if(
+                            type === "active"
+                        ){
+
+                            rightHtml =
+                                `
+                                <div class="stats-cell">
+
+                                    <span>
+                                        경기
+                                    </span>
+
+                                    <strong>
+                                        ${games}
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-cell">
+
+                                    <span>
+                                        승률
+                                    </span>
+
+                                    <strong>
+                                        ${winRate}%
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-rating">
+                                    ⭐ ${rating}
+                                </div>
+                                `;
+
+                        }
+
+
+                        else if(
+                            type === "winrate"
+                        ){
+
+                            rightHtml =
+                                `
+                                <div class="stats-cell">
+
+                                    <span>
+                                        전적
+                                    </span>
+
+                                    <strong>
+                                        ${wins}승 ${losses}패
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-winrate-value">
+                                    ${winRate}%
+                                </div>
+                                `;
+
+                        }
+
+
+                        else if(
+                            type === "streak"
+                        ){
+
+                            rightHtml =
+                                `
+                                <div class="stats-cell">
+
+                                    <span>
+                                        현재
+                                    </span>
+
+                                    <strong>
+                                        ${winStreak}연승
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-streak-value">
+                                    🔥 ${bestWinStreak}연승
+                                </div>
+                                `;
+
+                        }
+
+
+                        return `
+                            <div class="stats-player-row">
+
+                                <div class="stats-rank">
+                                    ${getRankText(
+                                        index
+                                    )}
+                                </div>
+
+
+                                ${getPlayerMainHtml(
+                                    player
+                                )}
+
+
+                                ${rightHtml}
+
+                            </div>
+                        `;
+
+                    }
+                )
+                .join(
+                    ""
+                );
+
+
+            target.innerHTML =
+                `
+                <div class="stats-list">
+                    ${rows}
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           상승 / 하락 리스트
+        ===================================================== */
+
+        function renderTrendList(
+            targetId,
+            players,
+            declining
+        ){
+
+            const target =
+                document.getElementById(
+                    targetId
+                );
+
+
+            if(
+                !target
+            ){
+                return;
+            }
+
+
+            if(
+                !Array.isArray(
+                    players
+                )
+                ||
+                players.length === 0
+            ){
+
+                target.innerHTML =
+                    `
+                    <div class="empty-match-card">
+                        최근 경기 데이터가 없습니다.
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            const rows =
+                players.map(
+                    function(
+                        player,
+                        index
+                    ){
+
+                        const recentWins =
+                            safeNumber(
+                                player.recent_wins
+                            );
+
+                        const recentLosses =
+                            safeNumber(
+                                player.recent_losses
+                            );
+
+                        const recentWinRate =
+                            safeNumber(
+                                player.recent_win_rate
+                            );
+
+                        const change =
+                            safeNumber(
+                                player.recent_rating_change
+                            );
+
+
+                        let valueClass =
+                            declining
+                            ? "stats-declining-value"
+                            : "stats-trending-value";
+
+
+                        if(
+                            change > 0
+                        ){
+
+                            valueClass +=
+                                declining
+                                ? " stats-declining-positive"
+                                : " stats-trending-positive";
+
+                        }
+
+
+                        else if(
+                            change < 0
+                        ){
+
+                            valueClass +=
+                                declining
+                                ? " stats-declining-negative"
+                                : " stats-trending-negative";
+
+                        }
+
+
+                        const changeText =
+                            change > 0
+                            ? "+"
+                                + change
+                                + " LP"
+                            : change
+                                + " LP";
+
+
+                        let rankText =
+                            getRankText(
+                                index
+                            );
+
+
+                        if(
+                            declining
+                            &&
+                            index === 0
+                        ){
+
+                            rankText =
+                                "📉";
+
+                        }
+
+
+                        return `
+                            <div class="stats-player-row">
+
+                                <div class="stats-rank">
+                                    ${rankText}
+                                </div>
+
+
+                                ${getPlayerMainHtml(
+                                    player
+                                )}
+
+
+                                <div class="stats-cell">
+
+                                    <span>
+                                        최근 전적
+                                    </span>
+
+                                    <strong>
+                                        ${recentWins}승
+                                        ${recentLosses}패
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="stats-cell">
+
+                                    <span>
+                                        최근 승률
+                                    </span>
+
+                                    <strong>
+                                        ${recentWinRate}%
+                                    </strong>
+
+                                </div>
+
+
+                                <div class="${valueClass}">
+                                    ${changeText}
+                                </div>
+
+                            </div>
+                        `;
+
+                    }
+                )
+                .join(
+                    ""
+                );
+
+
+            target.innerHTML =
+                `
+                <div class="stats-list">
+                    ${rows}
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           최근 진영 흐름
+        ===================================================== */
+
+        function renderRecentSide(
+            recent
+        ){
+
+            const target =
+                document.getElementById(
+                    "statsRecentSideArea"
+                );
+
+
+            if(
+                !target
+            ){
+                return;
+            }
+
+
+            const results =
+                Array.isArray(
+                    recent?.results
+                )
+                ? recent.results
+                : [];
+
+
+            if(
+                results.length === 0
+            ){
+
+                target.innerHTML =
+                    `
+                    <div class="empty-match-card">
+                        최근 경기 데이터가 없습니다.
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            const games =
+                safeNumber(
+                    recent.games
+                );
+
+            const blueWins =
+                safeNumber(
+                    recent.blue_wins
+                );
+
+            const redWins =
+                safeNumber(
+                    recent.red_wins
+                );
+
+            const blueRate =
+                safeNumber(
+                    recent.blue_win_rate
+                );
+
+            const redRate =
+                safeNumber(
+                    recent.red_win_rate
+                );
+
+
+            const strip =
+                results.map(
+                    function(
+                        match
+                    ){
+
+                        const matchId =
+                            safeNumber(
+                                match.id
+                            );
+
+
+                        const winner =
+                            String(
+                                match.winner
+                                || ""
+                            ).toLowerCase();
+
+
+                        if(
+                            winner === "blue"
+                        ){
+
+                            return `
+                                <a
+                                    href="/match/${matchId}"
+                                    class="
+                                        recent-side-result
+                                        recent-side-result-blue
+                                    "
+                                    title="
+                                        경기 #${matchId} · 블루 승리
+                                    "
+                                >
+                                    B
+                                </a>
+                            `;
+
+                        }
+
+
+                        if(
+                            winner === "red"
+                        ){
+
+                            return `
+                                <a
+                                    href="/match/${matchId}"
+                                    class="
+                                        recent-side-result
+                                        recent-side-result-red
+                                    "
+                                    title="
+                                        경기 #${matchId} · 레드 승리
+                                    "
+                                >
+                                    R
+                                </a>
+                            `;
+
+                        }
+
+
+                        return "";
+
+                    }
+                )
+                .join(
+                    ""
+                );
+
+
+            target.innerHTML =
+                `
+                <div class="recent-side-summary">
+
+                    <div
+                        class="
+                            recent-side-card
+                            recent-side-blue
+                        "
+                    >
+
+                        <span>
+                            🔵 BLUE
+                        </span>
+
+                        <strong>
+                            ${blueWins}승
+                        </strong>
+
+                        <div>
+                            ${blueRate}%
+                        </div>
+
+                    </div>
+
+
+                    <div class="recent-side-center">
+
+                        최근
+
+                        <strong>
+                            ${games}
+                        </strong>
+
+                        경기
+
+                    </div>
+
+
+                    <div
+                        class="
+                            recent-side-card
+                            recent-side-red
+                        "
+                    >
+
+                        <span>
+                            🔴 RED
+                        </span>
+
+                        <strong>
+                            ${redWins}승
+                        </strong>
+
+                        <div>
+                            ${redRate}%
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <div class="recent-side-track">
+
+                    <div
+                        class="recent-side-blue-fill"
+                        style="
+                            width:
+                            ${Math.max(
+                                0,
+                                Math.min(
+                                    100,
+                                    blueRate
+                                )
+                            )}%;
+                        "
+                    ></div>
+
+                    <div
+                        class="recent-side-red-fill"
+                        style="
+                            width:
+                            ${Math.max(
+                                0,
+                                Math.min(
+                                    100,
+                                    redRate
+                                )
+                            )}%;
+                        "
+                    ></div>
+
+                </div>
+
+
+                <div class="recent-side-strip">
+                    ${strip}
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           포지션 통계
+        ===================================================== */
+
+        function getPositionName(
+            position
+        ){
+
+            const value =
+                String(
+                    position
+                    || ""
+                ).toUpperCase();
+
+
+            if(
+                value === "TOP"
+            ){
+                return "🛡️ TOP";
+            }
+
+
+            if(
+                value === "JUNGLE"
+            ){
+                return "🌲 JUNGLE";
+            }
+
+
+            if(
+                value === "MID"
+            ){
+                return "⚔️ MID";
+            }
+
+
+            if(
+                value === "ADC"
+            ){
+                return "🏹 ADC";
+            }
+
+
+            if(
+                value === "SUPPORT"
+            ){
+                return "💚 SUPPORT";
+            }
+
+
+            return (
+                "🎮 "
+                + escapeHtml(
+                    value
+                    || "UNKNOWN"
+                )
+            );
+
+        }
+
+
+        function renderPositionStats(
+            stats
+        ){
+
+            const target =
+                document.getElementById(
+                    "statsPositionArea"
+                );
+
+
+            if(
+                !target
+            ){
+                return;
+            }
+
+
+            if(
+                !Array.isArray(
+                    stats
+                )
+                ||
+                stats.length === 0
+            ){
+
+                target.innerHTML =
+                    `
+                    <div class="empty-match-card">
+                        포지션 기록이 없습니다.
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            const cards =
+                stats.map(
+                    function(
+                        stat
+                    ){
+
+                        const games =
+                            safeNumber(
+                                stat.games
+                            );
+
+                        const wins =
+                            safeNumber(
+                                stat.wins
+                            );
+
+                        const losses =
+                            safeNumber(
+                                stat.losses
+                            );
+
+                        const winRate =
+                            safeNumber(
+                                stat.win_rate
+                            );
+
+
+                        return `
+                            <div class="stats-data-card">
+
+                                <div class="stats-data-top">
+
+                                    <div class="stats-data-title">
+                                        ${getPositionName(
+                                            stat.position
+                                        )}
+                                    </div>
+
+
+                                    <div class="stats-data-value">
+                                        ${winRate}%
+                                    </div>
+
+                                </div>
+
+
+                                <div class="stats-data-sub">
+
+                                    ${games}경기 ·
+                                    ${wins}승
+                                    ${losses}패
+
+                                </div>
+
+
+                                <div class="stats-progress">
+
+                                    <div
+                                        class="stats-progress-fill"
+                                        style="
+                                            width:
+                                            ${Math.max(
+                                                0,
+                                                Math.min(
+                                                    100,
+                                                    winRate
+                                                )
+                                            )}%;
+                                        "
+                                    ></div>
+
+                                </div>
+
+                            </div>
+                        `;
+
+                    }
+                )
+                .join(
+                    ""
+                );
+
+
+            target.innerHTML =
+                `
+                <div class="stats-grid-two">
+                    ${cards}
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           티어 분포
+        ===================================================== */
+
+        function renderTierStats(
+            stats
+        ){
+
+            const target =
+                document.getElementById(
+                    "statsTierArea"
+                );
+
+
+            if(
+                !target
+            ){
+                return;
+            }
+
+
+            if(
+                !Array.isArray(
+                    stats
+                )
+                ||
+                stats.length === 0
+            ){
+
+                target.innerHTML =
+                    `
+                    <div class="empty-match-card">
+                        티어 데이터가 없습니다.
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            const rows =
+                stats.map(
+                    function(
+                        stat
+                    ){
+
+                        const tier =
+                            escapeHtml(
+                                stat.tier
+                                || "미설정"
+                            );
+
+                        const count =
+                            safeNumber(
+                                stat.player_count
+                            );
+
+                        const rating =
+                            safeNumber(
+                                stat.average_rating
+                            );
+
+                        const percentage =
+                            safeNumber(
+                                stat.percentage
+                            );
+
+
+                        return `
+                            <div class="stats-tier-row">
+
+                                <div class="stats-tier-name">
+                                    ${tier}
+                                </div>
+
+
+                                <div class="stats-tier-count">
+                                    ${count}명
+                                </div>
+
+
+                                <div class="stats-tier-rating">
+                                    평균 ${rating}
+                                </div>
+
+
+                                <div>
+
+                                    <div class="stats-tier-percent">
+                                        ${percentage}%
+                                    </div>
+
+
+                                    <div class="stats-tier-bar">
+
+                                        <div
+                                            class="stats-tier-fill"
+                                            style="
+                                                width:
+                                                ${Math.max(
+                                                    0,
+                                                    Math.min(
+                                                        100,
+                                                        percentage
+                                                    )
+                                                )}%;
+                                            "
+                                        ></div>
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+                        `;
+
+                    }
+                )
+                .join(
+                    ""
+                );
+
+
+            target.innerHTML =
+                `
+                <div class="stats-tier-list">
+                    ${rows}
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           전체 데이터 렌더링
+        ===================================================== */
+
+        function renderStats(
+            data
+        ){
+
+            const summary =
+                data.summary
+                || {};
+
+
+            const side =
+                data.side
+                || {};
+
+
+            const playerCount =
+                document.getElementById(
+                    "statsPlayerCount"
+                );
+
+
+            const matchCount =
+                document.getElementById(
+                    "statsMatchCount"
+                );
+
+
+            const averageRating =
+                document.getElementById(
+                    "statsAverageRating"
+                );
+
+
+            const totalMvp =
+                document.getElementById(
+                    "statsTotalMvp"
+                );
+
+
+            if(
+                playerCount
+            ){
+
+                playerCount.textContent =
+                    safeNumber(
+                        summary.player_count
+                    );
+
+            }
+
+
+            if(
+                matchCount
+            ){
+
+                matchCount.textContent =
+                    safeNumber(
+                        summary.match_count
+                    );
+
+            }
+
+
+            if(
+                averageRating
+            ){
+
+                averageRating.textContent =
+                    safeNumber(
+                        summary.average_rating
+                    );
+
+            }
+
+
+            if(
+                totalMvp
+            ){
+
+                totalMvp.textContent =
+                    safeNumber(
+                        summary.total_mvp
+                    );
+
+            }
+
+
+            const blueRate =
+                document.getElementById(
+                    "statsBlueWinRate"
+                );
+
+
+            const redRate =
+                document.getElementById(
+                    "statsRedWinRate"
+                );
+
+
+            const blueWins =
+                document.getElementById(
+                    "statsBlueWins"
+                );
+
+
+            const redWins =
+                document.getElementById(
+                    "statsRedWins"
+                );
+
+
+            if(
+                blueRate
+            ){
+
+                blueRate.textContent =
+                    safeNumber(
+                        side.blue_win_rate
+                    )
+                    + "%";
+
+            }
+
+
+            if(
+                redRate
+            ){
+
+                redRate.textContent =
+                    safeNumber(
+                        side.red_win_rate
+                    )
+                    + "%";
+
+            }
+
+
+            if(
+                blueWins
+            ){
+
+                blueWins.textContent =
+                    safeNumber(
+                        side.blue_wins
+                    )
+                    + "승";
+
+            }
+
+
+            if(
+                redWins
+            ){
+
+                redWins.textContent =
+                    safeNumber(
+                        side.red_wins
+                    )
+                    + "승";
+
+            }
+
+
+            renderRecentSide(
+                data.recent_side
+            );
+
+
+            renderStandardPlayerList(
+                "statsTopRatingArea",
+                data.top_rating_players,
+                "rating",
+                "등록된 플레이어가 없습니다."
+            );
+
+
+            renderStandardPlayerList(
+                "statsTopMvpArea",
+                data.top_mvp_players,
+                "mvp",
+                "MVP 기록이 없습니다."
+            );
+
+
+            renderStandardPlayerList(
+                "statsMostActiveArea",
+                data.most_active_players,
+                "active",
+                "경기 참가 기록이 없습니다."
+            );
+
+
+            renderStandardPlayerList(
+                "statsTopWinrateArea",
+                data.top_winrate_players,
+                "winrate",
+                "승률 데이터가 없습니다."
+            );
+
+
+            renderTrendList(
+                "statsTrendingArea",
+                data.top_trending_players,
+                false
+            );
+
+
+            renderTrendList(
+                "statsDecliningArea",
+                data.top_declining_players,
+                true
+            );
+
+
+            renderStandardPlayerList(
+                "statsStreakArea",
+                data.top_streak_players,
+                "streak",
+                "연승 기록이 없습니다."
+            );
+
+
+            renderPositionStats(
+                data.position_stats
+            );
+
+
+            renderTierStats(
+                data.tier_stats
+            );
+
+        }
+
+
+        /* =====================================================
+           API 호출
+        ===================================================== */
+
+        async function refreshStats(){
+
+            if(
+                isRefreshing
+                ||
+                pageClosed
+            ){
+                return;
+            }
+
+
+            isRefreshing =
+                true;
+
+
+            try{
+
+                const response =
+                    await fetch(
+                        "/api/stats",
+                        {
+                            method:
+                                "GET",
+
+                            cache:
+                                "no-store",
+
+                            headers:{
+                                "Accept":
+                                    "application/json"
+                            }
+                        }
+                    );
+
+
+                if(
+                    !response.ok
+                ){
+
+                    console.warn(
+                        "통계 API 오류:",
+                        response.status
+                    );
+
+
+                    if(
+                        apiError
+                    ){
+
+                        apiError.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                const data =
+                    await response.json();
+
+
+                if(
+                    !data
+                    ||
+                    !data.success
+                ){
+
+                    console.warn(
+                        "통계 API 응답이 올바르지 않습니다."
+                    );
+
+
+                    if(
+                        apiError
+                    ){
+
+                        apiError.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                if(
+                    apiError
+                ){
+
+                    apiError.style.display =
+                        "none";
+
+                }
+
+
+                renderStats(
+                    data
+                );
+
+            }
+
+
+            catch(
+                error
+            ){
+
+                console.warn(
+                    "통계 자동 갱신 실패:",
+                    error
+                );
+
+
+                if(
+                    apiError
+                ){
+
+                    apiError.style.display =
+                        "";
+
+                }
+
+            }
+
+
+            finally{
+
+                isRefreshing =
+                    false;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           최초 즉시 실행
+        ===================================================== */
+
+        refreshStats();
+
+
+        /* =====================================================
+           5초 자동 갱신
+        ===================================================== */
+
+        const statsRefreshTimer =
+            setInterval(
+                function(){
+
+                    if(
+                        document.visibilityState
+                        === "visible"
+                    ){
+
+                        refreshStats();
+
+                    }
+
+                },
+                5000
+            );
+
+
+        /* =====================================================
+           탭 복귀 즉시 갱신
+        ===================================================== */
+
+        document.addEventListener(
+            "visibilitychange",
+            function(){
+
+                if(
+                    document.visibilityState
+                    === "visible"
+                ){
+
+                    refreshStats();
+
+                }
+
+            }
+        );
+
+
+        /* =====================================================
+           페이지 종료
+        ===================================================== */
+
+        window.addEventListener(
+            "beforeunload",
+            function(){
+
+                pageClosed =
+                    true;
+
+
+                clearInterval(
+                    statsRefreshTimer
+                );
+
+            }
+        );
+
+    }
+);
+
+</script>
+
+{% endblock %}

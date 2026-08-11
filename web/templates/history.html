@@ -1,0 +1,2112 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     전체 전적 헤더
+============================== -->
+
+<div class="history-header">
+
+    <div>
+
+        <h1>
+            📜 전체 전적
+        </h1>
+
+        <p>
+            최근 경기 기록을 검색하고 조건별로 확인할 수 있습니다.
+        </p>
+
+    </div>
+
+
+    <div class="history-count">
+
+        총 경기
+
+        <strong id="historyTotalMatchCount">
+            {{ total_match_count }}
+        </strong>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     검색 / 필터
+============================== -->
+
+<div class="history-filter-box">
+
+    <div class="history-filter-search">
+
+        <label for="historyPlayerSearch">
+            플레이어 검색
+        </label>
+
+        <input
+            type="text"
+            id="historyPlayerSearch"
+            placeholder="디스코드 닉네임 또는 Riot 닉네임"
+            autocomplete="off"
+        >
+
+    </div>
+
+
+    <div class="history-filter-select">
+
+        <label for="historyWinnerFilter">
+            승리팀
+        </label>
+
+        <select id="historyWinnerFilter">
+
+            <option value="">
+                전체
+            </option>
+
+            <option value="blue">
+                🔵 블루팀 승리
+            </option>
+
+            <option value="red">
+                🔴 레드팀 승리
+            </option>
+
+        </select>
+
+    </div>
+
+
+    <div class="history-filter-select">
+
+        <label for="historySeasonFilter">
+            시즌
+        </label>
+
+        <select id="historySeasonFilter">
+
+            <option value="">
+                전체 시즌
+            </option>
+
+        </select>
+
+    </div>
+
+
+    <button
+        type="button"
+        id="historyFilterReset"
+        class="history-filter-reset"
+    >
+        초기화
+    </button>
+
+</div>
+
+
+<!-- ==============================
+     검색 결과 요약
+============================== -->
+
+<div class="history-filter-result">
+
+    <span>
+        현재 목록
+    </span>
+
+    <strong id="historyVisibleCount">
+        {{ displayed_match_count }}
+    </strong>
+
+    <span>
+        경기
+    </span>
+
+</div>
+
+
+<!-- ==============================
+     API 오류
+============================== -->
+
+<div
+    id="historyApiError"
+    class="empty-match-card"
+    style="display:none;"
+>
+    전적 데이터를 불러오지 못했습니다.
+</div>
+
+
+<!-- ==============================
+     경기 목록
+============================== -->
+
+<div
+    id="historyMatchList"
+    class="history-match-list"
+>
+
+    {% if matches %}
+
+        {% for item in matches %}
+
+        {% set match = item.match %}
+
+        {% set player_search =
+            namespace(
+                value=""
+            )
+        %}
+
+
+        {% for player in item.blue_team %}
+
+            {% set player_search.value =
+                player_search.value
+                ~ " "
+                ~ (
+                    player.discord_nickname
+                    or ""
+                )
+                ~ " "
+                ~ (
+                    player.riot_name
+                    or ""
+                )
+            %}
+
+        {% endfor %}
+
+
+        {% for player in item.red_team %}
+
+            {% set player_search.value =
+                player_search.value
+                ~ " "
+                ~ (
+                    player.discord_nickname
+                    or ""
+                )
+                ~ " "
+                ~ (
+                    player.riot_name
+                    or ""
+                )
+            %}
+
+        {% endfor %}
+
+
+        <div
+            class="history-match-wrapper"
+
+            data-winner="{{
+                match.winner
+                or ''
+            }}"
+
+            data-season="{{
+                match.season_name
+                or '일반 내전'
+            }}"
+
+            data-players="{{
+                player_search.value
+                | lower
+            }}"
+        >
+
+            <a
+                href="/match/{{ match.id }}"
+                class="history-match-link"
+            >
+
+                <div class="history-match-card">
+
+                    <!-- 경기 상단 -->
+
+                    <div class="history-match-top">
+
+                        <div>
+
+                            <span class="history-match-id">
+                                경기 #{{ match.id }}
+                            </span>
+
+                            <span class="history-match-date">
+                                {{ match.match_date }}
+                            </span>
+
+                        </div>
+
+
+                        <div>
+
+                            {% if match.winner == "blue" %}
+
+                                <span class="history-blue-win">
+                                    🔵 블루팀 승리
+                                </span>
+
+                            {% elif match.winner == "red" %}
+
+                                <span class="history-red-win">
+                                    🔴 레드팀 승리
+                                </span>
+
+                            {% else %}
+
+                                <span>
+                                    결과 없음
+                                </span>
+
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- 경기 정보 -->
+
+                    <div class="history-match-info">
+
+                        <div>
+
+                            시즌:
+
+                            <strong>
+
+                                {% if match.season_name %}
+
+                                    {{ match.season_name }}
+
+                                {% else %}
+
+                                    일반 내전
+
+                                {% endif %}
+
+                            </strong>
+
+                        </div>
+
+
+                        <div>
+
+                            내전 방:
+
+                            <strong>
+
+                                {% if match.room_id %}
+
+                                    #{{ match.room_id }}
+
+                                {% else %}
+
+                                    -
+
+                                {% endif %}
+
+                            </strong>
+
+                        </div>
+
+
+                        <div>
+
+                            MVP:
+
+                            {% if match.mvp_name %}
+
+                                <strong>
+                                    ⭐ {{ match.mvp_name }}
+                                </strong>
+
+                            {% elif match.mvp_discord_id %}
+
+                                <strong>
+                                    ⭐ 알 수 없는 플레이어
+                                </strong>
+
+                            {% else %}
+
+                                <strong>
+                                    -
+                                </strong>
+
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- 양 팀 -->
+
+                    <div class="history-team-grid">
+
+                        <!-- 블루팀 -->
+
+                        <div
+                            class="
+                                history-team
+                                history-blue-team
+                            "
+                        >
+
+                            <h3>
+                                🔵 블루팀
+                            </h3>
+
+
+                            {% if item.blue_team %}
+
+                                {% for player in item.blue_team %}
+
+                                <div class="history-player-row">
+
+                                    <span class="history-position">
+
+                                        {% if player.position == "TOP" %}
+
+                                            🛡️ TOP
+
+                                        {% elif player.position == "JUNGLE" %}
+
+                                            🌲 JUNGLE
+
+                                        {% elif player.position == "MID" %}
+
+                                            ⚔️ MID
+
+                                        {% elif player.position == "ADC" %}
+
+                                            🏹 ADC
+
+                                        {% elif player.position == "SUPPORT" %}
+
+                                            💚 SUPPORT
+
+                                        {% else %}
+
+                                            🎮 {{
+                                                player.position
+                                                or "미기록"
+                                            }}
+
+                                        {% endif %}
+
+                                    </span>
+
+
+                                    <span class="history-player-name">
+
+                                        {{
+                                            player.discord_nickname
+                                            or "알 수 없는 플레이어"
+                                        }}
+
+
+                                        {% if player.riot_name %}
+
+                                            <small class="history-player-riot">
+                                                {{ player.riot_name }}
+                                            </small>
+
+                                        {% endif %}
+
+                                    </span>
+
+
+                                    <span
+                                        class="
+                                            history-rating-change
+
+                                            {% if player.rating_change > 0 %}
+                                                history-rating-plus
+
+                                            {% elif player.rating_change < 0 %}
+                                                history-rating-minus
+                                            {% endif %}
+                                        "
+                                    >
+
+                                        {% if player.rating_change > 0 %}
+
+                                            +{{ player.rating_change }}
+
+                                        {% else %}
+
+                                            {{ player.rating_change or 0 }}
+
+                                        {% endif %}
+
+                                        LP
+
+                                    </span>
+
+                                </div>
+
+                                {% endfor %}
+
+
+                            {% else %}
+
+                                <div class="history-team-empty">
+                                    블루팀 기록 없음
+                                </div>
+
+                            {% endif %}
+
+                        </div>
+
+
+                        <!-- 레드팀 -->
+
+                        <div
+                            class="
+                                history-team
+                                history-red-team
+                            "
+                        >
+
+                            <h3>
+                                🔴 레드팀
+                            </h3>
+
+
+                            {% if item.red_team %}
+
+                                {% for player in item.red_team %}
+
+                                <div class="history-player-row">
+
+                                    <span class="history-position">
+
+                                        {% if player.position == "TOP" %}
+
+                                            🛡️ TOP
+
+                                        {% elif player.position == "JUNGLE" %}
+
+                                            🌲 JUNGLE
+
+                                        {% elif player.position == "MID" %}
+
+                                            ⚔️ MID
+
+                                        {% elif player.position == "ADC" %}
+
+                                            🏹 ADC
+
+                                        {% elif player.position == "SUPPORT" %}
+
+                                            💚 SUPPORT
+
+                                        {% else %}
+
+                                            🎮 {{
+                                                player.position
+                                                or "미기록"
+                                            }}
+
+                                        {% endif %}
+
+                                    </span>
+
+
+                                    <span class="history-player-name">
+
+                                        {{
+                                            player.discord_nickname
+                                            or "알 수 없는 플레이어"
+                                        }}
+
+
+                                        {% if player.riot_name %}
+
+                                            <small class="history-player-riot">
+                                                {{ player.riot_name }}
+                                            </small>
+
+                                        {% endif %}
+
+                                    </span>
+
+
+                                    <span
+                                        class="
+                                            history-rating-change
+
+                                            {% if player.rating_change > 0 %}
+                                                history-rating-plus
+
+                                            {% elif player.rating_change < 0 %}
+                                                history-rating-minus
+                                            {% endif %}
+                                        "
+                                    >
+
+                                        {% if player.rating_change > 0 %}
+
+                                            +{{ player.rating_change }}
+
+                                        {% else %}
+
+                                            {{ player.rating_change or 0 }}
+
+                                        {% endif %}
+
+                                        LP
+
+                                    </span>
+
+                                </div>
+
+                                {% endfor %}
+
+
+                            {% else %}
+
+                                <div class="history-team-empty">
+                                    레드팀 기록 없음
+                                </div>
+
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="history-detail-text">
+                        경기 상세 보기 →
+                    </div>
+
+                </div>
+
+            </a>
+
+        </div>
+
+        {% endfor %}
+
+    {% endif %}
+
+</div>
+
+
+<!-- ==============================
+     전체 경기 없음
+============================== -->
+
+<div
+    id="historyNoMatches"
+    class="empty-match-card"
+
+    {% if matches %}
+        style="display:none;"
+    {% endif %}
+>
+    아직 저장된 경기 기록이 없습니다.
+</div>
+
+
+<!-- ==============================
+     필터 결과 없음
+============================== -->
+
+<div
+    id="historyFilterEmpty"
+    class="
+        empty-match-card
+        history-filter-empty
+    "
+    style="display:none;"
+>
+    조건에 맞는 경기 기록이 없습니다.
+</div>
+
+
+<!-- =====================================================
+     전체 전적 실시간 갱신
+===================================================== -->
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        /* =====================================================
+           DOM
+        ===================================================== */
+
+        const searchInput =
+            document.getElementById(
+                "historyPlayerSearch"
+            );
+
+        const winnerFilter =
+            document.getElementById(
+                "historyWinnerFilter"
+            );
+
+        const seasonFilter =
+            document.getElementById(
+                "historySeasonFilter"
+            );
+
+        const resetButton =
+            document.getElementById(
+                "historyFilterReset"
+            );
+
+        const visibleCountElement =
+            document.getElementById(
+                "historyVisibleCount"
+            );
+
+        const totalMatchCountElement =
+            document.getElementById(
+                "historyTotalMatchCount"
+            );
+
+        const matchList =
+            document.getElementById(
+                "historyMatchList"
+            );
+
+        const filterEmptyMessage =
+            document.getElementById(
+                "historyFilterEmpty"
+            );
+
+        const noMatchesMessage =
+            document.getElementById(
+                "historyNoMatches"
+            );
+
+        const apiErrorMessage =
+            document.getElementById(
+                "historyApiError"
+            );
+
+
+        /* =====================================================
+           상태
+        ===================================================== */
+
+        let latestMatches =
+            [];
+
+        let isRefreshing =
+            false;
+
+        let pageClosed =
+            false;
+
+
+        /* =====================================================
+           HTML 안전 처리
+        ===================================================== */
+
+        function escapeHtml(
+            value
+        ){
+
+            if(
+                value === null
+                ||
+                value === undefined
+            ){
+                return "";
+            }
+
+
+            return String(
+                value
+            )
+            .replaceAll(
+                "&",
+                "&amp;"
+            )
+            .replaceAll(
+                "<",
+                "&lt;"
+            )
+            .replaceAll(
+                ">",
+                "&gt;"
+            )
+            .replaceAll(
+                '"',
+                "&quot;"
+            )
+            .replaceAll(
+                "'",
+                "&#039;"
+            );
+
+        }
+
+
+        /* =====================================================
+           숫자 처리
+        ===================================================== */
+
+        function safeNumber(
+            value
+        ){
+
+            const result =
+                Number(
+                    value
+                );
+
+
+            if(
+                !Number.isFinite(
+                    result
+                )
+            ){
+                return 0;
+            }
+
+
+            return result;
+
+        }
+
+
+        /* =====================================================
+           문자열 정규화
+        ===================================================== */
+
+        function normalizeText(
+            value
+        ){
+
+            return String(
+                value
+                || ""
+            )
+            .trim()
+            .toLowerCase();
+
+        }
+
+
+        /* =====================================================
+           포지션 표시
+        ===================================================== */
+
+        function getPositionText(
+            position
+        ){
+
+            const value =
+                String(
+                    position
+                    || ""
+                ).toUpperCase();
+
+
+            if(
+                value === "TOP"
+            ){
+                return "🛡️ TOP";
+            }
+
+
+            if(
+                value === "JUNGLE"
+            ){
+                return "🌲 JUNGLE";
+            }
+
+
+            if(
+                value === "MID"
+            ){
+                return "⚔️ MID";
+            }
+
+
+            if(
+                value === "ADC"
+            ){
+                return "🏹 ADC";
+            }
+
+
+            if(
+                value === "SUPPORT"
+            ){
+                return "💚 SUPPORT";
+            }
+
+
+            if(
+                value
+            ){
+                return (
+                    "🎮 "
+                    + escapeHtml(
+                        value
+                    )
+                );
+            }
+
+
+            return "🎮 미기록";
+
+        }
+
+
+        /* =====================================================
+           LP 변화 표시
+        ===================================================== */
+
+        function getRatingChangeHtml(
+            ratingChange
+        ){
+
+            const change =
+                safeNumber(
+                    ratingChange
+                );
+
+
+            let className =
+                "history-rating-change";
+
+
+            let text =
+                "0";
+
+
+            if(
+                change > 0
+            ){
+
+                className +=
+                    " history-rating-plus";
+
+                text =
+                    "+"
+                    + change;
+
+            }
+
+
+            else if(
+                change < 0
+            ){
+
+                className +=
+                    " history-rating-minus";
+
+                text =
+                    String(
+                        change
+                    );
+
+            }
+
+
+            return `
+                <span class="${className}">
+                    ${text} LP
+                </span>
+            `;
+
+        }
+
+
+        /* =====================================================
+           선수 행 생성
+        ===================================================== */
+
+        function createPlayerRowHtml(
+            player
+        ){
+
+            const nickname =
+                escapeHtml(
+                    player.discord_nickname
+                    || "알 수 없는 플레이어"
+                );
+
+
+            const riotName =
+                escapeHtml(
+                    player.riot_name
+                    || ""
+                );
+
+
+            let riotHtml =
+                "";
+
+
+            if(
+                riotName
+            ){
+
+                riotHtml =
+                    `
+                    <small class="history-player-riot">
+                        ${riotName}
+                    </small>
+                    `;
+
+            }
+
+
+            return `
+                <div class="history-player-row">
+
+                    <span class="history-position">
+
+                        ${getPositionText(
+                            player.position
+                        )}
+
+                    </span>
+
+
+                    <span class="history-player-name">
+
+                        ${nickname}
+
+                        ${riotHtml}
+
+                    </span>
+
+
+                    ${getRatingChangeHtml(
+                        player.rating_change
+                    )}
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           팀 생성
+        ===================================================== */
+
+        function createTeamHtml(
+            team,
+            teamCode
+        ){
+
+            const players =
+                Array.isArray(
+                    team
+                )
+                ? team
+                : [];
+
+
+            const isBlue =
+                teamCode === "blue";
+
+
+            const teamClass =
+                isBlue
+                ? "history-blue-team"
+                : "history-red-team";
+
+
+            const teamTitle =
+                isBlue
+                ? "🔵 블루팀"
+                : "🔴 레드팀";
+
+
+            const emptyText =
+                isBlue
+                ? "블루팀 기록 없음"
+                : "레드팀 기록 없음";
+
+
+            let playersHtml =
+                `
+                <div class="history-team-empty">
+                    ${emptyText}
+                </div>
+                `;
+
+
+            if(
+                players.length > 0
+            ){
+
+                playersHtml =
+                    players
+                        .map(
+                            createPlayerRowHtml
+                        )
+                        .join(
+                            ""
+                        );
+
+            }
+
+
+            return `
+                <div
+                    class="
+                        history-team
+                        ${teamClass}
+                    "
+                >
+
+                    <h3>
+                        ${teamTitle}
+                    </h3>
+
+                    ${playersHtml}
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           승리팀 표시
+        ===================================================== */
+
+        function getWinnerHtml(
+            winner
+        ){
+
+            const value =
+                String(
+                    winner
+                    || ""
+                ).toLowerCase();
+
+
+            if(
+                value === "blue"
+            ){
+
+                return `
+                    <span class="history-blue-win">
+                        🔵 블루팀 승리
+                    </span>
+                `;
+
+            }
+
+
+            if(
+                value === "red"
+            ){
+
+                return `
+                    <span class="history-red-win">
+                        🔴 레드팀 승리
+                    </span>
+                `;
+
+            }
+
+
+            return `
+                <span>
+                    결과 없음
+                </span>
+            `;
+
+        }
+
+
+        /* =====================================================
+           검색용 플레이어 문자열
+        ===================================================== */
+
+        function getPlayerSearchText(
+            match
+        ){
+
+            const players =
+                [
+                    ...(
+                        Array.isArray(
+                            match.blue_team
+                        )
+                        ? match.blue_team
+                        : []
+                    ),
+
+                    ...(
+                        Array.isArray(
+                            match.red_team
+                        )
+                        ? match.red_team
+                        : []
+                    )
+                ];
+
+
+            return players
+                .map(
+                    function(
+                        player
+                    ){
+
+                        return (
+                            (
+                                player.discord_nickname
+                                || ""
+                            )
+                            + " "
+                            + (
+                                player.riot_name
+                                || ""
+                            )
+                        );
+
+                    }
+                )
+                .join(
+                    " "
+                )
+                .toLowerCase();
+
+        }
+
+
+        /* =====================================================
+           경기 카드 생성
+        ===================================================== */
+
+        function createMatchHtml(
+            match
+        ){
+
+            const matchId =
+                safeNumber(
+                    match.id
+                );
+
+
+            const matchDate =
+                escapeHtml(
+                    match.match_date
+                    || "-"
+                );
+
+
+            const winner =
+                String(
+                    match.winner
+                    || ""
+                ).toLowerCase();
+
+
+            const seasonNameRaw =
+                match.season_name
+                || "일반 내전";
+
+
+            const seasonName =
+                escapeHtml(
+                    seasonNameRaw
+                );
+
+
+            const roomId =
+                escapeHtml(
+                    match.room_id
+                    || "-"
+                );
+
+
+            const mvpName =
+                escapeHtml(
+                    match.mvp_name
+                    || ""
+                );
+
+
+            const mvpDiscordId =
+                String(
+                    match.mvp_discord_id
+                    || ""
+                );
+
+
+            let mvpText =
+                "-";
+
+
+            if(
+                mvpName
+            ){
+
+                mvpText =
+                    "⭐ "
+                    + mvpName;
+
+            }
+
+
+            else if(
+                mvpDiscordId
+            ){
+
+                mvpText =
+                    "⭐ 알 수 없는 플레이어";
+
+            }
+
+
+            const playerSearch =
+                escapeHtml(
+                    getPlayerSearchText(
+                        match
+                    )
+                );
+
+
+            return `
+                <div
+                    class="history-match-wrapper"
+
+                    data-winner="${escapeHtml(
+                        winner
+                    )}"
+
+                    data-season="${seasonName}"
+
+                    data-players="${playerSearch}"
+                >
+
+                    <a
+                        href="/match/${matchId}"
+                        class="history-match-link"
+                    >
+
+                        <div class="history-match-card">
+
+
+                            <!-- 경기 상단 -->
+
+                            <div class="history-match-top">
+
+                                <div>
+
+                                    <span class="history-match-id">
+                                        경기 #${matchId}
+                                    </span>
+
+                                    <span class="history-match-date">
+                                        ${matchDate}
+                                    </span>
+
+                                </div>
+
+
+                                <div>
+
+                                    ${getWinnerHtml(
+                                        winner
+                                    )}
+
+                                </div>
+
+                            </div>
+
+
+                            <!-- 경기 정보 -->
+
+                            <div class="history-match-info">
+
+                                <div>
+
+                                    시즌:
+
+                                    <strong>
+                                        ${seasonName}
+                                    </strong>
+
+                                </div>
+
+
+                                <div>
+
+                                    내전 방:
+
+                                    <strong>
+
+                                        ${
+                                            roomId !== "-"
+                                            ? "#" + roomId
+                                            : "-"
+                                        }
+
+                                    </strong>
+
+                                </div>
+
+
+                                <div>
+
+                                    MVP:
+
+                                    <strong>
+                                        ${mvpText}
+                                    </strong>
+
+                                </div>
+
+                            </div>
+
+
+                            <!-- 팀 -->
+
+                            <div class="history-team-grid">
+
+                                ${createTeamHtml(
+                                    match.blue_team,
+                                    "blue"
+                                )}
+
+                                ${createTeamHtml(
+                                    match.red_team,
+                                    "red"
+                                )}
+
+                            </div>
+
+
+                            <div class="history-detail-text">
+                                경기 상세 보기 →
+                            </div>
+
+                        </div>
+
+                    </a>
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           시즌 필터 갱신
+        ===================================================== */
+
+        function updateSeasonOptions(
+            matches
+        ){
+
+            if(
+                !seasonFilter
+            ){
+                return;
+            }
+
+
+            const currentValue =
+                seasonFilter.value;
+
+
+            const seasons =
+                new Set();
+
+
+            matches.forEach(
+                function(
+                    match
+                ){
+
+                    seasons.add(
+                        String(
+                            match.season_name
+                            || "일반 내전"
+                        )
+                    );
+
+                }
+            );
+
+
+            const sortedSeasons =
+                Array.from(
+                    seasons
+                )
+                .sort(
+                    function(
+                        a,
+                        b
+                    ){
+
+                        return a.localeCompare(
+                            b,
+                            "ko"
+                        );
+
+                    }
+                );
+
+
+            seasonFilter.innerHTML =
+                `
+                <option value="">
+                    전체 시즌
+                </option>
+                `;
+
+
+            sortedSeasons.forEach(
+                function(
+                    season
+                ){
+
+                    const option =
+                        document.createElement(
+                            "option"
+                        );
+
+
+                    option.value =
+                        season;
+
+                    option.textContent =
+                        season;
+
+
+                    seasonFilter.appendChild(
+                        option
+                    );
+
+                }
+            );
+
+
+            const stillExists =
+                Array.from(
+                    seasonFilter.options
+                )
+                .some(
+                    function(
+                        option
+                    ){
+
+                        return (
+                            option.value
+                            === currentValue
+                        );
+
+                    }
+                );
+
+
+            if(
+                stillExists
+            ){
+
+                seasonFilter.value =
+                    currentValue;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           경기 목록 렌더링
+        ===================================================== */
+
+        function renderMatches(
+            matches
+        ){
+
+            latestMatches =
+                Array.isArray(
+                    matches
+                )
+                ? matches
+                : [];
+
+
+            if(
+                totalMatchCountElement
+            ){
+
+                totalMatchCountElement.textContent =
+                    latestMatches.length;
+
+            }
+
+
+            updateSeasonOptions(
+                latestMatches
+            );
+
+
+            if(
+                latestMatches.length === 0
+            ){
+
+                if(
+                    matchList
+                ){
+
+                    matchList.innerHTML =
+                        "";
+
+                }
+
+
+                if(
+                    noMatchesMessage
+                ){
+
+                    noMatchesMessage.style.display =
+                        "";
+
+                }
+
+
+                if(
+                    filterEmptyMessage
+                ){
+
+                    filterEmptyMessage.style.display =
+                        "none";
+
+                }
+
+
+                if(
+                    visibleCountElement
+                ){
+
+                    visibleCountElement.textContent =
+                        "0";
+
+                }
+
+
+                return;
+
+            }
+
+
+            if(
+                noMatchesMessage
+            ){
+
+                noMatchesMessage.style.display =
+                    "none";
+
+            }
+
+
+            if(
+                matchList
+            ){
+
+                matchList.innerHTML =
+                    latestMatches
+                        .map(
+                            createMatchHtml
+                        )
+                        .join(
+                            ""
+                        );
+
+            }
+
+
+            applyHistoryFilters();
+
+        }
+
+
+        /* =====================================================
+           필터 적용
+        ===================================================== */
+
+        function applyHistoryFilters(){
+
+            const wrappers =
+                Array.from(
+                    document.querySelectorAll(
+                        ".history-match-wrapper"
+                    )
+                );
+
+
+            const searchValue =
+                normalizeText(
+                    searchInput?.value
+                );
+
+
+            const winnerValue =
+                String(
+                    winnerFilter?.value
+                    || ""
+                ).toLowerCase();
+
+
+            const seasonValue =
+                String(
+                    seasonFilter?.value
+                    || ""
+                );
+
+
+            let count =
+                0;
+
+
+            wrappers.forEach(
+                function(
+                    wrapper
+                ){
+
+                    const players =
+                        normalizeText(
+                            wrapper.dataset.players
+                        );
+
+
+                    const winner =
+                        String(
+                            wrapper.dataset.winner
+                            || ""
+                        ).toLowerCase();
+
+
+                    const season =
+                        String(
+                            wrapper.dataset.season
+                            || ""
+                        );
+
+
+                    const searchMatch =
+                        (
+                            !searchValue
+                            ||
+                            players.includes(
+                                searchValue
+                            )
+                        );
+
+
+                    const winnerMatch =
+                        (
+                            !winnerValue
+                            ||
+                            winner === winnerValue
+                        );
+
+
+                    const seasonMatch =
+                        (
+                            !seasonValue
+                            ||
+                            season === seasonValue
+                        );
+
+
+                    const visible =
+                        (
+                            searchMatch
+                            &&
+                            winnerMatch
+                            &&
+                            seasonMatch
+                        );
+
+
+                    wrapper.style.display =
+                        visible
+                        ? ""
+                        : "none";
+
+
+                    if(
+                        visible
+                    ){
+
+                        count++;
+
+                    }
+
+                }
+            );
+
+
+            if(
+                visibleCountElement
+            ){
+
+                visibleCountElement.textContent =
+                    count;
+
+            }
+
+
+            if(
+                filterEmptyMessage
+            ){
+
+                filterEmptyMessage.style.display =
+                    (
+                        latestMatches.length > 0
+                        &&
+                        count === 0
+                    )
+                    ? ""
+                    : "none";
+
+            }
+
+        }
+
+
+        /* =====================================================
+           API 호출
+        ===================================================== */
+
+        async function refreshHistory(){
+
+            if(
+                isRefreshing
+                ||
+                pageClosed
+            ){
+                return;
+            }
+
+
+            isRefreshing =
+                true;
+
+
+            try{
+
+                const response =
+                    await fetch(
+                        "/api/history",
+                        {
+                            method:
+                                "GET",
+
+                            cache:
+                                "no-store",
+
+                            headers:{
+                                "Accept":
+                                    "application/json"
+                            }
+                        }
+                    );
+
+
+                if(
+                    !response.ok
+                ){
+
+                    console.warn(
+                        "전적 API 오류:",
+                        response.status
+                    );
+
+
+                    if(
+                        apiErrorMessage
+                    ){
+
+                        apiErrorMessage.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                const data =
+                    await response.json();
+
+
+                if(
+                    !data
+                    ||
+                    !data.success
+                    ||
+                    !Array.isArray(
+                        data.matches
+                    )
+                ){
+
+                    console.warn(
+                        "전적 API 응답 형식이 올바르지 않습니다."
+                    );
+
+
+                    if(
+                        apiErrorMessage
+                    ){
+
+                        apiErrorMessage.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                if(
+                    apiErrorMessage
+                ){
+
+                    apiErrorMessage.style.display =
+                        "none";
+
+                }
+
+
+                renderMatches(
+                    data.matches
+                );
+
+
+                if(
+                    totalMatchCountElement
+                    &&
+                    data.summary
+                ){
+
+                    totalMatchCountElement.textContent =
+                        safeNumber(
+                            data.summary.match_count
+                        );
+
+                }
+
+            }
+
+            catch(
+                error
+            ){
+
+                console.warn(
+                    "전적 자동 갱신 실패:",
+                    error
+                );
+
+
+                if(
+                    apiErrorMessage
+                ){
+
+                    apiErrorMessage.style.display =
+                        "";
+
+                }
+
+            }
+
+            finally{
+
+                isRefreshing =
+                    false;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           이벤트
+        ===================================================== */
+
+        if(
+            searchInput
+        ){
+
+            searchInput.addEventListener(
+                "input",
+                applyHistoryFilters
+            );
+
+        }
+
+
+        if(
+            winnerFilter
+        ){
+
+            winnerFilter.addEventListener(
+                "change",
+                applyHistoryFilters
+            );
+
+        }
+
+
+        if(
+            seasonFilter
+        ){
+
+            seasonFilter.addEventListener(
+                "change",
+                applyHistoryFilters
+            );
+
+        }
+
+
+        if(
+            resetButton
+        ){
+
+            resetButton.addEventListener(
+                "click",
+                function(){
+
+                    if(
+                        searchInput
+                    ){
+                        searchInput.value =
+                            "";
+                    }
+
+
+                    if(
+                        winnerFilter
+                    ){
+                        winnerFilter.value =
+                            "";
+                    }
+
+
+                    if(
+                        seasonFilter
+                    ){
+                        seasonFilter.value =
+                            "";
+                    }
+
+
+                    applyHistoryFilters();
+
+
+                    if(
+                        searchInput
+                    ){
+
+                        searchInput.focus();
+
+                    }
+
+                }
+            );
+
+        }
+
+
+        /* =====================================================
+           최초 실행
+        ===================================================== */
+
+        refreshHistory();
+
+
+        /* =====================================================
+           5초마다 갱신
+        ===================================================== */
+
+        const historyRefreshTimer =
+            setInterval(
+                function(){
+
+                    if(
+                        document.visibilityState
+                        === "visible"
+                    ){
+
+                        refreshHistory();
+
+                    }
+
+                },
+                5000
+            );
+
+
+        /* =====================================================
+           탭 복귀 즉시 갱신
+        ===================================================== */
+
+        document.addEventListener(
+            "visibilitychange",
+            function(){
+
+                if(
+                    document.visibilityState
+                    === "visible"
+                ){
+
+                    refreshHistory();
+
+                }
+
+            }
+        );
+
+
+        /* =====================================================
+           페이지 종료
+        ===================================================== */
+
+        window.addEventListener(
+            "beforeunload",
+            function(){
+
+                pageClosed =
+                    true;
+
+
+                clearInterval(
+                    historyRefreshTimer
+                );
+
+            }
+        );
+
+    }
+);
+
+</script>
+
+{% endblock %}

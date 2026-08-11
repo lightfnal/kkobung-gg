@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     검색 결과 헤더
+============================== -->
+
+<div class="search-result-header">
+
+    <div>
+
+        <h1>
+            🔍 플레이어 검색
+        </h1>
+
+        <p>
+
+            {% if query %}
+
+                검색어:
+                <strong>
+                    {{ query }}
+                </strong>
+
+            {% else %}
+
+                플레이어를 검색해보세요.
+
+            {% endif %}
+
+        </p>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     검색창
+============================== -->
+
+<form
+    class="search-box"
+    action="/search"
+    method="get"
+>
+
+    <input
+        type="text"
+        name="q"
+        value="{{ query }}"
+        placeholder="디스코드 닉네임 또는 Riot 닉네임"
+        autocomplete="off"
+    >
+
+    <button type="submit">
+        🔍
+    </button>
+
+</form>
+
+
+<!-- ==============================
+     결과 개수
+============================== -->
+
+{% if query %}
+
+<div class="search-result-count">
+
+    <span>
+        검색 결과
+    </span>
+
+    <strong>
+        {{ result_count }}
+    </strong>
+
+    <span>
+        명
+    </span>
+
+</div>
+
+{% endif %}
+
+
+<!-- ==============================
+     검색 결과
+============================== -->
+
+{% if players %}
+
+<div class="search-result-list">
+
+    {% for player in players %}
+
+    <a
+        href="/player/{{ player.id }}"
+        class="search-player-link"
+    >
+
+        <div class="search-player-card">
+
+            <!-- 플레이어 -->
+
+            <div class="search-player-main">
+
+                <div class="search-player-name">
+                    {{ player.discord_nickname }}
+                </div>
+
+                <div class="search-player-tier">
+
+                    {{ player.tier or "-" }}
+
+                    {% if player.riot_name %}
+
+                        · {{ player.riot_name }}
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <!-- 레이팅 -->
+
+            <div class="search-player-stat">
+
+                <span>
+                    레이팅
+                </span>
+
+                <strong class="search-player-rating-value">
+                    ⭐ {{ player.rating }}
+                </strong>
+
+            </div>
+
+
+            <!-- 전적 -->
+
+            <div class="search-player-stat">
+
+                <span>
+                    전적
+                </span>
+
+                <strong>
+                    {{ player.wins }}승
+                    {{ player.losses }}패
+                </strong>
+
+            </div>
+
+
+            <!-- 승률 -->
+
+            <div class="search-player-stat">
+
+                <span>
+                    승률
+                </span>
+
+                <strong class="search-player-winrate">
+
+                    {{ player.win_rate }}%
+
+                </strong>
+
+            </div>
+
+
+            <!-- 화살표 -->
+
+            <div class="search-player-arrow">
+                →
+            </div>
+
+        </div>
+
+    </a>
+
+    {% endfor %}
+
+</div>
+
+
+{% else %}
+
+<div class="empty-match-card">
+
+    {% if query %}
+
+        <strong>
+            "{{ query }}"
+        </strong>
+
+        검색 결과가 없습니다.
+
+    {% else %}
+
+        플레이어 닉네임이나 Riot 닉네임을 입력해주세요.
+
+    {% endif %}
+
+</div>
+
+{% endif %}
+
+{% endblock %}

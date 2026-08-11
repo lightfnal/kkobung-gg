@@ -1,0 +1,917 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     경기 헤더
+============================== -->
+
+<div class="match-detail-header">
+
+    <div>
+
+        <h1>
+            🎮 경기 #{{ match.id }}
+        </h1>
+
+        <p>
+            {{ match.match_date }}
+
+            {% if match.season_name %}
+                · {{ match.season_name }}
+            {% endif %}
+
+            {% if match.room_id %}
+                · ROOM #{{ match.room_id }}
+            {% endif %}
+        </p>
+
+    </div>
+
+
+    <div>
+
+        {% if match.winner == "blue" %}
+
+            <span
+                class="
+                    match-winner-badge
+                    blue-winner
+                "
+            >
+                🔵 블루팀 승리
+            </span>
+
+        {% elif match.winner == "red" %}
+
+            <span
+                class="
+                    match-winner-badge
+                    red-winner
+                "
+            >
+                🔴 레드팀 승리
+            </span>
+
+        {% else %}
+
+            <span class="match-winner-badge">
+                결과 없음
+            </span>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     MVP
+============================== -->
+
+{% if match.mvp_discord_id %}
+
+<div class="match-mvp-box">
+
+    <div class="match-mvp-title">
+        🏆 MATCH MVP
+    </div>
+
+
+    <div class="match-mvp-player">
+
+        {% if match.mvp_player_id %}
+
+            <a
+                href="/player/{{ match.mvp_player_id }}"
+            >
+                {{
+                    match.mvp_discord_nickname
+                    or "알 수 없는 플레이어"
+                }}
+            </a>
+
+
+            {% if match.mvp_riot_name %}
+
+                <div class="match-mvp-riot-name">
+                    {{ match.mvp_riot_name }}
+                </div>
+
+            {% endif %}
+
+        {% else %}
+
+            알 수 없는 플레이어
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+{% endif %}
+
+
+<!-- ==============================
+     예상 승률
+============================== -->
+
+<div class="match-winrate-section">
+
+    <div class="match-winrate-header">
+
+        <div class="match-winrate-blue-text">
+
+            🔵 BLUE
+
+            <strong>
+                {{ blue_win_rate }}%
+            </strong>
+
+        </div>
+
+
+        <div class="match-winrate-title">
+            경기 전 예상 승률
+        </div>
+
+
+        <div class="match-winrate-red-text">
+
+            <strong>
+                {{ red_win_rate }}%
+            </strong>
+
+            RED 🔴
+
+        </div>
+
+    </div>
+
+
+    <div class="match-winrate-track">
+
+        <div
+            class="match-winrate-blue-fill"
+            style="width:{{ blue_win_rate }}%;"
+        ></div>
+
+        <div
+            class="match-winrate-red-fill"
+            style="width:{{ red_win_rate }}%;"
+        ></div>
+
+    </div>
+
+
+    <div class="match-winrate-summary">
+
+        <div>
+
+            경기 전 평균 레이팅
+
+            <strong
+                class="
+                    match-winrate-blue-rating
+                "
+            >
+                {{ blue_avg }}
+            </strong>
+
+        </div>
+
+
+        <div class="match-winrate-rating-diff">
+
+            차이
+
+            <strong>
+                {{ rating_difference }}
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            경기 전 평균 레이팅
+
+            <strong
+                class="
+                    match-winrate-red-rating
+                "
+            >
+                {{ red_avg }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     결과 요약
+============================== -->
+
+<div class="match-result-summary">
+
+    <div class="match-result-summary-item">
+
+        <span>
+            레이팅 우세
+        </span>
+
+        <strong>
+
+            {% if favored_team == "blue" %}
+
+                🔵 블루팀
+
+            {% elif favored_team == "red" %}
+
+                🔴 레드팀
+
+            {% else %}
+
+                ⚖️ 동률
+
+            {% endif %}
+
+        </strong>
+
+    </div>
+
+
+    <div class="match-result-summary-item">
+
+        <span>
+            실제 승리
+        </span>
+
+        <strong>
+
+            {% if match.winner == "blue" %}
+
+                🔵 블루팀
+
+            {% elif match.winner == "red" %}
+
+                🔴 레드팀
+
+            {% else %}
+
+                -
+
+            {% endif %}
+
+        </strong>
+
+    </div>
+
+
+    <div class="match-result-summary-item">
+
+        <span>
+            경기 결과
+        </span>
+
+        <strong>
+
+            {% if result_type == "balanced" %}
+
+                ⚖️ 균형 경기
+
+            {% elif result_type == "expected" %}
+
+                ✅ 예상 적중
+
+            {% elif result_type == "upset" %}
+
+                🔥 업셋
+
+            {% else %}
+
+                -
+
+            {% endif %}
+
+        </strong>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     팀별 LP 요약
+============================== -->
+
+<div class="match-lp-summary">
+
+    <div class="match-lp-summary-card">
+
+        <div class="match-lp-summary-label">
+            🔵 블루팀 총 LP 변화
+        </div>
+
+
+        <div
+            class="
+                match-lp-summary-value
+
+                {% if blue_lp_total > 0 %}
+                    match-lp-positive
+
+                {% elif blue_lp_total < 0 %}
+                    match-lp-negative
+                {% endif %}
+            "
+        >
+
+            {% if blue_lp_total > 0 %}
+
+                +{{ blue_lp_total }}
+
+            {% else %}
+
+                {{ blue_lp_total }}
+
+            {% endif %}
+
+            LP
+
+        </div>
+
+    </div>
+
+
+    <div class="match-lp-summary-card">
+
+        <div class="match-lp-summary-label">
+            🔴 레드팀 총 LP 변화
+        </div>
+
+
+        <div
+            class="
+                match-lp-summary-value
+
+                {% if red_lp_total > 0 %}
+                    match-lp-positive
+
+                {% elif red_lp_total < 0 %}
+                    match-lp-negative
+                {% endif %}
+            "
+        >
+
+            {% if red_lp_total > 0 %}
+
+                +{{ red_lp_total }}
+
+            {% else %}
+
+                {{ red_lp_total }}
+
+            {% endif %}
+
+            LP
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최대 상승 / 최대 하락
+============================== -->
+
+{% if max_gain_player and max_loss_player %}
+
+<div class="match-rating-highlight-grid">
+
+    <div class="match-rating-highlight-card">
+
+        <div class="match-rating-highlight-label">
+            📈 최대 상승
+        </div>
+
+
+        <div class="match-rating-highlight-player">
+
+            {% if max_gain_player.player_id %}
+
+                <a
+                    href="/player/{{ max_gain_player.player_id }}"
+                >
+
+                    {{
+                        max_gain_player.discord_nickname
+                        or "알 수 없는 플레이어"
+                    }}
+
+                </a>
+
+            {% else %}
+
+                {{
+                    max_gain_player.discord_nickname
+                    or "알 수 없는 플레이어"
+                }}
+
+            {% endif %}
+
+        </div>
+
+
+        <div
+            class="
+                match-rating-highlight-value
+                match-rating-highlight-positive
+            "
+        >
+
+            {% if max_gain_player.rating_change > 0 %}
+
+                +{{ max_gain_player.rating_change }}
+
+            {% else %}
+
+                {{ max_gain_player.rating_change or 0 }}
+
+            {% endif %}
+
+            LP
+
+        </div>
+
+    </div>
+
+
+    <div class="match-rating-highlight-card">
+
+        <div class="match-rating-highlight-label">
+            📉 최대 하락
+        </div>
+
+
+        <div class="match-rating-highlight-player">
+
+            {% if max_loss_player.player_id %}
+
+                <a
+                    href="/player/{{ max_loss_player.player_id }}"
+                >
+
+                    {{
+                        max_loss_player.discord_nickname
+                        or "알 수 없는 플레이어"
+                    }}
+
+                </a>
+
+            {% else %}
+
+                {{
+                    max_loss_player.discord_nickname
+                    or "알 수 없는 플레이어"
+                }}
+
+            {% endif %}
+
+        </div>
+
+
+        <div
+            class="
+                match-rating-highlight-value
+                match-rating-highlight-negative
+            "
+        >
+
+            {% if max_loss_player.rating_change > 0 %}
+
+                +{{ max_loss_player.rating_change }}
+
+            {% else %}
+
+                {{ max_loss_player.rating_change or 0 }}
+
+            {% endif %}
+
+            LP
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endif %}
+
+
+<!-- ==============================
+     양 팀
+============================== -->
+
+<div class="match-team-grid">
+
+
+    <!-- ==============================
+         블루팀
+    ============================== -->
+
+    <div
+        class="
+            match-team-box
+            blue-team-box
+        "
+    >
+
+        <h2>
+            🔵 블루팀
+        </h2>
+
+
+        <div class="team-average">
+
+            <div>
+
+                경기 전 평균 레이팅
+
+                <strong>
+                    {{ blue_avg }} LP
+                </strong>
+
+            </div>
+
+
+            <div class="team-winrate">
+
+                예상 승률
+
+                <strong>
+                    {{ blue_win_rate }}%
+                </strong>
+
+            </div>
+
+        </div>
+
+
+        {% if blue_team %}
+
+            {% for player in blue_team %}
+
+            <div class="match-player-row">
+
+
+                <div class="match-player-position">
+
+                    {% if player.position == "TOP" %}
+
+                        🛡️ TOP
+
+                    {% elif player.position == "JUNGLE" %}
+
+                        🌲 JUNGLE
+
+                    {% elif player.position == "MID" %}
+
+                        ⚔️ MID
+
+                    {% elif player.position == "ADC" %}
+
+                        🏹 ADC
+
+                    {% elif player.position == "SUPPORT" %}
+
+                        💚 SUPPORT
+
+                    {% else %}
+
+                        🎮 {{ player.position or "미기록" }}
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="match-player-name">
+
+                    {% if player.player_id %}
+
+                        <a
+                            href="/player/{{ player.player_id }}"
+                            class="player-link"
+                        >
+
+                            {{
+                                player.discord_nickname
+                                or "알 수 없는 플레이어"
+                            }}
+
+                        </a>
+
+                    {% else %}
+
+                        <span>
+                            알 수 없는 플레이어
+                        </span>
+
+                    {% endif %}
+
+
+                    <div class="match-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+
+                            · {{ player.riot_name }}
+
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="match-player-rating">
+
+                    <div>
+
+                        {{ player.rating_before }}
+                        →
+                        {{ player.rating_after }}
+
+                    </div>
+
+
+                    {% if player.rating_change > 0 %}
+
+                        <span class="lp-plus">
+                            +{{ player.rating_change }}
+                        </span>
+
+                    {% elif player.rating_change < 0 %}
+
+                        <span class="lp-minus">
+                            {{ player.rating_change }}
+                        </span>
+
+                    {% else %}
+
+                        <span>
+                            0
+                        </span>
+
+                    {% endif %}
+
+                    LP
+
+                </div>
+
+
+                {% if
+                    player.discord_id
+                    == match.mvp_discord_id
+                %}
+
+                    <div class="match-player-mvp">
+                        ⭐ MVP
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+            {% endfor %}
+
+
+        {% else %}
+
+            <div class="empty-match-card">
+                블루팀 기록이 없습니다.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+
+    <!-- ==============================
+         레드팀
+    ============================== -->
+
+    <div
+        class="
+            match-team-box
+            red-team-box
+        "
+    >
+
+        <h2>
+            🔴 레드팀
+        </h2>
+
+
+        <div class="team-average">
+
+            <div>
+
+                경기 전 평균 레이팅
+
+                <strong>
+                    {{ red_avg }} LP
+                </strong>
+
+            </div>
+
+
+            <div class="team-winrate">
+
+                예상 승률
+
+                <strong>
+                    {{ red_win_rate }}%
+                </strong>
+
+            </div>
+
+        </div>
+
+
+        {% if red_team %}
+
+            {% for player in red_team %}
+
+            <div class="match-player-row">
+
+
+                <div class="match-player-position">
+
+                    {% if player.position == "TOP" %}
+
+                        🛡️ TOP
+
+                    {% elif player.position == "JUNGLE" %}
+
+                        🌲 JUNGLE
+
+                    {% elif player.position == "MID" %}
+
+                        ⚔️ MID
+
+                    {% elif player.position == "ADC" %}
+
+                        🏹 ADC
+
+                    {% elif player.position == "SUPPORT" %}
+
+                        💚 SUPPORT
+
+                    {% else %}
+
+                        🎮 {{ player.position or "미기록" }}
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="match-player-name">
+
+                    {% if player.player_id %}
+
+                        <a
+                            href="/player/{{ player.player_id }}"
+                            class="player-link"
+                        >
+
+                            {{
+                                player.discord_nickname
+                                or "알 수 없는 플레이어"
+                            }}
+
+                        </a>
+
+                    {% else %}
+
+                        <span>
+                            알 수 없는 플레이어
+                        </span>
+
+                    {% endif %}
+
+
+                    <div class="match-player-sub">
+
+                        {{ player.tier or "-" }}
+
+                        {% if player.riot_name %}
+
+                            · {{ player.riot_name }}
+
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="match-player-rating">
+
+                    <div>
+
+                        {{ player.rating_before }}
+                        →
+                        {{ player.rating_after }}
+
+                    </div>
+
+
+                    {% if player.rating_change > 0 %}
+
+                        <span class="lp-plus">
+                            +{{ player.rating_change }}
+                        </span>
+
+                    {% elif player.rating_change < 0 %}
+
+                        <span class="lp-minus">
+                            {{ player.rating_change }}
+                        </span>
+
+                    {% else %}
+
+                        <span>
+                            0
+                        </span>
+
+                    {% endif %}
+
+                    LP
+
+                </div>
+
+
+                {% if
+                    player.discord_id
+                    == match.mvp_discord_id
+                %}
+
+                    <div class="match-player-mvp">
+                        ⭐ MVP
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+            {% endfor %}
+
+
+        {% else %}
+
+            <div class="empty-match-card">
+                레드팀 기록이 없습니다.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     하단 메뉴
+============================== -->
+
+<div class="room-bottom-actions">
+
+    <a
+        href="/history"
+        class="room-back-button"
+    >
+        ← 전체 전적
+    </a>
+
+
+    <a
+        href="/"
+        class="room-history-button"
+    >
+        🏠 홈으로
+    </a>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,1119 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     헤더
+============================== -->
+
+<div class="analysis-header">
+
+    <div>
+
+        <h1>
+            ⚔️ 플레이어 비교
+        </h1>
+
+        <p>
+            두 플레이어의 레이팅, 전적, 최근 폼,
+            포지션 기록과 맞대결 성적을 비교합니다.
+        </p>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     플레이어 선택
+============================== -->
+
+<form
+    action="/compare"
+    method="get"
+    class="compare-select-form"
+>
+
+    <div class="compare-select-player">
+
+        <label for="player1_id">
+            플레이어 1
+        </label>
+
+        <select
+            id="player1_id"
+            name="player1_id"
+            required
+        >
+
+            <option value="">
+                플레이어 선택
+            </option>
+
+            {% for player in players %}
+
+            <option
+                value="{{ player.id }}"
+
+                {% if player1_id == player.id %}
+                    selected
+                {% endif %}
+            >
+
+                {{ player.discord_nickname }}
+                · {{ player.tier or "-" }}
+                · {{ player.rating }} LP
+
+            </option>
+
+            {% endfor %}
+
+        </select>
+
+    </div>
+
+
+    <div class="compare-vs-select">
+        VS
+    </div>
+
+
+    <div class="compare-select-player">
+
+        <label for="player2_id">
+            플레이어 2
+        </label>
+
+        <select
+            id="player2_id"
+            name="player2_id"
+            required
+        >
+
+            <option value="">
+                플레이어 선택
+            </option>
+
+            {% for player in players %}
+
+            <option
+                value="{{ player.id }}"
+
+                {% if player2_id == player.id %}
+                    selected
+                {% endif %}
+            >
+
+                {{ player.discord_nickname }}
+                · {{ player.tier or "-" }}
+                · {{ player.rating }} LP
+
+            </option>
+
+            {% endfor %}
+
+        </select>
+
+    </div>
+
+
+    <button
+        type="submit"
+        class="analysis-button"
+    >
+        비교하기
+    </button>
+
+</form>
+
+
+{% if (
+    player1
+    and player2
+    and player1_data
+    and player2_data
+) %}
+
+
+{% if player1.id == player2.id %}
+
+<div class="empty-match-card">
+    서로 다른 두 플레이어를 선택해주세요.
+</div>
+
+{% else %}
+
+
+<!-- ==============================
+     VS 프로필
+============================== -->
+
+<div class="compare-profile-grid">
+
+    <div class="compare-profile-card">
+
+        <div class="compare-profile-label">
+            PLAYER 1
+        </div>
+
+        <a
+            href="/player/{{ player1.id }}"
+            class="compare-profile-name"
+        >
+            {{ player1.discord_nickname }}
+        </a>
+
+        <div class="compare-profile-riot">
+            {{ player1.riot_name or "-" }}
+        </div>
+
+        <div class="compare-profile-tier">
+            {{ player1.tier or "-" }}
+        </div>
+
+        <div class="compare-profile-rating">
+            ⭐ {{ player1.rating }} LP
+        </div>
+
+    </div>
+
+
+    <div class="compare-profile-vs">
+        VS
+    </div>
+
+
+    <div class="compare-profile-card">
+
+        <div class="compare-profile-label">
+            PLAYER 2
+        </div>
+
+        <a
+            href="/player/{{ player2.id }}"
+            class="compare-profile-name"
+        >
+            {{ player2.discord_nickname }}
+        </a>
+
+        <div class="compare-profile-riot">
+            {{ player2.riot_name or "-" }}
+        </div>
+
+        <div class="compare-profile-tier">
+            {{ player2.tier or "-" }}
+        </div>
+
+        <div class="compare-profile-rating">
+            ⭐ {{ player2.rating }} LP
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     기본 기록 비교
+============================== -->
+
+<div class="analysis-section">
+
+    <div class="analysis-section-header">
+
+        <h2>
+            📊 기본 기록 비교
+        </h2>
+
+        <p>
+            전체 누적 경기 기준
+        </p>
+
+    </div>
+
+
+    <div class="compare-stat-table">
+
+        <!-- 랭킹 -->
+
+        <div class="compare-stat-row">
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player1_data.rank < player2_data.rank %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                #{{ player1_data.rank }}
+            </div>
+
+            <div class="compare-stat-label">
+                전체 순위
+            </div>
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player2_data.rank < player1_data.rank %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                #{{ player2_data.rank }}
+            </div>
+
+        </div>
+
+
+        <!-- 레이팅 -->
+
+        <div class="compare-stat-row">
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player1.rating > player2.rating %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                {{ player1.rating }}
+            </div>
+
+            <div class="compare-stat-label">
+                레이팅
+            </div>
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player2.rating > player1.rating %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                {{ player2.rating }}
+            </div>
+
+        </div>
+
+
+        <!-- 경기 -->
+
+        <div class="compare-stat-row">
+
+            <div class="compare-stat-value">
+                {{ player1_data.games }}
+            </div>
+
+            <div class="compare-stat-label">
+                전체 경기
+            </div>
+
+            <div class="compare-stat-value">
+                {{ player2_data.games }}
+            </div>
+
+        </div>
+
+
+        <!-- 전적 -->
+
+        <div class="compare-stat-row">
+
+            <div class="compare-stat-value">
+                {{ player1_data.wins }}승
+                {{ player1_data.losses }}패
+            </div>
+
+            <div class="compare-stat-label">
+                전적
+            </div>
+
+            <div class="compare-stat-value">
+                {{ player2_data.wins }}승
+                {{ player2_data.losses }}패
+            </div>
+
+        </div>
+
+
+        <!-- 승률 -->
+
+        <div class="compare-stat-row">
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player1_data.win_rate > player2_data.win_rate %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                {{ player1_data.win_rate }}%
+            </div>
+
+            <div class="compare-stat-label">
+                승률
+            </div>
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player2_data.win_rate > player1_data.win_rate %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                {{ player2_data.win_rate }}%
+            </div>
+
+        </div>
+
+
+        <!-- MVP -->
+
+        <div class="compare-stat-row">
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player1_data.mvp_count > player2_data.mvp_count %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                ⭐ {{ player1_data.mvp_count }}
+            </div>
+
+            <div class="compare-stat-label">
+                MVP
+            </div>
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player2_data.mvp_count > player1_data.mvp_count %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                ⭐ {{ player2_data.mvp_count }}
+            </div>
+
+        </div>
+
+
+        <!-- 최고 연승 -->
+
+        <div class="compare-stat-row">
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player1.best_win_streak > player2.best_win_streak %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                🔥 {{ player1.best_win_streak }}
+            </div>
+
+            <div class="compare-stat-label">
+                최고 연승
+            </div>
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if player2.best_win_streak > player1.best_win_streak %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+                🔥 {{ player2.best_win_streak }}
+            </div>
+
+        </div>
+
+
+        <!-- 평균 LP -->
+
+        <div class="compare-stat-row">
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if (
+                        player1_data.avg_rating_change
+                        > player2_data.avg_rating_change
+                    ) %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+
+                {% if player1_data.avg_rating_change > 0 %}
+                    +
+                {% endif %}
+
+                {{ player1_data.avg_rating_change }}
+
+            </div>
+
+            <div class="compare-stat-label">
+                경기당 평균 LP
+            </div>
+
+            <div
+                class="
+                    compare-stat-value
+                    {% if (
+                        player2_data.avg_rating_change
+                        > player1_data.avg_rating_change
+                    ) %}
+                        compare-stat-winner
+                    {% endif %}
+                "
+            >
+
+                {% if player2_data.avg_rating_change > 0 %}
+                    +
+                {% endif %}
+
+                {{ player2_data.avg_rating_change }}
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     최근 폼
+============================== -->
+
+<div class="analysis-section">
+
+    <div class="analysis-section-header">
+
+        <h2>
+            🔥 최근 폼 비교
+        </h2>
+
+        <p>
+            최근 5 / 10 / 20경기 기준
+        </p>
+
+    </div>
+
+
+    {% for key, title in [
+        ("recent_5", "최근 5경기"),
+        ("recent_10", "최근 10경기"),
+        ("recent_20", "최근 20경기")
+    ] %}
+
+    {% set p1_recent = player1_data[key] %}
+    {% set p2_recent = player2_data[key] %}
+
+
+    <div class="compare-recent-block">
+
+        <h3>
+            {{ title }}
+        </h3>
+
+
+        <div class="compare-stat-table">
+
+            <div class="compare-stat-row">
+
+                <div class="compare-stat-value">
+                    {{ p1_recent.wins }}승
+                    {{ p1_recent.losses }}패
+                </div>
+
+                <div class="compare-stat-label">
+                    전적
+                </div>
+
+                <div class="compare-stat-value">
+                    {{ p2_recent.wins }}승
+                    {{ p2_recent.losses }}패
+                </div>
+
+            </div>
+
+
+            <div class="compare-stat-row">
+
+                <div
+                    class="
+                        compare-stat-value
+                        {% if p1_recent.win_rate > p2_recent.win_rate %}
+                            compare-stat-winner
+                        {% endif %}
+                    "
+                >
+                    {{ p1_recent.win_rate }}%
+                </div>
+
+                <div class="compare-stat-label">
+                    승률
+                </div>
+
+                <div
+                    class="
+                        compare-stat-value
+                        {% if p2_recent.win_rate > p1_recent.win_rate %}
+                            compare-stat-winner
+                        {% endif %}
+                    "
+                >
+                    {{ p2_recent.win_rate }}%
+                </div>
+
+            </div>
+
+
+            <div class="compare-stat-row">
+
+                <div
+                    class="
+                        compare-stat-value
+
+                        {% if p1_recent.rating_change > 0 %}
+                            analysis-positive
+                        {% elif p1_recent.rating_change < 0 %}
+                            analysis-negative
+                        {% endif %}
+                    "
+                >
+
+                    {% if p1_recent.rating_change > 0 %}
+                        +
+                    {% endif %}
+
+                    {{ p1_recent.rating_change }}
+                    LP
+
+                </div>
+
+                <div class="compare-stat-label">
+                    LP 변화
+                </div>
+
+                <div
+                    class="
+                        compare-stat-value
+
+                        {% if p2_recent.rating_change > 0 %}
+                            analysis-positive
+                        {% elif p2_recent.rating_change < 0 %}
+                            analysis-negative
+                        {% endif %}
+                    "
+                >
+
+                    {% if p2_recent.rating_change > 0 %}
+                        +
+                    {% endif %}
+
+                    {{ p2_recent.rating_change }}
+                    LP
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    {% endfor %}
+
+</div>
+
+
+<!-- ==============================
+     최근 5경기 W/L
+============================== -->
+
+<div class="analysis-section">
+
+    <div class="analysis-section-header">
+
+        <h2>
+            🎮 최근 5경기 흐름
+        </h2>
+
+        <p>
+            왼쪽에서 오른쪽으로 최근 경기 순서
+        </p>
+
+    </div>
+
+
+    <div class="compare-form-grid">
+
+        <div class="compare-form-player">
+
+            <h3>
+                {{ player1.discord_nickname }}
+            </h3>
+
+            <div class="recent-form-results">
+
+                {% for match in player1_data.recent_5.results %}
+
+                <a
+                    href="/match/{{ match.match_id }}"
+                    class="
+                        recent-form-result
+
+                        {% if match.won %}
+                            recent-form-win
+                        {% else %}
+                            recent-form-loss
+                        {% endif %}
+                    "
+                >
+                    {% if match.won %}
+                        W
+                    {% else %}
+                        L
+                    {% endif %}
+                </a>
+
+                {% endfor %}
+
+            </div>
+
+        </div>
+
+
+        <div class="compare-form-player">
+
+            <h3>
+                {{ player2.discord_nickname }}
+            </h3>
+
+            <div class="recent-form-results">
+
+                {% for match in player2_data.recent_5.results %}
+
+                <a
+                    href="/match/{{ match.match_id }}"
+                    class="
+                        recent-form-result
+
+                        {% if match.won %}
+                            recent-form-win
+                        {% else %}
+                            recent-form-loss
+                        {% endif %}
+                    "
+                >
+                    {% if match.won %}
+                        W
+                    {% else %}
+                        L
+                    {% endif %}
+                </a>
+
+                {% endfor %}
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     맞대결
+============================== -->
+
+<div class="analysis-section">
+
+    <div class="analysis-section-header">
+
+        <h2>
+            ⚔️ 맞대결
+        </h2>
+
+        <p>
+            두 플레이어가 서로 다른 팀으로 만난 경기
+        </p>
+
+    </div>
+
+
+    {% if head_to_head and head_to_head.games > 0 %}
+
+    <div class="compare-headtohead-card">
+
+        <div class="compare-headtohead-player">
+
+            <a href="/player/{{ player1.id }}">
+                {{ player1.discord_nickname }}
+            </a>
+
+            <strong>
+                {{ head_to_head.player1_wins }}승
+            </strong>
+
+            <span>
+                {{ head_to_head.player1_win_rate }}%
+            </span>
+
+        </div>
+
+
+        <div class="compare-headtohead-center">
+
+            <div>
+                {{ head_to_head.games }}경기
+            </div>
+
+            <strong>
+                VS
+            </strong>
+
+        </div>
+
+
+        <div class="compare-headtohead-player">
+
+            <a href="/player/{{ player2.id }}">
+                {{ player2.discord_nickname }}
+            </a>
+
+            <strong>
+                {{ head_to_head.player2_wins }}승
+            </strong>
+
+            <span>
+                {{ head_to_head.player2_win_rate }}%
+            </span>
+
+        </div>
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+        아직 두 플레이어의 맞대결 기록이 없습니다.
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<!-- ==============================
+     같은 팀 기록
+============================== -->
+
+<div class="analysis-section">
+
+    <div class="analysis-section-header">
+
+        <h2>
+            🤝 같은 팀 기록
+        </h2>
+
+        <p>
+            두 플레이어가 같은 팀으로 플레이한 경기
+        </p>
+
+    </div>
+
+
+    {% if same_team and same_team.games > 0 %}
+
+    <div class="analysis-summary-grid">
+
+        <div class="analysis-summary-card">
+
+            <div class="analysis-summary-label">
+                함께한 경기
+            </div>
+
+            <div class="analysis-summary-value">
+                {{ same_team.games }}경기
+            </div>
+
+        </div>
+
+
+        <div class="analysis-summary-card">
+
+            <div class="analysis-summary-label">
+                함께한 전적
+            </div>
+
+            <div class="analysis-summary-value">
+                {{ same_team.wins }}승
+                {{ same_team.losses }}패
+            </div>
+
+        </div>
+
+
+        <div class="analysis-summary-card">
+
+            <div class="analysis-summary-label">
+                듀오 승률
+            </div>
+
+            <div class="analysis-summary-value">
+                {{ same_team.win_rate }}%
+            </div>
+
+        </div>
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+        아직 두 플레이어가 같은 팀으로 플레이한 기록이 없습니다.
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+<!-- ==============================
+     포지션 비교
+============================== -->
+
+<div class="analysis-section">
+
+    <div class="analysis-section-header">
+
+        <h2>
+            🎯 포지션별 비교
+        </h2>
+
+        <p>
+            실제 경기에서 플레이한 포지션 기준
+        </p>
+
+    </div>
+
+
+    <div class="compare-position-grid">
+
+        <!-- PLAYER 1 -->
+
+        <div class="compare-position-player">
+
+            <h3>
+                {{ player1.discord_nickname }}
+            </h3>
+
+
+            {% if player1_data.position_stats %}
+
+                {% for stat in player1_data.position_stats %}
+
+                <div class="analysis-position-card">
+
+                    <div class="analysis-position-name">
+
+                        {% if stat.position == "TOP" %}
+                            🛡️ TOP
+                        {% elif stat.position == "JUNGLE" %}
+                            🌲 JUNGLE
+                        {% elif stat.position == "MID" %}
+                            ⚔️ MID
+                        {% elif stat.position == "ADC" %}
+                            🏹 ADC
+                        {% elif stat.position == "SUPPORT" %}
+                            💚 SUPPORT
+                        {% else %}
+                            🎮 {{ stat.position }}
+                        {% endif %}
+
+                    </div>
+
+                    <div>
+                        {{ stat.games }}경기
+                    </div>
+
+                    <div>
+                        {{ stat.wins }}승
+                        {{ stat.losses }}패
+                    </div>
+
+                    <strong>
+                        승률 {{ stat.win_rate }}%
+                    </strong>
+
+                    <div
+                        class="
+                            {% if stat.avg_rating_change > 0 %}
+                                analysis-positive
+                            {% elif stat.avg_rating_change < 0 %}
+                                analysis-negative
+                            {% endif %}
+                        "
+                    >
+                        평균
+
+                        {% if stat.avg_rating_change > 0 %}
+                            +
+                        {% endif %}
+
+                        {{ stat.avg_rating_change }} LP
+                    </div>
+
+                </div>
+
+                {% endfor %}
+
+            {% else %}
+
+            <div class="empty-match-card">
+                포지션 기록 없음
+            </div>
+
+            {% endif %}
+
+        </div>
+
+
+        <!-- PLAYER 2 -->
+
+        <div class="compare-position-player">
+
+            <h3>
+                {{ player2.discord_nickname }}
+            </h3>
+
+
+            {% if player2_data.position_stats %}
+
+                {% for stat in player2_data.position_stats %}
+
+                <div class="analysis-position-card">
+
+                    <div class="analysis-position-name">
+
+                        {% if stat.position == "TOP" %}
+                            🛡️ TOP
+                        {% elif stat.position == "JUNGLE" %}
+                            🌲 JUNGLE
+                        {% elif stat.position == "MID" %}
+                            ⚔️ MID
+                        {% elif stat.position == "ADC" %}
+                            🏹 ADC
+                        {% elif stat.position == "SUPPORT" %}
+                            💚 SUPPORT
+                        {% else %}
+                            🎮 {{ stat.position }}
+                        {% endif %}
+
+                    </div>
+
+                    <div>
+                        {{ stat.games }}경기
+                    </div>
+
+                    <div>
+                        {{ stat.wins }}승
+                        {{ stat.losses }}패
+                    </div>
+
+                    <strong>
+                        승률 {{ stat.win_rate }}%
+                    </strong>
+
+                    <div
+                        class="
+                            {% if stat.avg_rating_change > 0 %}
+                                analysis-positive
+                            {% elif stat.avg_rating_change < 0 %}
+                                analysis-negative
+                            {% endif %}
+                        "
+                    >
+                        평균
+
+                        {% if stat.avg_rating_change > 0 %}
+                            +
+                        {% endif %}
+
+                        {{ stat.avg_rating_change }} LP
+                    </div>
+
+                </div>
+
+                {% endfor %}
+
+            {% else %}
+
+            <div class="empty-match-card">
+                포지션 기록 없음
+            </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     하단
+============================== -->
+
+<div class="room-bottom-actions">
+
+    <a
+        href="/ranking"
+        class="room-back-button"
+    >
+        🏆 전체 랭킹
+    </a>
+
+    <a
+        href="/analysis"
+        class="room-history-button"
+    >
+        📊 플레이어 분석
+    </a>
+
+</div>
+
+{% endif %}
+
+
+{% elif (
+    player1_id is not none
+    and player2_id is not none
+) %}
+
+<div class="empty-match-card">
+    선택한 플레이어 정보를 찾을 수 없습니다.
+</div>
+
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Environment
+.env
+
+# Logs
+logs/
+*.log
+
+# Database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Runtime Data
+data/backups/
+data/game_state.json
+data/match_history.json
+data/players.json
+data/rooms_state.json
+data/team_history.json
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

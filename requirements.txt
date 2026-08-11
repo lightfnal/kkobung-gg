@@ -1,0 +1,9 @@
+discord.py==2.7.1
+python-dotenv==1.2.2
+requests==2.34.2
+
+fastapi
+uvicorn
+jinja2
+aiofiles
+python-multipart

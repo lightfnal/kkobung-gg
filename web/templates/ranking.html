@@ -1,0 +1,1370 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     랭킹 헤더
+============================== -->
+
+<div class="ranking-header">
+
+    <h1>
+        🏆 전체 랭킹
+    </h1>
+
+    <p>
+        현재 공개 레이팅을 기준으로 한 전체 플레이어 순위입니다.
+    </p>
+
+</div>
+
+
+<!-- ==============================
+     검색 / 필터
+============================== -->
+
+<div class="ranking-filter-box">
+
+    <div class="ranking-filter-search">
+
+        <label for="rankingPlayerSearch">
+            플레이어 검색
+        </label>
+
+        <input
+            type="text"
+            id="rankingPlayerSearch"
+            placeholder="디스코드 닉네임 또는 Riot 닉네임"
+            autocomplete="off"
+        >
+
+    </div>
+
+
+    <div class="ranking-filter-select">
+
+        <label for="rankingTierFilter">
+            티어
+        </label>
+
+        <select id="rankingTierFilter">
+
+            <option value="">
+                전체 티어
+            </option>
+
+        </select>
+
+    </div>
+
+
+    <div class="ranking-filter-select">
+
+        <label for="rankingPositionFilter">
+            포지션
+        </label>
+
+        <select id="rankingPositionFilter">
+
+            <option value="">
+                전체 포지션
+            </option>
+
+            <option value="TOP">
+                🛡️ TOP
+            </option>
+
+            <option value="JUNGLE">
+                🌲 JUNGLE
+            </option>
+
+            <option value="MID">
+                ⚔️ MID
+            </option>
+
+            <option value="ADC">
+                🏹 ADC
+            </option>
+
+            <option value="SUPPORT">
+                💚 SUPPORT
+            </option>
+
+        </select>
+
+    </div>
+
+
+    <button
+        type="button"
+        id="rankingFilterReset"
+        class="ranking-filter-reset"
+    >
+        초기화
+    </button>
+
+</div>
+
+
+<!-- ==============================
+     검색 결과
+============================== -->
+
+<div class="ranking-filter-result">
+
+    <span>
+        검색 결과
+    </span>
+
+    <strong id="rankingVisibleCount">
+        0
+    </strong>
+
+    <span>
+        명
+    </span>
+
+</div>
+
+
+<!-- ==============================
+     API 상태 안내
+============================== -->
+
+<div
+    id="rankingApiError"
+    class="empty-match-card"
+    style="display:none;"
+>
+    랭킹 데이터를 불러오지 못했습니다.
+</div>
+
+
+<!-- ==============================
+     랭킹 테이블
+============================== -->
+
+<div
+    id="rankingTable"
+    class="ranking-table"
+>
+
+    <!-- 테이블 제목 -->
+
+    <div class="ranking-row ranking-head">
+
+        <div>
+            순위
+        </div>
+
+        <div>
+            플레이어
+        </div>
+
+        <div>
+            티어
+        </div>
+
+        <div>
+            레이팅
+        </div>
+
+        <div>
+            전적
+        </div>
+
+        <div>
+            승률
+        </div>
+
+        <div>
+            비교
+        </div>
+
+    </div>
+
+
+    <!-- JS가 플레이어 목록을 여기에 생성 -->
+
+    <div id="rankingPlayerRows">
+
+        <div class="empty-match-card">
+            랭킹 데이터를 불러오는 중입니다.
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     플레이어 없음
+============================== -->
+
+<div
+    id="rankingEmpty"
+    class="empty-match-card"
+    style="display:none;"
+>
+    등록된 플레이어가 없습니다.
+</div>
+
+
+<!-- =====================================================
+     실시간 랭킹 자동 갱신
+===================================================== -->
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        /* =====================================================
+           DOM
+        ===================================================== */
+
+        const rankingTable =
+            document.getElementById(
+                "rankingTable"
+            );
+
+        const rankingRows =
+            document.getElementById(
+                "rankingPlayerRows"
+            );
+
+        const emptyMessage =
+            document.getElementById(
+                "rankingEmpty"
+            );
+
+        const apiErrorMessage =
+            document.getElementById(
+                "rankingApiError"
+            );
+
+        const searchInput =
+            document.getElementById(
+                "rankingPlayerSearch"
+            );
+
+        const tierFilter =
+            document.getElementById(
+                "rankingTierFilter"
+            );
+
+        const positionFilter =
+            document.getElementById(
+                "rankingPositionFilter"
+            );
+
+        const resetButton =
+            document.getElementById(
+                "rankingFilterReset"
+            );
+
+        const visibleCount =
+            document.getElementById(
+                "rankingVisibleCount"
+            );
+
+
+        /* =====================================================
+           상태
+        ===================================================== */
+
+        let latestPlayers =
+            [];
+
+        let isRefreshing =
+            false;
+
+        let pageClosed =
+            false;
+
+
+        /* =====================================================
+           공통 함수
+        ===================================================== */
+
+        function escapeHtml(
+            value
+        ){
+
+            if(
+                value === null
+                ||
+                value === undefined
+            ){
+                return "";
+            }
+
+
+            return String(
+                value
+            )
+            .replaceAll(
+                "&",
+                "&amp;"
+            )
+            .replaceAll(
+                "<",
+                "&lt;"
+            )
+            .replaceAll(
+                ">",
+                "&gt;"
+            )
+            .replaceAll(
+                '"',
+                "&quot;"
+            )
+            .replaceAll(
+                "'",
+                "&#039;"
+            );
+
+        }
+
+
+        function safeNumber(
+            value
+        ){
+
+            const numberValue =
+                Number(
+                    value
+                );
+
+
+            if(
+                !Number.isFinite(
+                    numberValue
+                )
+            ){
+                return 0;
+            }
+
+
+            return numberValue;
+
+        }
+
+
+        function normalizeText(
+            value
+        ){
+
+            return String(
+                value
+                || ""
+            )
+            .trim()
+            .toLowerCase();
+
+        }
+
+
+        /* =====================================================
+           티어 선택지
+        ===================================================== */
+
+        function updateTierOptions(
+            players
+        ){
+
+            if(
+                !tierFilter
+            ){
+                return;
+            }
+
+
+            const currentValue =
+                tierFilter.value;
+
+
+            const tiers =
+                new Set();
+
+
+            players.forEach(
+                function(
+                    player
+                ){
+
+                    const tier =
+                        String(
+                            player.tier
+                            || ""
+                        ).trim();
+
+
+                    if(
+                        tier
+                    ){
+
+                        tiers.add(
+                            tier
+                        );
+
+                    }
+
+                }
+            );
+
+
+            const sortedTiers =
+                Array.from(
+                    tiers
+                )
+                .sort(
+                    function(
+                        a,
+                        b
+                    ){
+
+                        return a.localeCompare(
+                            b,
+                            "ko"
+                        );
+
+                    }
+                );
+
+
+            tierFilter.innerHTML =
+                `
+                <option value="">
+                    전체 티어
+                </option>
+                `;
+
+
+            sortedTiers.forEach(
+                function(
+                    tier
+                ){
+
+                    const option =
+                        document.createElement(
+                            "option"
+                        );
+
+
+                    option.value =
+                        tier;
+
+                    option.textContent =
+                        tier;
+
+
+                    tierFilter.appendChild(
+                        option
+                    );
+
+                }
+            );
+
+
+            const optionExists =
+                Array.from(
+                    tierFilter.options
+                )
+                .some(
+                    function(
+                        option
+                    ){
+
+                        return (
+                            option.value
+                            === currentValue
+                        );
+
+                    }
+                );
+
+
+            if(
+                optionExists
+            ){
+
+                tierFilter.value =
+                    currentValue;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           순위 표시
+        ===================================================== */
+
+        function getRankText(
+            rank
+        ){
+
+            if(
+                rank === 1
+            ){
+                return "🥇";
+            }
+
+
+            if(
+                rank === 2
+            ){
+                return "🥈";
+            }
+
+
+            if(
+                rank === 3
+            ){
+                return "🥉";
+            }
+
+
+            return String(
+                rank
+            );
+
+        }
+
+
+        /* =====================================================
+           플레이어 행 HTML
+        ===================================================== */
+
+        function createRankingRowHtml(
+            player
+        ){
+
+            const playerId =
+                safeNumber(
+                    player.id
+                );
+
+
+            const rank =
+                safeNumber(
+                    player.rank
+                );
+
+
+            const nickname =
+                escapeHtml(
+                    player.discord_nickname
+                    || "알 수 없는 플레이어"
+                );
+
+
+            const riotName =
+                escapeHtml(
+                    player.riot_name
+                    || ""
+                );
+
+
+            const tier =
+                escapeHtml(
+                    player.tier
+                    || "-"
+                );
+
+
+            const rating =
+                safeNumber(
+                    player.rating
+                );
+
+
+            const wins =
+                safeNumber(
+                    player.wins
+                );
+
+
+            const losses =
+                safeNumber(
+                    player.losses
+                );
+
+
+            const winRate =
+                safeNumber(
+                    player.win_rate
+                );
+
+
+            const mainPosition =
+                escapeHtml(
+                    player.main_position
+                    || ""
+                );
+
+
+            const subPosition =
+                escapeHtml(
+                    player.sub_position
+                    || ""
+                );
+
+
+            let subText =
+                riotName;
+
+
+            if(
+                mainPosition
+            ){
+
+                if(
+                    subText
+                ){
+
+                    subText +=
+                        " · ";
+
+                }
+
+
+                subText +=
+                    mainPosition;
+
+
+                if(
+                    subPosition
+                ){
+
+                    subText +=
+                        " / "
+                        + subPosition;
+
+                }
+
+            }
+
+
+            if(
+                !subText
+            ){
+
+                subText =
+                    "Riot ID 없음";
+
+            }
+
+
+            return `
+                <div
+                    class="ranking-player-wrapper"
+
+                    data-player-name="${escapeHtml(
+                        (
+                            player.discord_nickname
+                            || ""
+                        )
+                        + " "
+                        + (
+                            player.riot_name
+                            || ""
+                        )
+                    )}"
+
+                    data-tier="${tier}"
+
+                    data-main-position="${mainPosition}"
+
+                    data-sub-position="${subPosition}"
+                >
+
+                    <div class="ranking-row">
+
+                        <!-- 순위 -->
+
+                        <div class="ranking-position">
+                            ${getRankText(
+                                rank
+                            )}
+                        </div>
+
+
+                        <!-- 플레이어 -->
+
+                        <div>
+
+                            <a
+                                href="/player/${playerId}"
+                                class="ranking-player-name-link"
+                            >
+                                ${nickname}
+                            </a>
+
+
+                            <div class="ranking-player-riot">
+
+                                ${subText}
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- 티어 -->
+
+                        <div class="ranking-tier">
+                            ${tier}
+                        </div>
+
+
+                        <!-- 레이팅 -->
+
+                        <div class="ranking-rating">
+                            ⭐ ${rating}
+                        </div>
+
+
+                        <!-- 전적 -->
+
+                        <div class="ranking-record">
+                            ${wins}승 ${losses}패
+                        </div>
+
+
+                        <!-- 승률 -->
+
+                        <div class="ranking-winrate">
+                            ${winRate}%
+                        </div>
+
+
+                        <!-- 비교 -->
+
+                        <div class="ranking-compare">
+
+                            <a
+                                href="/compare?player1_id=${playerId}"
+                                class="ranking-compare-button"
+                            >
+                                ⚔️ 비교
+                            </a>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           랭킹 전체 렌더링
+        ===================================================== */
+
+        function renderRanking(
+            players
+        ){
+
+            latestPlayers =
+                Array.isArray(
+                    players
+                )
+                ? players
+                : [];
+
+
+            if(
+                latestPlayers.length === 0
+            ){
+
+                if(
+                    rankingRows
+                ){
+
+                    rankingRows.innerHTML =
+                        "";
+
+                }
+
+
+                if(
+                    rankingTable
+                ){
+
+                    rankingTable.style.display =
+                        "none";
+
+                }
+
+
+                if(
+                    emptyMessage
+                ){
+
+                    emptyMessage.style.display =
+                        "";
+
+                }
+
+
+                if(
+                    visibleCount
+                ){
+
+                    visibleCount.textContent =
+                        "0";
+
+                }
+
+
+                updateTierOptions(
+                    []
+                );
+
+
+                return;
+
+            }
+
+
+            if(
+                rankingTable
+            ){
+
+                rankingTable.style.display =
+                    "";
+
+            }
+
+
+            if(
+                emptyMessage
+            ){
+
+                emptyMessage.style.display =
+                    "none";
+
+            }
+
+
+            if(
+                rankingRows
+            ){
+
+                rankingRows.innerHTML =
+                    latestPlayers
+                        .map(
+                            createRankingRowHtml
+                        )
+                        .join(
+                            ""
+                        );
+
+            }
+
+
+            updateTierOptions(
+                latestPlayers
+            );
+
+
+            applyFilters();
+
+        }
+
+
+        /* =====================================================
+           검색 / 필터
+        ===================================================== */
+
+        function applyFilters(){
+
+            const wrappers =
+                Array.from(
+                    document.querySelectorAll(
+                        ".ranking-player-wrapper"
+                    )
+                );
+
+
+            const searchValue =
+                normalizeText(
+                    searchInput?.value
+                );
+
+
+            const tierValue =
+                String(
+                    tierFilter?.value
+                    || ""
+                );
+
+
+            const positionValue =
+                String(
+                    positionFilter?.value
+                    || ""
+                ).toUpperCase();
+
+
+            let count =
+                0;
+
+
+            wrappers.forEach(
+                function(
+                    wrapper
+                ){
+
+                    const playerName =
+                        normalizeText(
+                            wrapper.dataset.playerName
+                        );
+
+
+                    const tier =
+                        String(
+                            wrapper.dataset.tier
+                            || ""
+                        );
+
+
+                    const mainPosition =
+                        String(
+                            wrapper.dataset.mainPosition
+                            || ""
+                        ).toUpperCase();
+
+
+                    const subPosition =
+                        String(
+                            wrapper.dataset.subPosition
+                            || ""
+                        ).toUpperCase();
+
+
+                    const searchMatch =
+                        (
+                            !searchValue
+                            ||
+                            playerName.includes(
+                                searchValue
+                            )
+                        );
+
+
+                    const tierMatch =
+                        (
+                            !tierValue
+                            ||
+                            tier === tierValue
+                        );
+
+
+                    const positionMatch =
+                        (
+                            !positionValue
+                            ||
+                            mainPosition === positionValue
+                            ||
+                            subPosition === positionValue
+                        );
+
+
+                    const visible =
+                        (
+                            searchMatch
+                            &&
+                            tierMatch
+                            &&
+                            positionMatch
+                        );
+
+
+                    wrapper.style.display =
+                        visible
+                        ? ""
+                        : "none";
+
+
+                    if(
+                        visible
+                    ){
+
+                        count++;
+
+                    }
+
+                }
+            );
+
+
+            if(
+                visibleCount
+            ){
+
+                visibleCount.textContent =
+                    count;
+
+            }
+
+
+            /*
+             * 등록 플레이어는 있지만
+             * 필터 결과가 0명인 경우
+             */
+
+            if(
+                latestPlayers.length > 0
+            ){
+
+                if(
+                    emptyMessage
+                ){
+
+                    if(
+                        count === 0
+                    ){
+
+                        emptyMessage.textContent =
+                            "조건에 맞는 플레이어가 없습니다.";
+
+                        emptyMessage.style.display =
+                            "";
+
+                    }
+
+                    else{
+
+                        emptyMessage.style.display =
+                            "none";
+
+                    }
+
+                }
+
+            }
+
+        }
+
+
+        /* =====================================================
+           API 호출
+        ===================================================== */
+
+        async function refreshRanking(){
+
+            if(
+                isRefreshing
+                ||
+                pageClosed
+            ){
+                return;
+            }
+
+
+            isRefreshing =
+                true;
+
+
+            try{
+
+                const response =
+                    await fetch(
+                        "/api/ranking",
+                        {
+                            method:
+                                "GET",
+
+                            cache:
+                                "no-store",
+
+                            headers:{
+                                "Accept":
+                                    "application/json"
+                            }
+                        }
+                    );
+
+
+                if(
+                    !response.ok
+                ){
+
+                    console.warn(
+                        "랭킹 API 오류:",
+                        response.status
+                    );
+
+
+                    if(
+                        apiErrorMessage
+                    ){
+
+                        apiErrorMessage.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                const data =
+                    await response.json();
+
+
+                if(
+                    !data
+                    ||
+                    !data.success
+                    ||
+                    !Array.isArray(
+                        data.players
+                    )
+                ){
+
+                    console.warn(
+                        "랭킹 API 응답 형식이 올바르지 않습니다."
+                    );
+
+
+                    if(
+                        apiErrorMessage
+                    ){
+
+                        apiErrorMessage.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                if(
+                    apiErrorMessage
+                ){
+
+                    apiErrorMessage.style.display =
+                        "none";
+
+                }
+
+
+                renderRanking(
+                    data.players
+                );
+
+            }
+
+            catch(
+                error
+            ){
+
+                console.warn(
+                    "랭킹 자동 갱신 실패:",
+                    error
+                );
+
+
+                if(
+                    apiErrorMessage
+                ){
+
+                    apiErrorMessage.style.display =
+                        "";
+
+                }
+
+            }
+
+            finally{
+
+                isRefreshing =
+                    false;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           이벤트
+        ===================================================== */
+
+        if(
+            searchInput
+        ){
+
+            searchInput.addEventListener(
+                "input",
+                applyFilters
+            );
+
+        }
+
+
+        if(
+            tierFilter
+        ){
+
+            tierFilter.addEventListener(
+                "change",
+                applyFilters
+            );
+
+        }
+
+
+        if(
+            positionFilter
+        ){
+
+            positionFilter.addEventListener(
+                "change",
+                applyFilters
+            );
+
+        }
+
+
+        if(
+            resetButton
+        ){
+
+            resetButton.addEventListener(
+                "click",
+                function(){
+
+                    if(
+                        searchInput
+                    ){
+
+                        searchInput.value =
+                            "";
+
+                    }
+
+
+                    if(
+                        tierFilter
+                    ){
+
+                        tierFilter.value =
+                            "";
+
+                    }
+
+
+                    if(
+                        positionFilter
+                    ){
+
+                        positionFilter.value =
+                            "";
+
+                    }
+
+
+                    applyFilters();
+
+
+                    if(
+                        searchInput
+                    ){
+
+                        searchInput.focus();
+
+                    }
+
+                }
+            );
+
+        }
+
+
+        /* =====================================================
+           최초 실행
+        ===================================================== */
+
+        refreshRanking();
+
+
+        /* =====================================================
+           5초마다 자동 갱신
+        ===================================================== */
+
+        const rankingRefreshTimer =
+            setInterval(
+                function(){
+
+                    if(
+                        document.visibilityState
+                        === "visible"
+                    ){
+
+                        refreshRanking();
+
+                    }
+
+                },
+                5000
+            );
+
+
+        /* =====================================================
+           탭 복귀
+        ===================================================== */
+
+        document.addEventListener(
+            "visibilitychange",
+            function(){
+
+                if(
+                    document.visibilityState
+                    === "visible"
+                ){
+
+                    refreshRanking();
+
+                }
+
+            }
+        );
+
+
+        /* =====================================================
+           페이지 종료
+        ===================================================== */
+
+        window.addEventListener(
+            "beforeunload",
+            function(){
+
+                pageClosed =
+                    true;
+
+
+                clearInterval(
+                    rankingRefreshTimer
+                );
+
+            }
+        );
+
+    }
+);
+
+</script>
+
+{% endblock %}

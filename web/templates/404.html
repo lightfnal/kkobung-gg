@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="error-page">
+
+    <div class="error-card">
+
+        <div class="error-icon">
+            🚫
+        </div>
+
+        <h1>
+            404
+        </h1>
+
+        <h2>
+            페이지를 찾을 수 없습니다.
+        </h2>
+
+        <p>
+            요청한 페이지가 존재하지 않거나 삭제되었습니다.
+        </p>
+
+        <div class="error-buttons">
+
+            <a
+                href="/"
+                class="error-button-primary"
+            >
+                🏠 홈으로
+            </a>
+
+            <a
+                href="/ranking"
+                class="error-button"
+            >
+                🏆 랭킹
+            </a>
+
+            <a
+                href="/history"
+                class="error-button"
+            >
+                📜 전적
+            </a>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

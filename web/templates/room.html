@@ -1,0 +1,2399 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- ==============================
+     방 헤더
+============================== -->
+
+<div
+    id="roomDetailHeader"
+    class="room-detail-header"
+>
+
+    <div>
+
+        <div class="room-detail-title-row">
+
+            <h1 id="roomDetailName">
+                🎮 {{ room_name }}
+            </h1>
+
+            <span
+                id="roomDetailStatus"
+                class="
+                    room-detail-status
+                    room-detail-status-{{ status_code }}
+                "
+            >
+
+                {% if status_code == "playing" %}
+
+                    🔴 경기 진행 중
+
+                {% elif status_code == "ready" %}
+
+                    🟡 팀 구성 완료
+
+                {% elif status_code == "recruiting" %}
+
+                    🟢 모집 중
+
+                {% else %}
+
+                    ⚫ 대기 중
+
+                {% endif %}
+
+            </span>
+
+        </div>
+
+
+        <p id="roomDetailId">
+            ROOM #{{ room_id }}
+        </p>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     방 삭제 / 종료 안내
+============================== -->
+
+<div
+    id="roomDeletedMessage"
+    class="empty-match-card"
+    style="display:none;"
+>
+
+    이 내전방은 종료되었거나 삭제되었습니다.
+
+</div>
+
+
+<div id="roomLiveContent">
+
+
+<!-- ==============================
+     방 요약
+============================== -->
+
+<div class="room-summary-grid">
+
+    <div class="room-summary-card">
+
+        <div class="room-summary-label">
+            참가 인원
+        </div>
+
+        <div
+            id="roomPlayerCount"
+            class="room-summary-value"
+        >
+            {{ player_count }} / 10
+        </div>
+
+    </div>
+
+
+    <div class="room-summary-card">
+
+        <div class="room-summary-label">
+            현재 상태
+        </div>
+
+        <div
+            id="roomStatusText"
+            class="
+                room-summary-value
+                room-summary-status
+            "
+        >
+            {{ status }}
+        </div>
+
+    </div>
+
+
+    <div class="room-summary-card">
+
+        <div class="room-summary-label">
+            현재 세트
+        </div>
+
+        <div
+            id="roomCurrentGame"
+            class="room-summary-value"
+        >
+
+            {% if status_code == "playing" %}
+
+                {{ current_game_number }}세트
+
+            {% elif status_code == "ready" %}
+
+                {{ current_game_number }}세트 시작 대기
+
+            {% else %}
+
+                -
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     참가 인원 게이지
+============================== -->
+
+<div class="room-player-progress-card">
+
+    <div class="room-player-progress-top">
+
+        <span>
+            모집 현황
+        </span>
+
+        <strong id="roomProgressCount">
+            {{ player_count }} / 10명
+        </strong>
+
+    </div>
+
+
+    <div class="room-player-progress">
+
+        <div
+            id="roomProgressFill"
+            class="room-player-progress-fill"
+            style="
+                width:
+                {% if player_count >= 10 %}
+                    100%
+                {% else %}
+                    {{ player_count * 10 }}%
+                {% endif %}
+                ;
+            "
+        ></div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     BO3 스코어
+============================== -->
+
+<div
+    id="roomSeriesArea"
+
+    {% if
+        status_code != "playing"
+        and status_code != "ready"
+    %}
+        style="display:none;"
+    {% endif %}
+>
+
+    <div class="room-series-card">
+
+        <div class="room-series-title">
+            BO3 SERIES
+        </div>
+
+
+        <div class="room-series-score">
+
+            <div
+                class="
+                    room-series-team
+                    room-blue
+                "
+            >
+
+                <div class="room-series-team-name">
+                    BLUE
+                </div>
+
+                <div
+                    id="roomBlueScore"
+                    class="room-series-team-score"
+                >
+                    {{ blue_score }}
+                </div>
+
+            </div>
+
+
+            <div class="room-series-center">
+
+                <div class="room-series-vs">
+                    VS
+                </div>
+
+                <div
+                    id="roomSeriesGame"
+                    class="room-series-game"
+                >
+
+                    {% if status_code == "playing" %}
+
+                        {{ current_game_number }}세트 진행 중
+
+                    {% else %}
+
+                        {{ current_game_number }}세트 시작 대기
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <div
+                class="
+                    room-series-team
+                    room-red
+                "
+            >
+
+                <div class="room-series-team-name">
+                    RED
+                </div>
+
+                <div
+                    id="roomRedScore"
+                    class="room-series-team-score"
+                >
+                    {{ red_score }}
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     팀 밸런스
+============================== -->
+
+<div
+    id="roomBalanceArea"
+
+    {% if not blue_team and not red_team %}
+        style="display:none;"
+    {% endif %}
+>
+
+    <div class="room-section">
+
+        <div class="room-section-header">
+
+            <h2>
+                ⚖️ 팀 밸런스
+            </h2>
+
+            <p>
+                현재 팀의 공개 레이팅 기준 예상 밸런스
+            </p>
+
+        </div>
+
+
+        <div class="room-balance-card">
+
+            <!-- BLUE -->
+
+            <div
+                class="
+                    room-balance-team
+                    room-balance-blue
+                "
+            >
+
+                <div class="room-balance-team-name">
+                    🔵 BLUE
+                </div>
+
+                <div class="room-balance-label">
+                    평균 레이팅
+                </div>
+
+                <div
+                    id="roomBlueAverage"
+                    class="room-balance-rating"
+                >
+
+                    {% if has_complete_rating_data %}
+
+                        {{ blue_avg }}
+
+                    {% else %}
+
+                        -
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="room-balance-label">
+                    예상 승률
+                </div>
+
+                <div
+                    id="roomBlueWinRate"
+                    class="room-balance-winrate"
+                >
+
+                    {% if blue_win_rate is not none %}
+
+                        {{ blue_win_rate }}%
+
+                    {% else %}
+
+                        -
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <!-- CENTER -->
+
+            <div class="room-balance-center">
+
+                <div
+                    id="roomBalanceStatus"
+                    class="
+                        room-balance-status
+                        room-balance-status-{{ balance_code }}
+                    "
+                >
+                    {{ balance_text }}
+                </div>
+
+
+                <div class="room-balance-difference">
+
+                    레이팅 차이
+
+                    <strong id="roomRatingDifference">
+
+                        {% if has_complete_rating_data %}
+
+                            {{ absolute_rating_difference }}
+
+                        {% else %}
+
+                            -
+
+                        {% endif %}
+
+                    </strong>
+
+                </div>
+
+
+                <div class="room-balance-vs">
+                    VS
+                </div>
+
+            </div>
+
+
+            <!-- RED -->
+
+            <div
+                class="
+                    room-balance-team
+                    room-balance-red
+                "
+            >
+
+                <div class="room-balance-team-name">
+                    🔴 RED
+                </div>
+
+                <div class="room-balance-label">
+                    평균 레이팅
+                </div>
+
+                <div
+                    id="roomRedAverage"
+                    class="room-balance-rating"
+                >
+
+                    {% if has_complete_rating_data %}
+
+                        {{ red_avg }}
+
+                    {% else %}
+
+                        -
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="room-balance-label">
+                    예상 승률
+                </div>
+
+                <div
+                    id="roomRedWinRate"
+                    class="room-balance-winrate"
+                >
+
+                    {% if red_win_rate is not none %}
+
+                        {{ red_win_rate }}%
+
+                    {% else %}
+
+                        -
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     현재 팀 구성
+============================== -->
+
+<div
+    id="roomTeamsArea"
+
+    {% if not blue_team and not red_team %}
+        style="display:none;"
+    {% endif %}
+>
+
+    <div class="room-section">
+
+        <div class="room-section-header">
+
+            <h2>
+                ⚔️ 현재 팀 구성
+            </h2>
+
+            <p>
+                현재 배정된 팀과 포지션
+            </p>
+
+        </div>
+
+
+        <div class="room-team-grid">
+
+            <!-- BLUE -->
+
+            <div
+                class="
+                    room-team-card
+                    room-blue-card
+                "
+            >
+
+                <div class="room-team-header">
+
+                    <h2>
+                        🔵 블루팀
+                    </h2>
+
+                    <span id="roomBlueTeamCount">
+                        {{ blue_team | length }}명
+                    </span>
+
+                </div>
+
+
+                <div id="roomBlueTeamList">
+
+                    {% if blue_team %}
+
+                    <div class="room-team-list">
+
+                        {% for member in blue_team %}
+
+                        <div class="room-team-player">
+
+                            <div class="room-team-position">
+
+                                {% if member.position == "TOP" %}
+                                    🛡️ TOP
+                                {% elif member.position == "JUNGLE" %}
+                                    🌲 JUNGLE
+                                {% elif member.position == "MID" %}
+                                    ⚔️ MID
+                                {% elif member.position == "ADC" %}
+                                    🏹 ADC
+                                {% elif member.position == "SUPPORT" %}
+                                    💚 SUPPORT
+                                {% else %}
+                                    🎮 {{ member.position or "미기록" }}
+                                {% endif %}
+
+                            </div>
+
+
+                            <div class="room-team-player-info">
+
+                                {% if member.player_id %}
+
+                                <a
+                                    href="/player/{{ member.player_id }}"
+                                    class="room-team-player-name-link"
+                                >
+                                    {{
+                                        member.discord_nickname
+                                        or "알 수 없는 플레이어"
+                                    }}
+                                </a>
+
+                                {% else %}
+
+                                <div class="room-team-player-name">
+                                    {{
+                                        member.discord_nickname
+                                        or "알 수 없는 플레이어"
+                                    }}
+                                </div>
+
+                                {% endif %}
+
+
+                                <div class="room-team-player-sub">
+
+                                    {{ member.tier or "티어 없음" }}
+
+                                    {% if member.riot_name %}
+                                        · {{ member.riot_name }}
+                                    {% endif %}
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="room-team-player-rating">
+
+                                {% if member.rating is not none %}
+                                    ⭐ {{ member.rating }}
+                                {% else %}
+                                    -
+                                {% endif %}
+
+                            </div>
+
+                        </div>
+
+                        {% endfor %}
+
+                    </div>
+
+                    {% else %}
+
+                    <div class="room-empty-team">
+                        블루팀 선수가 없습니다.
+                    </div>
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <!-- RED -->
+
+            <div
+                class="
+                    room-team-card
+                    room-red-card
+                "
+            >
+
+                <div class="room-team-header">
+
+                    <h2>
+                        🔴 레드팀
+                    </h2>
+
+                    <span id="roomRedTeamCount">
+                        {{ red_team | length }}명
+                    </span>
+
+                </div>
+
+
+                <div id="roomRedTeamList">
+
+                    {% if red_team %}
+
+                    <div class="room-team-list">
+
+                        {% for member in red_team %}
+
+                        <div class="room-team-player">
+
+                            <div class="room-team-position">
+
+                                {% if member.position == "TOP" %}
+                                    🛡️ TOP
+                                {% elif member.position == "JUNGLE" %}
+                                    🌲 JUNGLE
+                                {% elif member.position == "MID" %}
+                                    ⚔️ MID
+                                {% elif member.position == "ADC" %}
+                                    🏹 ADC
+                                {% elif member.position == "SUPPORT" %}
+                                    💚 SUPPORT
+                                {% else %}
+                                    🎮 {{ member.position or "미기록" }}
+                                {% endif %}
+
+                            </div>
+
+
+                            <div class="room-team-player-info">
+
+                                {% if member.player_id %}
+
+                                <a
+                                    href="/player/{{ member.player_id }}"
+                                    class="room-team-player-name-link"
+                                >
+                                    {{
+                                        member.discord_nickname
+                                        or "알 수 없는 플레이어"
+                                    }}
+                                </a>
+
+                                {% else %}
+
+                                <div class="room-team-player-name">
+                                    {{
+                                        member.discord_nickname
+                                        or "알 수 없는 플레이어"
+                                    }}
+                                </div>
+
+                                {% endif %}
+
+
+                                <div class="room-team-player-sub">
+
+                                    {{ member.tier or "티어 없음" }}
+
+                                    {% if member.riot_name %}
+                                        · {{ member.riot_name }}
+                                    {% endif %}
+
+                                </div>
+
+                            </div>
+
+
+                            <div class="room-team-player-rating">
+
+                                {% if member.rating is not none %}
+                                    ⭐ {{ member.rating }}
+                                {% else %}
+                                    -
+                                {% endif %}
+
+                            </div>
+
+                        </div>
+
+                        {% endfor %}
+
+                    </div>
+
+                    {% else %}
+
+                    <div class="room-empty-team">
+                        레드팀 선수가 없습니다.
+                    </div>
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     참가자 명단
+============================== -->
+
+<div class="room-section">
+
+    <div class="room-section-header">
+
+        <h2>
+            👥 참가자 명단
+        </h2>
+
+        <p>
+            현재 방에 참가 중인 전체 플레이어
+        </p>
+
+    </div>
+
+
+    <div id="roomPlayersArea">
+
+        {% if players %}
+
+        <div class="room-player-list">
+
+            {% for player in players %}
+
+            <div class="room-player-row">
+
+                <div class="room-player-number">
+                    {{ loop.index }}
+                </div>
+
+
+                <div class="room-player-main">
+
+                    {% if player.player_id %}
+
+                    <a
+                        href="/player/{{ player.player_id }}"
+                        class="room-player-name-link"
+                    >
+                        {{
+                            player.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+                    </a>
+
+                    {% else %}
+
+                    <div class="room-player-name">
+                        {{
+                            player.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+                    </div>
+
+                    {% endif %}
+
+
+                    <div class="room-player-sub">
+
+                        {% if player.riot_name %}
+
+                            {{ player.riot_name }}
+
+                        {% else %}
+
+                            Discord ID · {{ player.discord_id }}
+
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <div class="room-player-tier">
+                    {{ player.tier or "-" }}
+                </div>
+
+
+                <div class="room-player-position">
+
+                    {% if player.main_position %}
+
+                        {{ player.main_position }}
+
+                        {% if player.sub_position %}
+                            · {{ player.sub_position }}
+                        {% endif %}
+
+                    {% else %}
+
+                        -
+
+                    {% endif %}
+
+                </div>
+
+
+                <div class="room-player-rating">
+
+                    {% if player.rating is not none %}
+                        ⭐ {{ player.rating }}
+                    {% else %}
+                        -
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+            {% endfor %}
+
+        </div>
+
+
+        {% else %}
+
+        <div class="empty-match-card">
+            현재 참가자가 없습니다.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+</div>
+
+
+<!-- ==============================
+     하단 메뉴
+============================== -->
+
+<div class="room-bottom-actions">
+
+    <a
+        href="/"
+        class="room-back-button"
+    >
+        ← 홈으로
+    </a>
+
+    <a
+        href="/history"
+        class="room-history-button"
+    >
+        📜 전체 전적
+    </a>
+
+</div>
+
+
+<!-- =====================================================
+     방 상세 실시간 자동 갱신
+===================================================== -->
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        /* =====================================================
+           기본 설정
+        ===================================================== */
+
+        const ROOM_ID =
+            {{ room_id | tojson }};
+
+
+        let isRefreshing =
+            false;
+
+        let roomDeleted =
+            false;
+
+        let pageClosed =
+            false;
+
+
+        /* =====================================================
+           DOM
+        ===================================================== */
+
+        const roomNameElement =
+            document.getElementById(
+                "roomDetailName"
+            );
+
+        const roomIdElement =
+            document.getElementById(
+                "roomDetailId"
+            );
+
+        const roomStatusElement =
+            document.getElementById(
+                "roomDetailStatus"
+            );
+
+        const roomStatusTextElement =
+            document.getElementById(
+                "roomStatusText"
+            );
+
+        const playerCountElement =
+            document.getElementById(
+                "roomPlayerCount"
+            );
+
+        const progressCountElement =
+            document.getElementById(
+                "roomProgressCount"
+            );
+
+        const progressFillElement =
+            document.getElementById(
+                "roomProgressFill"
+            );
+
+        const currentGameElement =
+            document.getElementById(
+                "roomCurrentGame"
+            );
+
+        const seriesArea =
+            document.getElementById(
+                "roomSeriesArea"
+            );
+
+        const blueScoreElement =
+            document.getElementById(
+                "roomBlueScore"
+            );
+
+        const redScoreElement =
+            document.getElementById(
+                "roomRedScore"
+            );
+
+        const seriesGameElement =
+            document.getElementById(
+                "roomSeriesGame"
+            );
+
+        const balanceArea =
+            document.getElementById(
+                "roomBalanceArea"
+            );
+
+        const blueAverageElement =
+            document.getElementById(
+                "roomBlueAverage"
+            );
+
+        const redAverageElement =
+            document.getElementById(
+                "roomRedAverage"
+            );
+
+        const blueWinRateElement =
+            document.getElementById(
+                "roomBlueWinRate"
+            );
+
+        const redWinRateElement =
+            document.getElementById(
+                "roomRedWinRate"
+            );
+
+        const balanceStatusElement =
+            document.getElementById(
+                "roomBalanceStatus"
+            );
+
+        const ratingDifferenceElement =
+            document.getElementById(
+                "roomRatingDifference"
+            );
+
+        const teamsArea =
+            document.getElementById(
+                "roomTeamsArea"
+            );
+
+        const blueTeamCountElement =
+            document.getElementById(
+                "roomBlueTeamCount"
+            );
+
+        const redTeamCountElement =
+            document.getElementById(
+                "roomRedTeamCount"
+            );
+
+        const blueTeamListElement =
+            document.getElementById(
+                "roomBlueTeamList"
+            );
+
+        const redTeamListElement =
+            document.getElementById(
+                "roomRedTeamList"
+            );
+
+        const playersArea =
+            document.getElementById(
+                "roomPlayersArea"
+            );
+
+        const liveContent =
+            document.getElementById(
+                "roomLiveContent"
+            );
+
+        const deletedMessage =
+            document.getElementById(
+                "roomDeletedMessage"
+            );
+
+
+        /* =====================================================
+           공통 유틸
+        ===================================================== */
+
+        function escapeHtml(
+            value
+        ){
+
+            if(
+                value === null
+                ||
+                value === undefined
+            ){
+                return "";
+            }
+
+
+            return String(
+                value
+            )
+            .replaceAll(
+                "&",
+                "&amp;"
+            )
+            .replaceAll(
+                "<",
+                "&lt;"
+            )
+            .replaceAll(
+                ">",
+                "&gt;"
+            )
+            .replaceAll(
+                '"',
+                "&quot;"
+            )
+            .replaceAll(
+                "'",
+                "&#039;"
+            );
+
+        }
+
+
+        function safeNumber(
+            value
+        ){
+
+            const result =
+                Number(
+                    value
+                );
+
+
+            if(
+                !Number.isFinite(
+                    result
+                )
+            ){
+                return 0;
+            }
+
+
+            return result;
+
+        }
+
+
+        function safeStatusCode(
+            value
+        ){
+
+            const status =
+                String(
+                    value
+                    || ""
+                ).toLowerCase();
+
+
+            if(
+                status === "playing"
+                ||
+                status === "ready"
+                ||
+                status === "recruiting"
+                ||
+                status === "waiting"
+            ){
+                return status;
+            }
+
+
+            return "waiting";
+
+        }
+
+
+        /* =====================================================
+           상태 표시
+        ===================================================== */
+
+        function getStatusBadge(
+            statusCode
+        ){
+
+            if(
+                statusCode === "playing"
+            ){
+                return "🔴 경기 진행 중";
+            }
+
+
+            if(
+                statusCode === "ready"
+            ){
+                return "🟡 팀 구성 완료";
+            }
+
+
+            if(
+                statusCode === "recruiting"
+            ){
+                return "🟢 모집 중";
+            }
+
+
+            return "⚫ 대기 중";
+
+        }
+
+
+        /* =====================================================
+           포지션 표시
+        ===================================================== */
+
+        function getPositionText(
+            position
+        ){
+
+            const value =
+                String(
+                    position
+                    || ""
+                ).toUpperCase();
+
+
+            if(
+                value === "TOP"
+            ){
+                return "🛡️ TOP";
+            }
+
+
+            if(
+                value === "JUNGLE"
+            ){
+                return "🌲 JUNGLE";
+            }
+
+
+            if(
+                value === "MID"
+            ){
+                return "⚔️ MID";
+            }
+
+
+            if(
+                value === "ADC"
+            ){
+                return "🏹 ADC";
+            }
+
+
+            if(
+                value === "SUPPORT"
+            ){
+                return "💚 SUPPORT";
+            }
+
+
+            if(
+                value
+            ){
+                return "🎮 " + escapeHtml(
+                    value
+                );
+            }
+
+
+            return "🎮 미기록";
+
+        }
+
+
+        /* =====================================================
+           선수 이름
+        ===================================================== */
+
+        function createPlayerNameHtml(
+            player,
+            linkClass,
+            fallbackClass
+        ){
+
+            const nickname =
+                escapeHtml(
+                    player.discord_nickname
+                    || "알 수 없는 플레이어"
+                );
+
+
+            const playerId =
+                safeNumber(
+                    player.player_id
+                );
+
+
+            if(
+                playerId > 0
+            ){
+
+                return `
+                    <a
+                        href="/player/${playerId}"
+                        class="${linkClass}"
+                    >
+                        ${nickname}
+                    </a>
+                `;
+
+            }
+
+
+            return `
+                <div class="${fallbackClass}">
+                    ${nickname}
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           팀 선수 HTML
+        ===================================================== */
+
+        function createTeamPlayerHtml(
+            member
+        ){
+
+            const tier =
+                escapeHtml(
+                    member.tier
+                    || "티어 없음"
+                );
+
+
+            const riotName =
+                escapeHtml(
+                    member.riot_name
+                    || ""
+                );
+
+
+            let subText =
+                tier;
+
+
+            if(
+                riotName
+            ){
+
+                subText +=
+                    " · "
+                    + riotName;
+
+            }
+
+
+            let ratingText =
+                "-";
+
+
+            if(
+                member.rating !== null
+                &&
+                member.rating !== undefined
+            ){
+
+                ratingText =
+                    "⭐ "
+                    + safeNumber(
+                        member.rating
+                    );
+
+            }
+
+
+            return `
+                <div class="room-team-player">
+
+                    <div class="room-team-position">
+                        ${getPositionText(
+                            member.position
+                        )}
+                    </div>
+
+
+                    <div class="room-team-player-info">
+
+                        ${createPlayerNameHtml(
+                            member,
+                            "room-team-player-name-link",
+                            "room-team-player-name"
+                        )}
+
+                        <div class="room-team-player-sub">
+                            ${subText}
+                        </div>
+
+                    </div>
+
+
+                    <div class="room-team-player-rating">
+                        ${ratingText}
+                    </div>
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           팀 목록 렌더링
+        ===================================================== */
+
+        function renderTeam(
+            team,
+            container,
+            countElement,
+            emptyText
+        ){
+
+            const members =
+                Array.isArray(
+                    team
+                )
+                ? team
+                : [];
+
+
+            if(
+                countElement
+            ){
+
+                countElement.textContent =
+                    members.length
+                    + "명";
+
+            }
+
+
+            if(
+                !container
+            ){
+                return;
+            }
+
+
+            if(
+                members.length === 0
+            ){
+
+                container.innerHTML =
+                    `
+                    <div class="room-empty-team">
+                        ${escapeHtml(
+                            emptyText
+                        )}
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            container.innerHTML =
+                `
+                <div class="room-team-list">
+
+                    ${
+                        members
+                            .map(
+                                createTeamPlayerHtml
+                            )
+                            .join(
+                                ""
+                            )
+                    }
+
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           참가자 HTML
+        ===================================================== */
+
+        function createPlayerRowHtml(
+            player,
+            index
+        ){
+
+            const discordId =
+                escapeHtml(
+                    player.discord_id
+                    || ""
+                );
+
+
+            const riotName =
+                escapeHtml(
+                    player.riot_name
+                    || ""
+                );
+
+
+            const tier =
+                escapeHtml(
+                    player.tier
+                    || "-"
+                );
+
+
+            const mainPosition =
+                escapeHtml(
+                    player.main_position
+                    || ""
+                );
+
+
+            const subPosition =
+                escapeHtml(
+                    player.sub_position
+                    || ""
+                );
+
+
+            let subText =
+                riotName;
+
+
+            if(
+                !subText
+            ){
+
+                subText =
+                    "Discord ID · "
+                    + discordId;
+
+            }
+
+
+            let positionText =
+                "-";
+
+
+            if(
+                mainPosition
+            ){
+
+                positionText =
+                    mainPosition;
+
+
+                if(
+                    subPosition
+                ){
+
+                    positionText +=
+                        " · "
+                        + subPosition;
+
+                }
+
+            }
+
+
+            let ratingText =
+                "-";
+
+
+            if(
+                player.rating !== null
+                &&
+                player.rating !== undefined
+            ){
+
+                ratingText =
+                    "⭐ "
+                    + safeNumber(
+                        player.rating
+                    );
+
+            }
+
+
+            return `
+                <div class="room-player-row">
+
+                    <div class="room-player-number">
+                        ${index + 1}
+                    </div>
+
+
+                    <div class="room-player-main">
+
+                        ${createPlayerNameHtml(
+                            player,
+                            "room-player-name-link",
+                            "room-player-name"
+                        )}
+
+                        <div class="room-player-sub">
+                            ${subText}
+                        </div>
+
+                    </div>
+
+
+                    <div class="room-player-tier">
+                        ${tier}
+                    </div>
+
+
+                    <div class="room-player-position">
+                        ${positionText}
+                    </div>
+
+
+                    <div class="room-player-rating">
+                        ${ratingText}
+                    </div>
+
+                </div>
+            `;
+
+        }
+
+
+        /* =====================================================
+           참가자 명단 렌더링
+        ===================================================== */
+
+        function renderPlayers(
+            players
+        ){
+
+            if(
+                !playersArea
+            ){
+                return;
+            }
+
+
+            const list =
+                Array.isArray(
+                    players
+                )
+                ? players
+                : [];
+
+
+            if(
+                list.length === 0
+            ){
+
+                playersArea.innerHTML =
+                    `
+                    <div class="empty-match-card">
+                        현재 참가자가 없습니다.
+                    </div>
+                    `;
+
+                return;
+
+            }
+
+
+            playersArea.innerHTML =
+                `
+                <div class="room-player-list">
+
+                    ${
+                        list
+                            .map(
+                                createPlayerRowHtml
+                            )
+                            .join(
+                                ""
+                            )
+                    }
+
+                </div>
+                `;
+
+        }
+
+
+        /* =====================================================
+           전체 방 데이터 적용
+        ===================================================== */
+
+        function updateRoom(
+            room
+        ){
+
+            const statusCode =
+                safeStatusCode(
+                    room.status_code
+                );
+
+
+            const playerCount =
+                Math.max(
+                    0,
+                    safeNumber(
+                        room.player_count
+                    )
+                );
+
+
+            const currentGameNumber =
+                Math.max(
+                    1,
+                    safeNumber(
+                        room.current_game_number
+                        || 1
+                    )
+                );
+
+
+            const blueTeam =
+                Array.isArray(
+                    room.blue_team
+                )
+                ? room.blue_team
+                : [];
+
+
+            const redTeam =
+                Array.isArray(
+                    room.red_team
+                )
+                ? room.red_team
+                : [];
+
+
+            const hasTeams =
+                Boolean(
+                    room.has_teams
+                    ||
+                    blueTeam.length
+                    ||
+                    redTeam.length
+                );
+
+
+            /* ==============================
+               제목
+            ============================== */
+
+            if(
+                roomNameElement
+            ){
+
+                roomNameElement.textContent =
+                    "🎮 "
+                    + (
+                        room.room_name
+                        || (
+                            "내전 "
+                            + ROOM_ID
+                        )
+                    );
+
+            }
+
+
+            if(
+                roomIdElement
+            ){
+
+                roomIdElement.textContent =
+                    "ROOM #"
+                    + (
+                        room.room_id
+                        || ROOM_ID
+                    );
+
+            }
+
+
+            /* ==============================
+               상태
+            ============================== */
+
+            if(
+                roomStatusElement
+            ){
+
+                roomStatusElement.textContent =
+                    getStatusBadge(
+                        statusCode
+                    );
+
+
+                roomStatusElement.className =
+                    "room-detail-status "
+                    + "room-detail-status-"
+                    + statusCode;
+
+            }
+
+
+            if(
+                roomStatusTextElement
+            ){
+
+                roomStatusTextElement.textContent =
+                    room.status
+                    || getStatusBadge(
+                        statusCode
+                    ).replace(
+                        /^[^\s]+\s/,
+                        ""
+                    );
+
+            }
+
+
+            /* ==============================
+               참가자
+            ============================== */
+
+            if(
+                playerCountElement
+            ){
+
+                playerCountElement.textContent =
+                    playerCount
+                    + " / 10";
+
+            }
+
+
+            if(
+                progressCountElement
+            ){
+
+                progressCountElement.textContent =
+                    playerCount
+                    + " / 10명";
+
+            }
+
+
+            if(
+                progressFillElement
+            ){
+
+                const progress =
+                    Math.max(
+                        0,
+                        Math.min(
+                            100,
+                            playerCount * 10
+                        )
+                    );
+
+
+                progressFillElement.style.width =
+                    progress
+                    + "%";
+
+            }
+
+
+            /* ==============================
+               현재 세트
+            ============================== */
+
+            if(
+                currentGameElement
+            ){
+
+                if(
+                    statusCode === "playing"
+                ){
+
+                    currentGameElement.textContent =
+                        currentGameNumber
+                        + "세트";
+
+                }
+
+                else if(
+                    statusCode === "ready"
+                ){
+
+                    currentGameElement.textContent =
+                        currentGameNumber
+                        + "세트 시작 대기";
+
+                }
+
+                else{
+
+                    currentGameElement.textContent =
+                        "-";
+
+                }
+
+            }
+
+
+            /* ==============================
+               BO3
+            ============================== */
+
+            if(
+                seriesArea
+            ){
+
+                seriesArea.style.display =
+                    (
+                        statusCode === "playing"
+                        ||
+                        statusCode === "ready"
+                    )
+                    ? ""
+                    : "none";
+
+            }
+
+
+            if(
+                blueScoreElement
+            ){
+
+                blueScoreElement.textContent =
+                    safeNumber(
+                        room.blue_score
+                    );
+
+            }
+
+
+            if(
+                redScoreElement
+            ){
+
+                redScoreElement.textContent =
+                    safeNumber(
+                        room.red_score
+                    );
+
+            }
+
+
+            if(
+                seriesGameElement
+            ){
+
+                if(
+                    statusCode === "playing"
+                ){
+
+                    seriesGameElement.textContent =
+                        currentGameNumber
+                        + "세트 진행 중";
+
+                }
+
+                else{
+
+                    seriesGameElement.textContent =
+                        currentGameNumber
+                        + "세트 시작 대기";
+
+                }
+
+            }
+
+
+            /* ==============================
+               팀 영역
+            ============================== */
+
+            if(
+                teamsArea
+            ){
+
+                teamsArea.style.display =
+                    hasTeams
+                    ? ""
+                    : "none";
+
+            }
+
+
+            renderTeam(
+                blueTeam,
+                blueTeamListElement,
+                blueTeamCountElement,
+                "블루팀 선수가 없습니다."
+            );
+
+
+            renderTeam(
+                redTeam,
+                redTeamListElement,
+                redTeamCountElement,
+                "레드팀 선수가 없습니다."
+            );
+
+
+            /* ==============================
+               팀 밸런스
+            ============================== */
+
+            if(
+                balanceArea
+            ){
+
+                balanceArea.style.display =
+                    hasTeams
+                    ? ""
+                    : "none";
+
+            }
+
+
+            const completeRating =
+                Boolean(
+                    room.has_complete_rating_data
+                );
+
+
+            if(
+                blueAverageElement
+            ){
+
+                blueAverageElement.textContent =
+                    completeRating
+                    ? safeNumber(
+                        room.blue_avg
+                    )
+                    : "-";
+
+            }
+
+
+            if(
+                redAverageElement
+            ){
+
+                redAverageElement.textContent =
+                    completeRating
+                    ? safeNumber(
+                        room.red_avg
+                    )
+                    : "-";
+
+            }
+
+
+            if(
+                blueWinRateElement
+            ){
+
+                blueWinRateElement.textContent =
+                    (
+                        room.blue_win_rate
+                        !== null
+                        &&
+                        room.blue_win_rate
+                        !== undefined
+                    )
+                    ? safeNumber(
+                        room.blue_win_rate
+                    ) + "%"
+                    : "-";
+
+            }
+
+
+            if(
+                redWinRateElement
+            ){
+
+                redWinRateElement.textContent =
+                    (
+                        room.red_win_rate
+                        !== null
+                        &&
+                        room.red_win_rate
+                        !== undefined
+                    )
+                    ? safeNumber(
+                        room.red_win_rate
+                    ) + "%"
+                    : "-";
+
+            }
+
+
+            if(
+                ratingDifferenceElement
+            ){
+
+                ratingDifferenceElement.textContent =
+                    completeRating
+                    ? safeNumber(
+                        room.absolute_rating_difference
+                    )
+                    : "-";
+
+            }
+
+
+            if(
+                balanceStatusElement
+            ){
+
+                const balanceCode =
+                    String(
+                        room.balance_code
+                        || "unknown"
+                    );
+
+
+                balanceStatusElement.textContent =
+                    room.balance_text
+                    || "레이팅 정보 부족";
+
+
+                balanceStatusElement.className =
+                    "room-balance-status "
+                    + "room-balance-status-"
+                    + balanceCode;
+
+            }
+
+
+            /* ==============================
+               참가자 목록
+            ============================== */
+
+            renderPlayers(
+                room.players
+                || []
+            );
+
+        }
+
+
+        /* =====================================================
+           방 삭제 처리
+        ===================================================== */
+
+        function handleDeletedRoom(){
+
+            roomDeleted =
+                true;
+
+
+            if(
+                liveContent
+            ){
+
+                liveContent.style.display =
+                    "none";
+
+            }
+
+
+            if(
+                deletedMessage
+            ){
+
+                deletedMessage.style.display =
+                    "";
+
+            }
+
+
+            if(
+                roomStatusElement
+            ){
+
+                roomStatusElement.textContent =
+                    "⚫ 종료됨";
+
+
+                roomStatusElement.className =
+                    "room-detail-status "
+                    + "room-detail-status-waiting";
+
+            }
+
+        }
+
+
+        /* =====================================================
+           API 호출
+        ===================================================== */
+
+        async function refreshRoom(){
+
+            if(
+                isRefreshing
+                ||
+                roomDeleted
+                ||
+                pageClosed
+            ){
+                return;
+            }
+
+
+            isRefreshing =
+                true;
+
+
+            try{
+
+                const response =
+                    await fetch(
+                        "/api/room/"
+                        + encodeURIComponent(
+                            ROOM_ID
+                        ),
+                        {
+                            method:
+                                "GET",
+
+                            cache:
+                                "no-store",
+
+                            headers:{
+                                "Accept":
+                                    "application/json"
+                            }
+                        }
+                    );
+
+
+                if(
+                    response.status === 404
+                ){
+
+                    handleDeletedRoom();
+
+                    return;
+
+                }
+
+
+                if(
+                    !response.ok
+                ){
+
+                    console.warn(
+                        "방 상세 API 오류:",
+                        response.status
+                    );
+
+                    return;
+
+                }
+
+
+                const data =
+                    await response.json();
+
+
+                if(
+                    !data
+                    ||
+                    !data.success
+                    ||
+                    !data.room
+                ){
+
+                    console.warn(
+                        "방 상세 API 응답 형식이 올바르지 않습니다."
+                    );
+
+                    return;
+
+                }
+
+
+                updateRoom(
+                    data.room
+                );
+
+            }
+
+            catch(
+                error
+            ){
+
+                console.warn(
+                    "방 상세 자동 갱신 실패:",
+                    error
+                );
+
+            }
+
+            finally{
+
+                isRefreshing =
+                    false;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           최초 즉시 갱신
+        ===================================================== */
+
+        refreshRoom();
+
+
+        /* =====================================================
+           5초마다 갱신
+        ===================================================== */
+
+        const roomRefreshTimer =
+            setInterval(
+                function(){
+
+                    if(
+                        document.visibilityState
+                        === "visible"
+                        &&
+                        !roomDeleted
+                    ){
+
+                        refreshRoom();
+
+                    }
+
+                },
+                5000
+            );
+
+
+        /* =====================================================
+           탭 복귀
+        ===================================================== */
+
+        document.addEventListener(
+            "visibilitychange",
+            function(){
+
+                if(
+                    document.visibilityState
+                    === "visible"
+                    &&
+                    !roomDeleted
+                ){
+
+                    refreshRoom();
+
+                }
+
+            }
+        );
+
+
+        /* =====================================================
+           페이지 종료
+        ===================================================== */
+
+        window.addEventListener(
+            "beforeunload",
+            function(){
+
+                pageClosed =
+                    true;
+
+
+                clearInterval(
+                    roomRefreshTimer
+                );
+
+            }
+        );
+
+    }
+);
+
+</script>
+
+{% endblock %}

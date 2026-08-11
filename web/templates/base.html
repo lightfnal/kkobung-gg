@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        {% block title %}
+            꼬붕.gg
+        {% endblock %}
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/static/css/style.css"
+    >
+
+</head>
+
+
+<body>
+
+
+<!-- ==============================
+     상단 네비게이션
+============================== -->
+
+<nav class="main-nav">
+
+    <a
+        href="/"
+        class="logo"
+    >
+        🏆 꼬붕.gg
+    </a>
+
+
+    <div class="nav-menu">
+
+        <a
+            href="/"
+            class="
+                nav-link
+                {% if request.url.path == '/' %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            홈
+        </a>
+
+
+        <a
+            href="/ranking"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/ranking') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            랭킹
+        </a>
+
+
+        <a
+            href="/history"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/history')
+                   or request.url.path.startswith('/match') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            전적
+        </a>
+
+
+        <a
+            href="/season"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/season') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            시즌
+        </a>
+
+
+        <a
+            href="/compare"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/compare') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            비교
+        </a>
+
+
+        <a
+            href="/analysis"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/analysis') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            분석
+        </a>
+
+
+        <a
+            href="/stats"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/stats') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            통계
+        </a>
+
+    </div>
+
+
+    <!-- ==============================
+         전역 검색
+    ============================== -->
+
+    <form
+        action="/search"
+        method="get"
+        class="nav-search"
+    >
+
+        <input
+            type="text"
+            name="q"
+            placeholder="플레이어 검색"
+            autocomplete="off"
+            aria-label="플레이어 검색"
+        >
+
+        <button
+            type="submit"
+            aria-label="검색"
+        >
+            🔍
+        </button>
+
+    </form>
+
+</nav>
+
+
+<!-- ==============================
+     본문
+============================== -->
+
+<main class="container">
+
+    {% block content %}
+
+    {% endblock %}
+
+</main>
+
+
+<!-- ==============================
+     Footer
+============================== -->
+
+<footer class="site-footer">
+
+    <div class="site-footer-inner">
+
+        <div>
+
+            <div class="site-footer-logo">
+                🏆 꼬붕.gg
+            </div>
+
+            <div class="site-footer-description">
+                디스코드 롤 내전 랭킹 · 전적 · 시즌 통계
+            </div>
+
+        </div>
+
+
+        <div class="site-footer-menu">
+
+            <a href="/">
+                홈
+            </a>
+
+            <a href="/ranking">
+                랭킹
+            </a>
+
+            <a href="/history">
+                전적
+            </a>
+
+            <a href="/stats">
+                통계
+            </a>
+
+        </div>
+
+    </div>
+
+
+    <div class="site-footer-bottom">
+        꼬붕.gg · LoL In-house Community Statistics
+    </div>
+
+</footer>
+
+
+</body>
+
+</html>

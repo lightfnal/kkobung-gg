@@ -1,0 +1,1967 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- =====================================================
+     전체 시즌 영역
+===================================================== -->
+
+<div id="seasonPageArea">
+
+{% if active_season %}
+
+<!-- ==============================
+     시즌 상단
+============================== -->
+
+<div class="season-header">
+
+    <div class="season-header-main">
+
+        <div class="season-trophy">
+            🏆
+        </div>
+
+        <div>
+
+            <h1 id="seasonName">
+                {{ active_season.season_name }}
+            </h1>
+
+            <p id="seasonStartedAt">
+                시작일 · {{ active_season.started_at }}
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <div class="season-status">
+        ● 진행 중
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     시즌 기본 요약
+============================== -->
+
+<div class="season-summary-grid">
+
+    <!-- 참가자 -->
+
+    <div class="season-summary-card">
+
+        <div class="season-summary-icon">
+            👥
+        </div>
+
+        <div class="season-summary-label">
+            참가 플레이어
+        </div>
+
+        <div
+            id="seasonPlayerCount"
+            class="season-summary-value"
+        >
+            {{ season_player_count }}명
+        </div>
+
+    </div>
+
+
+    <!-- 경기 -->
+
+    <div class="season-summary-card">
+
+        <div class="season-summary-icon">
+            🎮
+        </div>
+
+        <div class="season-summary-label">
+            시즌 경기
+        </div>
+
+        <div
+            id="seasonMatchCount"
+            class="season-summary-value"
+        >
+            {{ season_match_count }}경기
+        </div>
+
+    </div>
+
+
+    <!-- MVP -->
+
+    <div
+        id="seasonMvpCard"
+        class="season-summary-card"
+    >
+
+        <div class="season-summary-icon">
+            ⭐
+        </div>
+
+        <div class="season-summary-label">
+            시즌 MVP
+        </div>
+
+
+        <div id="seasonMvpContent">
+
+            {% if season_mvp %}
+
+                {% if season_mvp.player_id %}
+
+                    <a
+                        href="/player/{{ season_mvp.player_id }}"
+                        class="season-highlight-player"
+                    >
+                        {{
+                            season_mvp.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+                    </a>
+
+                {% else %}
+
+                    <div class="season-highlight-player">
+                        알 수 없는 플레이어
+                    </div>
+
+                {% endif %}
+
+
+                <div class="season-summary-sub">
+                    MVP {{ season_mvp.mvp }}회
+                </div>
+
+            {% else %}
+
+                <div class="season-summary-value">
+                    -
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <!-- 최고 연승 -->
+
+    <div class="season-summary-card">
+
+        <div class="season-summary-icon">
+            🔥
+        </div>
+
+        <div class="season-summary-label">
+            최고 연승
+        </div>
+
+
+        <div id="seasonBestStreakContent">
+
+            {% if best_win_streak_player %}
+
+                {% if best_win_streak_player.player_id %}
+
+                    <a
+                        href="/player/{{ best_win_streak_player.player_id }}"
+                        class="season-highlight-player"
+                    >
+                        {{
+                            best_win_streak_player.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+                    </a>
+
+                {% else %}
+
+                    <div class="season-highlight-player">
+                        알 수 없는 플레이어
+                    </div>
+
+                {% endif %}
+
+
+                <div class="season-summary-sub">
+                    {{
+                        best_win_streak_player.best_win_streak
+                    }}연승
+                </div>
+
+            {% else %}
+
+                <div class="season-summary-value">
+                    -
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     시즌 추가 기록
+============================== -->
+
+<div class="season-summary-grid">
+
+    <!-- 최고 승률 -->
+
+    <div class="season-summary-card">
+
+        <div class="season-summary-icon">
+            🎯
+        </div>
+
+        <div class="season-summary-label">
+            최고 승률
+        </div>
+
+
+        <div id="seasonBestWinrateContent">
+
+            {% if best_winrate_player %}
+
+                {% if best_winrate_player.player_id %}
+
+                    <a
+                        href="/player/{{ best_winrate_player.player_id }}"
+                        class="season-highlight-player"
+                    >
+                        {{
+                            best_winrate_player.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+                    </a>
+
+                {% else %}
+
+                    <div class="season-highlight-player">
+                        알 수 없는 플레이어
+                    </div>
+
+                {% endif %}
+
+
+                <div class="season-summary-sub">
+
+                    {{ best_winrate_player.win_rate }}%
+
+                    ·
+
+                    {{ best_winrate_player.games }}경기
+
+                </div>
+
+            {% else %}
+
+                <div class="season-summary-value">
+                    -
+                </div>
+
+                <div class="season-summary-sub">
+                    최소 3경기
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <!-- 최다 참가 -->
+
+    <div class="season-summary-card">
+
+        <div class="season-summary-icon">
+            🔥
+        </div>
+
+        <div class="season-summary-label">
+            최다 참가
+        </div>
+
+
+        <div id="seasonMostGamesContent">
+
+            {% if most_games_player %}
+
+                {% if most_games_player.player_id %}
+
+                    <a
+                        href="/player/{{ most_games_player.player_id }}"
+                        class="season-highlight-player"
+                    >
+                        {{
+                            most_games_player.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+                    </a>
+
+                {% else %}
+
+                    <div class="season-highlight-player">
+                        알 수 없는 플레이어
+                    </div>
+
+                {% endif %}
+
+
+                <div class="season-summary-sub">
+                    {{ most_games_player.games }}경기
+                </div>
+
+            {% else %}
+
+                <div class="season-summary-value">
+                    -
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ==============================
+     시즌 랭킹
+============================== -->
+
+<div class="season-ranking-header">
+
+    <div>
+
+        <h2>
+            👑 시즌 랭킹
+        </h2>
+
+        <p>
+            현재 시즌 레이팅 기준 순위
+        </p>
+
+    </div>
+
+</div>
+
+
+<div
+    id="seasonRankingArea"
+>
+
+    {% if season_players %}
+
+    <div class="season-ranking-table">
+
+        <div
+            class="
+                season-ranking-row
+                season-ranking-head
+            "
+        >
+
+            <div>
+                순위
+            </div>
+
+            <div>
+                플레이어
+            </div>
+
+            <div>
+                티어
+            </div>
+
+            <div>
+                레이팅
+            </div>
+
+            <div>
+                전적
+            </div>
+
+            <div>
+                승률
+            </div>
+
+            <div>
+                현재 흐름
+            </div>
+
+            <div>
+                MVP
+            </div>
+
+        </div>
+
+
+        {% for player in season_players %}
+
+        {% if player.player_id %}
+
+        <a
+            href="/player/{{ player.player_id }}"
+            class="season-ranking-link"
+        >
+
+        {% endif %}
+
+
+            <div
+                class="
+                    season-ranking-row
+
+                    {% if loop.index == 1 %}
+                        season-rank-first
+
+                    {% elif loop.index == 2 %}
+                        season-rank-second
+
+                    {% elif loop.index == 3 %}
+                        season-rank-third
+                    {% endif %}
+                "
+            >
+
+                <!-- 순위 -->
+
+                <div class="season-rank-number">
+
+                    {% if loop.index == 1 %}
+
+                        <span class="season-medal">
+                            🥇
+                        </span>
+
+                    {% elif loop.index == 2 %}
+
+                        <span class="season-medal">
+                            🥈
+                        </span>
+
+                    {% elif loop.index == 3 %}
+
+                        <span class="season-medal">
+                            🥉
+                        </span>
+
+                    {% else %}
+
+                        {{ loop.index }}
+
+                    {% endif %}
+
+                </div>
+
+
+                <!-- 플레이어 -->
+
+                <div class="season-player-info">
+
+                    <div class="season-player-name">
+
+                        {{
+                            player.discord_nickname
+                            or "알 수 없는 플레이어"
+                        }}
+
+                    </div>
+
+
+                    <div class="season-player-riot">
+
+                        {% if player.riot_name %}
+
+                            {{ player.riot_name }}
+
+                        {% else %}
+
+                            Riot ID 없음
+
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="season-player-positions">
+
+                        {{ player.main_position or "-" }}
+
+                        {% if player.sub_position %}
+
+                            · {{ player.sub_position }}
+
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+                <!-- 티어 -->
+
+                <div class="season-player-tier">
+
+                    {{ player.tier or "-" }}
+
+                </div>
+
+
+                <!-- 레이팅 -->
+
+                <div class="season-rating">
+
+                    ⭐ {{ player.rating }}
+
+                    <span class="season-lp">
+                        LP
+                    </span>
+
+                </div>
+
+
+                <!-- 전적 -->
+
+                <div class="season-record">
+
+                    <strong>
+                        {{ player.wins }}승
+                    </strong>
+
+                    <span>
+                        {{ player.losses }}패
+                    </span>
+
+                </div>
+
+
+                <!-- 승률 -->
+
+                <div class="season-winrate">
+
+                    <div
+                        class="
+                            season-winrate-number
+
+                            {% if player.win_rate >= 60 %}
+                                season-winrate-high
+
+                            {% elif player.win_rate < 40
+                                and player.games > 0 %}
+                                season-winrate-low
+                            {% endif %}
+                        "
+                    >
+
+                        {{ player.win_rate }}%
+
+                    </div>
+
+
+                    <div class="season-winrate-bar">
+
+                        <div
+                            class="season-winrate-fill"
+                            style="width:{{ player.win_rate }}%;"
+                        ></div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- 현재 흐름 -->
+
+                <div class="season-streak">
+
+                    {% if player.win_streak > 0 %}
+
+                        <span class="season-current-streak">
+                            🔥 {{ player.win_streak }}연승
+                        </span>
+
+                    {% elif player.lose_streak > 0 %}
+
+                        <span class="season-no-streak">
+                            💀 {{ player.lose_streak }}연패
+                        </span>
+
+                    {% else %}
+
+                        <span class="season-no-streak">
+                            -
+                        </span>
+
+                    {% endif %}
+
+                </div>
+
+
+                <!-- MVP -->
+
+                <div class="season-mvp-count">
+
+                    {% if player.mvp > 0 %}
+
+                        ⭐ {{ player.mvp }}
+
+                    {% else %}
+
+                        -
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+        {% if player.player_id %}
+
+        </a>
+
+        {% endif %}
+
+        {% endfor %}
+
+    </div>
+
+
+    {% else %}
+
+    <div class="empty-match-card">
+        아직 현재 시즌에 경기 기록이 없습니다.
+    </div>
+
+    {% endif %}
+
+</div>
+
+
+{% else %}
+
+<!-- ==============================
+     활성 시즌 없음
+============================== -->
+
+<div class="season-empty">
+
+    <div class="season-empty-icon">
+        🏆
+    </div>
+
+    <h1>
+        현재 진행 중인 시즌이 없습니다.
+    </h1>
+
+    <p>
+        새로운 시즌이 시작되면 이곳에서
+        시즌 랭킹을 확인할 수 있습니다.
+    </p>
+
+</div>
+
+{% endif %}
+
+</div>
+
+
+<!-- ==============================
+     API 오류
+============================== -->
+
+<div
+    id="seasonApiError"
+    class="empty-match-card"
+    style="display:none;"
+>
+    시즌 데이터를 불러오지 못했습니다.
+</div>
+
+
+<!-- =====================================================
+     시즌 실시간 자동 갱신
+===================================================== -->
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        const seasonPageArea =
+            document.getElementById(
+                "seasonPageArea"
+            );
+
+
+        const apiError =
+            document.getElementById(
+                "seasonApiError"
+            );
+
+
+        let isRefreshing =
+            false;
+
+
+        let pageClosed =
+            false;
+
+
+        let currentSeasonId =
+            null;
+
+
+        /* ==============================
+           HTML Escape
+        ============================== */
+
+        function escapeHtml(
+            value
+        ){
+
+            if(
+                value === null
+                ||
+                value === undefined
+            ){
+                return "";
+            }
+
+
+            return String(
+                value
+            )
+            .replaceAll(
+                "&",
+                "&amp;"
+            )
+            .replaceAll(
+                "<",
+                "&lt;"
+            )
+            .replaceAll(
+                ">",
+                "&gt;"
+            )
+            .replaceAll(
+                '"',
+                "&quot;"
+            )
+            .replaceAll(
+                "'",
+                "&#039;"
+            );
+
+        }
+
+
+        /* ==============================
+           숫자 안전 처리
+        ============================== */
+
+        function safeNumber(
+            value
+        ){
+
+            const number =
+                Number(
+                    value
+                );
+
+
+            if(
+                !Number.isFinite(
+                    number
+                )
+            ){
+                return 0;
+            }
+
+
+            return number;
+
+        }
+
+
+        /* ==============================
+           강조 플레이어 HTML
+        ============================== */
+
+        function createHighlightPlayer(
+            player,
+            subText
+        ){
+
+            if(
+                !player
+            ){
+
+                return `
+                    <div class="season-summary-value">
+                        -
+                    </div>
+                `;
+
+            }
+
+
+            const playerId =
+                safeNumber(
+                    player.player_id
+                );
+
+
+            const nickname =
+                escapeHtml(
+                    player.discord_nickname
+                    || "알 수 없는 플레이어"
+                );
+
+
+            let nameHtml =
+                `
+                <div class="season-highlight-player">
+                    ${nickname}
+                </div>
+                `;
+
+
+            if(
+                playerId > 0
+            ){
+
+                nameHtml =
+                    `
+                    <a
+                        href="/player/${playerId}"
+                        class="season-highlight-player"
+                    >
+                        ${nickname}
+                    </a>
+                    `;
+
+            }
+
+
+            return `
+                ${nameHtml}
+
+                <div class="season-summary-sub">
+                    ${subText}
+                </div>
+            `;
+
+        }
+
+
+        /* ==============================
+           랭킹 순위
+        ============================== */
+
+        function getRankHtml(
+            rank
+        ){
+
+            if(
+                rank === 1
+            ){
+
+                return `
+                    <span class="season-medal">
+                        🥇
+                    </span>
+                `;
+
+            }
+
+
+            if(
+                rank === 2
+            ){
+
+                return `
+                    <span class="season-medal">
+                        🥈
+                    </span>
+                `;
+
+            }
+
+
+            if(
+                rank === 3
+            ){
+
+                return `
+                    <span class="season-medal">
+                        🥉
+                    </span>
+                `;
+
+            }
+
+
+            return String(
+                rank
+            );
+
+        }
+
+
+        /* ==============================
+           시즌 플레이어 행
+        ============================== */
+
+        function createSeasonPlayerHtml(
+            player
+        ){
+
+            const rank =
+                safeNumber(
+                    player.rank
+                );
+
+
+            const playerId =
+                safeNumber(
+                    player.player_id
+                );
+
+
+            const nickname =
+                escapeHtml(
+                    player.discord_nickname
+                    || "알 수 없는 플레이어"
+                );
+
+
+            const riotName =
+                escapeHtml(
+                    player.riot_name
+                    || "Riot ID 없음"
+                );
+
+
+            const tier =
+                escapeHtml(
+                    player.tier
+                    || "-"
+                );
+
+
+            const mainPosition =
+                escapeHtml(
+                    player.main_position
+                    || "-"
+                );
+
+
+            const subPosition =
+                escapeHtml(
+                    player.sub_position
+                    || ""
+                );
+
+
+            const rating =
+                safeNumber(
+                    player.rating
+                );
+
+
+            const wins =
+                safeNumber(
+                    player.wins
+                );
+
+
+            const losses =
+                safeNumber(
+                    player.losses
+                );
+
+
+            const games =
+                safeNumber(
+                    player.games
+                );
+
+
+            const winRate =
+                safeNumber(
+                    player.win_rate
+                );
+
+
+            const winStreak =
+                safeNumber(
+                    player.win_streak
+                );
+
+
+            const loseStreak =
+                safeNumber(
+                    player.lose_streak
+                );
+
+
+            const mvp =
+                safeNumber(
+                    player.mvp
+                );
+
+
+            let rankClass =
+                "";
+
+
+            if(
+                rank === 1
+            ){
+
+                rankClass =
+                    "season-rank-first";
+
+            }
+
+
+            else if(
+                rank === 2
+            ){
+
+                rankClass =
+                    "season-rank-second";
+
+            }
+
+
+            else if(
+                rank === 3
+            ){
+
+                rankClass =
+                    "season-rank-third";
+
+            }
+
+
+            let positionText =
+                mainPosition;
+
+
+            if(
+                subPosition
+            ){
+
+                positionText +=
+                    " · "
+                    + subPosition;
+
+            }
+
+
+            let winRateClass =
+                "";
+
+
+            if(
+                winRate >= 60
+            ){
+
+                winRateClass =
+                    "season-winrate-high";
+
+            }
+
+
+            else if(
+                winRate < 40
+                &&
+                games > 0
+            ){
+
+                winRateClass =
+                    "season-winrate-low";
+
+            }
+
+
+            let streakHtml =
+                `
+                <span class="season-no-streak">
+                    -
+                </span>
+                `;
+
+
+            if(
+                winStreak > 0
+            ){
+
+                streakHtml =
+                    `
+                    <span class="season-current-streak">
+                        🔥 ${winStreak}연승
+                    </span>
+                    `;
+
+            }
+
+
+            else if(
+                loseStreak > 0
+            ){
+
+                streakHtml =
+                    `
+                    <span class="season-no-streak">
+                        💀 ${loseStreak}연패
+                    </span>
+                    `;
+
+            }
+
+
+            const mvpText =
+                mvp > 0
+                ? "⭐ " + mvp
+                : "-";
+
+
+            const rowHtml =
+                `
+                <div
+                    class="
+                        season-ranking-row
+                        ${rankClass}
+                    "
+                >
+
+                    <div class="season-rank-number">
+
+                        ${getRankHtml(
+                            rank
+                        )}
+
+                    </div>
+
+
+                    <div class="season-player-info">
+
+                        <div class="season-player-name">
+                            ${nickname}
+                        </div>
+
+
+                        <div class="season-player-riot">
+                            ${riotName}
+                        </div>
+
+
+                        <div class="season-player-positions">
+                            ${positionText}
+                        </div>
+
+                    </div>
+
+
+                    <div class="season-player-tier">
+                        ${tier}
+                    </div>
+
+
+                    <div class="season-rating">
+
+                        ⭐ ${rating}
+
+                        <span class="season-lp">
+                            LP
+                        </span>
+
+                    </div>
+
+
+                    <div class="season-record">
+
+                        <strong>
+                            ${wins}승
+                        </strong>
+
+                        <span>
+                            ${losses}패
+                        </span>
+
+                    </div>
+
+
+                    <div class="season-winrate">
+
+                        <div
+                            class="
+                                season-winrate-number
+                                ${winRateClass}
+                            "
+                        >
+                            ${winRate}%
+                        </div>
+
+
+                        <div class="season-winrate-bar">
+
+                            <div
+                                class="season-winrate-fill"
+                                style="
+                                    width:
+                                    ${Math.max(
+                                        0,
+                                        Math.min(
+                                            100,
+                                            winRate
+                                        )
+                                    )}%;
+                                "
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="season-streak">
+                        ${streakHtml}
+                    </div>
+
+
+                    <div class="season-mvp-count">
+                        ${mvpText}
+                    </div>
+
+                </div>
+                `;
+
+
+            if(
+                playerId > 0
+            ){
+
+                return `
+                    <a
+                        href="/player/${playerId}"
+                        class="season-ranking-link"
+                    >
+                        ${rowHtml}
+                    </a>
+                `;
+
+            }
+
+
+            return rowHtml;
+
+        }
+
+
+        /* ==============================
+           시즌 전체 화면 생성
+        ============================== */
+
+        function renderSeason(
+            data
+        ){
+
+            if(
+                !seasonPageArea
+            ){
+                return;
+            }
+
+
+            const activeSeason =
+                data.active_season;
+
+
+            /* ==============================
+               활성 시즌 없음
+            ============================== */
+
+            if(
+                !activeSeason
+            ){
+
+                currentSeasonId =
+                    null;
+
+
+                seasonPageArea.innerHTML =
+                    `
+                    <div class="season-empty">
+
+                        <div class="season-empty-icon">
+                            🏆
+                        </div>
+
+                        <h1>
+                            현재 진행 중인 시즌이 없습니다.
+                        </h1>
+
+                        <p>
+                            새로운 시즌이 시작되면 이곳에서
+                            시즌 랭킹을 확인할 수 있습니다.
+                        </p>
+
+                    </div>
+                    `;
+
+
+                return;
+
+            }
+
+
+            currentSeasonId =
+                safeNumber(
+                    activeSeason.id
+                );
+
+
+            const seasonName =
+                escapeHtml(
+                    activeSeason.season_name
+                    || "-"
+                );
+
+
+            const startedAt =
+                escapeHtml(
+                    activeSeason.started_at
+                    || "-"
+                );
+
+
+            const seasonPlayerCount =
+                safeNumber(
+                    data.summary
+                        ?.season_player_count
+                );
+
+
+            const seasonMatchCount =
+                safeNumber(
+                    data.summary
+                        ?.season_match_count
+                );
+
+
+            /* ==============================
+               MVP
+            ============================== */
+
+            let mvpContent =
+                `
+                <div class="season-summary-value">
+                    -
+                </div>
+                `;
+
+
+            if(
+                data.season_mvp
+            ){
+
+                mvpContent =
+                    createHighlightPlayer(
+                        data.season_mvp,
+                        "MVP "
+                        + safeNumber(
+                            data.season_mvp.mvp
+                        )
+                        + "회"
+                    );
+
+            }
+
+
+            /* ==============================
+               최고 연승
+            ============================== */
+
+            let streakContent =
+                `
+                <div class="season-summary-value">
+                    -
+                </div>
+                `;
+
+
+            if(
+                data.best_win_streak_player
+            ){
+
+                streakContent =
+                    createHighlightPlayer(
+                        data.best_win_streak_player,
+                        safeNumber(
+                            data.best_win_streak_player
+                                .best_win_streak
+                        )
+                        + "연승"
+                    );
+
+            }
+
+
+            /* ==============================
+               최고 승률
+            ============================== */
+
+            let bestWinrateContent =
+                `
+                <div class="season-summary-value">
+                    -
+                </div>
+
+                <div class="season-summary-sub">
+                    최소 3경기
+                </div>
+                `;
+
+
+            if(
+                data.best_winrate_player
+            ){
+
+                bestWinrateContent =
+                    createHighlightPlayer(
+                        data.best_winrate_player,
+
+                        safeNumber(
+                            data.best_winrate_player
+                                .win_rate
+                        )
+                        + "% · "
+                        + safeNumber(
+                            data.best_winrate_player
+                                .games
+                        )
+                        + "경기"
+                    );
+
+            }
+
+
+            /* ==============================
+               최다 참가
+            ============================== */
+
+            let mostGamesContent =
+                `
+                <div class="season-summary-value">
+                    -
+                </div>
+                `;
+
+
+            if(
+                data.most_games_player
+            ){
+
+                mostGamesContent =
+                    createHighlightPlayer(
+                        data.most_games_player,
+
+                        safeNumber(
+                            data.most_games_player
+                                .games
+                        )
+                        + "경기"
+                    );
+
+            }
+
+
+            /* ==============================
+               시즌 랭킹
+            ============================== */
+
+            const players =
+                Array.isArray(
+                    data.season_players
+                )
+                ? data.season_players
+                : [];
+
+
+            let rankingContent =
+                `
+                <div class="empty-match-card">
+                    아직 현재 시즌에 경기 기록이 없습니다.
+                </div>
+                `;
+
+
+            if(
+                players.length > 0
+            ){
+
+                const playerRows =
+                    players
+                        .map(
+                            createSeasonPlayerHtml
+                        )
+                        .join(
+                            ""
+                        );
+
+
+                rankingContent =
+                    `
+                    <div class="season-ranking-table">
+
+                        <div
+                            class="
+                                season-ranking-row
+                                season-ranking-head
+                            "
+                        >
+
+                            <div>
+                                순위
+                            </div>
+
+                            <div>
+                                플레이어
+                            </div>
+
+                            <div>
+                                티어
+                            </div>
+
+                            <div>
+                                레이팅
+                            </div>
+
+                            <div>
+                                전적
+                            </div>
+
+                            <div>
+                                승률
+                            </div>
+
+                            <div>
+                                현재 흐름
+                            </div>
+
+                            <div>
+                                MVP
+                            </div>
+
+                        </div>
+
+                        ${playerRows}
+
+                    </div>
+                    `;
+
+            }
+
+
+            /* ==============================
+               전체 HTML
+            ============================== */
+
+            seasonPageArea.innerHTML =
+                `
+                <div class="season-header">
+
+                    <div class="season-header-main">
+
+                        <div class="season-trophy">
+                            🏆
+                        </div>
+
+
+                        <div>
+
+                            <h1>
+                                ${seasonName}
+                            </h1>
+
+                            <p>
+                                시작일 · ${startedAt}
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="season-status">
+                        ● 진행 중
+                    </div>
+
+                </div>
+
+
+                <div class="season-summary-grid">
+
+                    <div class="season-summary-card">
+
+                        <div class="season-summary-icon">
+                            👥
+                        </div>
+
+                        <div class="season-summary-label">
+                            참가 플레이어
+                        </div>
+
+                        <div class="season-summary-value">
+                            ${seasonPlayerCount}명
+                        </div>
+
+                    </div>
+
+
+                    <div class="season-summary-card">
+
+                        <div class="season-summary-icon">
+                            🎮
+                        </div>
+
+                        <div class="season-summary-label">
+                            시즌 경기
+                        </div>
+
+                        <div class="season-summary-value">
+                            ${seasonMatchCount}경기
+                        </div>
+
+                    </div>
+
+
+                    <div class="season-summary-card">
+
+                        <div class="season-summary-icon">
+                            ⭐
+                        </div>
+
+                        <div class="season-summary-label">
+                            시즌 MVP
+                        </div>
+
+                        ${mvpContent}
+
+                    </div>
+
+
+                    <div class="season-summary-card">
+
+                        <div class="season-summary-icon">
+                            🔥
+                        </div>
+
+                        <div class="season-summary-label">
+                            최고 연승
+                        </div>
+
+                        ${streakContent}
+
+                    </div>
+
+                </div>
+
+
+                <div class="season-summary-grid">
+
+                    <div class="season-summary-card">
+
+                        <div class="season-summary-icon">
+                            🎯
+                        </div>
+
+                        <div class="season-summary-label">
+                            최고 승률
+                        </div>
+
+                        ${bestWinrateContent}
+
+                    </div>
+
+
+                    <div class="season-summary-card">
+
+                        <div class="season-summary-icon">
+                            🔥
+                        </div>
+
+                        <div class="season-summary-label">
+                            최다 참가
+                        </div>
+
+                        ${mostGamesContent}
+
+                    </div>
+
+                </div>
+
+
+                <div class="season-ranking-header">
+
+                    <div>
+
+                        <h2>
+                            👑 시즌 랭킹
+                        </h2>
+
+                        <p>
+                            현재 시즌 레이팅 기준 순위
+                        </p>
+
+                    </div>
+
+                </div>
+
+
+                <div id="seasonRankingArea">
+                    ${rankingContent}
+                </div>
+                `;
+
+        }
+
+
+        /* ==============================
+           API 호출
+        ============================== */
+
+        async function refreshSeason(){
+
+            if(
+                isRefreshing
+                ||
+                pageClosed
+            ){
+                return;
+            }
+
+
+            isRefreshing =
+                true;
+
+
+            try{
+
+                const response =
+                    await fetch(
+                        "/api/season",
+                        {
+                            method:
+                                "GET",
+
+                            cache:
+                                "no-store",
+
+                            headers:{
+                                "Accept":
+                                    "application/json"
+                            }
+                        }
+                    );
+
+
+                if(
+                    !response.ok
+                ){
+
+                    console.warn(
+                        "시즌 API 오류:",
+                        response.status
+                    );
+
+
+                    if(
+                        apiError
+                    ){
+
+                        apiError.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                const data =
+                    await response.json();
+
+
+                if(
+                    !data
+                    ||
+                    !data.success
+                ){
+
+                    console.warn(
+                        "시즌 API 응답이 올바르지 않습니다."
+                    );
+
+
+                    if(
+                        apiError
+                    ){
+
+                        apiError.style.display =
+                            "";
+
+                    }
+
+
+                    return;
+
+                }
+
+
+                if(
+                    apiError
+                ){
+
+                    apiError.style.display =
+                        "none";
+
+                }
+
+
+                renderSeason(
+                    data
+                );
+
+            }
+
+
+            catch(
+                error
+            ){
+
+                console.warn(
+                    "시즌 자동 갱신 실패:",
+                    error
+                );
+
+
+                if(
+                    apiError
+                ){
+
+                    apiError.style.display =
+                        "";
+
+                }
+
+            }
+
+
+            finally{
+
+                isRefreshing =
+                    false;
+
+            }
+
+        }
+
+
+        /* ==============================
+           최초 즉시 실행
+        ============================== */
+
+        refreshSeason();
+
+
+        /* ==============================
+           5초 자동 갱신
+        ============================== */
+
+        const seasonRefreshTimer =
+            setInterval(
+                function(){
+
+                    if(
+                        document.visibilityState
+                        === "visible"
+                    ){
+
+                        refreshSeason();
+
+                    }
+
+                },
+                5000
+            );
+
+
+        /* ==============================
+           탭 복귀
+        ============================== */
+
+        document.addEventListener(
+            "visibilitychange",
+            function(){
+
+                if(
+                    document.visibilityState
+                    === "visible"
+                ){
+
+                    refreshSeason();
+
+                }
+
+            }
+        );
+
+
+        /* ==============================
+           페이지 종료
+        ============================== */
+
+        window.addEventListener(
+            "beforeunload",
+            function(){
+
+                pageClosed =
+                    true;
+
+
+                clearInterval(
+                    seasonRefreshTimer
+                );
+
+            }
+        );
+
+    }
+);
+
+</script>
+
+{% endblock %}
