@@ -10,8 +10,19 @@ PROJECT_ROOT = (
     .parent
 )
 
-# 모든 데이터 파일이 저장되는 폴더
-DATA_DIR = PROJECT_ROOT / "data"
+
+# =====================================
+# 데이터 저장 위치
+# Render에서는 Persistent Disk 사용
+# 로컬에서는 기존 data 폴더 사용
+# =====================================
+
+RENDER_DATA_DIR = Path("/var/data")
+
+if RENDER_DATA_DIR.exists():
+    DATA_DIR = RENDER_DATA_DIR
+else:
+    DATA_DIR = PROJECT_ROOT / "data"
 
 DATA_DIR.mkdir(
     parents=True,
