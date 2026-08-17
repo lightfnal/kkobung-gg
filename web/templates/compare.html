@@ -226,7 +226,11 @@
         </h2>
 
         <p>
-            전체 누적 경기 기준
+            {% if active_season %}
+                {{ active_season.season_name }} 경기 기준
+            {% else %}
+                현재 시즌 경기 기준
+            {% endif %}
         </p>
 
     </div>

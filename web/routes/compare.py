@@ -38,6 +38,7 @@ def calculate_win_rate(
 def get_recent_form(
     cursor,
     discord_id,
+    season_id,
     limit=5
 ):
     """
@@ -57,11 +58,13 @@ def get_recent_form(
         JOIN matches m
             ON m.id = mp.match_id
         WHERE mp.discord_id = ?
+          AND m.season_id = ?
         ORDER BY m.id DESC
         LIMIT ?
         """,
         (
             str(discord_id),
+            season_id,
             limit
         )
     )
@@ -112,7 +115,8 @@ def get_recent_form(
 
 def get_position_stats(
     cursor,
-    discord_id
+    discord_id,
+    season_id
 ):
     """
     포지션별 경기 성적을 반환합니다.
@@ -146,9 +150,13 @@ def get_position_stats(
                 )
             ) AS avg_rating_change
 
-        FROM match_players
+        FROM match_players mp
 
-        WHERE discord_id = ?
+        JOIN matches m
+            ON m.id = mp.match_id
+
+        WHERE mp.discord_id = ?
+          AND m.season_id = ?
 
         GROUP BY
             COALESCE(
@@ -165,6 +173,7 @@ def get_position_stats(
         """,
         (
             str(discord_id),
+            season_id,
         )
     )
 
@@ -215,7 +224,8 @@ def get_position_stats(
 
 def get_player_compare_data(
     cursor,
-    player
+    player,
+    season_id
 ):
     """
     비교 페이지에서 사용할 플레이어 전체 요약 데이터를 만듭니다.
@@ -264,12 +274,17 @@ def get_player_compare_data(
                 )
             ) AS total_rating_change
 
-        FROM match_players
+        FROM match_players mp
 
-        WHERE discord_id = ?
+        JOIN matches m
+            ON m.id = mp.match_id
+
+        WHERE mp.discord_id = ?
+          AND m.season_id = ?
         """,
         (
             discord_id,
+            season_id,
         )
     )
 
@@ -315,9 +330,11 @@ def get_player_compare_data(
         SELECT COUNT(*) AS count
         FROM matches
         WHERE mvp_discord_id = ?
+          AND season_id = ?
         """,
         (
             discord_id,
+            season_id,
         )
     )
 
@@ -371,18 +388,21 @@ def get_player_compare_data(
     recent_5 = get_recent_form(
         cursor,
         discord_id,
+        season_id,
         5
     )
 
     recent_10 = get_recent_form(
         cursor,
         discord_id,
+        season_id,
         10
     )
 
     recent_20 = get_recent_form(
         cursor,
         discord_id,
+        season_id,
         20
     )
 
@@ -392,7 +412,8 @@ def get_player_compare_data(
 
     position_stats = get_position_stats(
         cursor,
-        discord_id
+        discord_id,
+        season_id
     )
 
     return {
@@ -450,6 +471,26 @@ def compare_page(
     with get_db_connection() as conn:
 
         cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                season_name,
+                started_at
+            FROM seasons
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        )
+
+        active_season = cursor.fetchone()
+        scope_season_id = (
+            active_season["id"]
+            if active_season is not None
+            else -1
+        )
 
         # ==============================
         # 비교 대상 선택 목록
@@ -562,14 +603,16 @@ def compare_page(
                 player1_data = (
                     get_player_compare_data(
                         cursor,
-                        player1
+                        player1,
+                        scope_season_id
                     )
                 )
 
                 player2_data = (
                     get_player_compare_data(
                         cursor,
-                        player2
+                        player2,
+                        scope_season_id
                     )
                 )
 
@@ -612,12 +655,17 @@ def compare_page(
                         ON p1.match_id = p2.match_id
                         AND p1.team != p2.team
 
+                    JOIN matches m
+                        ON m.id = p1.match_id
+
                     WHERE p1.discord_id = ?
                       AND p2.discord_id = ?
+                      AND m.season_id = ?
                     """,
                     (
                         player1_discord_id,
-                        player2_discord_id
+                        player2_discord_id,
+                        scope_season_id
                     )
                 )
 
@@ -690,12 +738,17 @@ def compare_page(
                         ON p1.match_id = p2.match_id
                         AND p1.team = p2.team
 
+                    JOIN matches m
+                        ON m.id = p1.match_id
+
                     WHERE p1.discord_id = ?
                       AND p2.discord_id = ?
+                      AND m.season_id = ?
                     """,
                     (
                         player1_discord_id,
-                        player2_discord_id
+                        player2_discord_id,
+                        scope_season_id
                     )
                 )
 
@@ -762,6 +815,9 @@ def compare_page(
                 head_to_head,
 
             "same_team":
-                same_team
+                same_team,
+
+            "active_season":
+                active_season
         }
     )
