@@ -5,6 +5,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.exceptions import HTTPException
 from fastapi.templating import Jinja2Templates
 
+from web.routes.admin import router as admin_router
+
 import storage.sqlite_db
 
 
@@ -116,6 +118,7 @@ app.include_router(
 app.include_router(
     api_stats_router
 )
+app.include_router(admin_router)
 
 @app.exception_handler(404)
 async def not_found_handler(
