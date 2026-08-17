@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hmac
 import os
-import shutil
 import sqlite3
 import threading
 import time
@@ -316,9 +315,24 @@ def create_backup() -> BackupCreated:
         destination = directory / f"backup_{timestamp}.db"
         temporary = directory / f".{destination.name}.tmp"
         try:
-            shutil.copy2(source, temporary)
+            temporary.unlink(missing_ok=True)
+            with sqlite3.connect(source, timeout=30.0) as source_connection:
+                source_connection.execute("PRAGMA busy_timeout = 30000")
+                with sqlite3.connect(temporary, timeout=30.0) as backup_connection:
+                    source_connection.backup(
+                        backup_connection,
+                        pages=256,
+                        sleep=0.05,
+                    )
+                    integrity = backup_connection.execute(
+                        "PRAGMA integrity_check"
+                    ).fetchone()
+            if integrity is None or integrity[0] != "ok":
+                raise sqlite3.DatabaseError(
+                    "Created backup failed integrity_check"
+                )
             os.replace(temporary, destination)
-        except OSError as exc:
+        except (OSError, sqlite3.Error) as exc:
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:
