@@ -5,6 +5,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.exceptions import HTTPException
 from fastapi.templating import Jinja2Templates
 
+import storage.sqlite_db
+
 
 from web.routes.api_history import (
     router as api_history_router
