@@ -16,6 +16,8 @@ const stagedUploadStatus = document.querySelector("#staged-upload-status");
 const restoreConfirmation = document.querySelector("#restore-confirmation");
 const restoreButton = document.querySelector("#restore-button");
 const restoreMessage = document.querySelector("#restore-message");
+const auditList = document.querySelector("#audit-list");
+const emptyAudit = document.querySelector("#empty-audit");
 let uploadIsStaged = false;
 
 function token() { return sessionStorage.getItem(tokenKey) || ""; }
@@ -41,16 +43,18 @@ async function api(path, options = {}) {
 function setText(selector, value) { document.querySelector(selector).textContent = value; }
 
 async function loadDashboard() {
-    const [infoResponse, backupsResponse, uploadResponse, autoBackupResponse] = await Promise.all([
+    const [infoResponse, backupsResponse, uploadResponse, autoBackupResponse, auditResponse] = await Promise.all([
         api("/admin/db-info"),
         api("/admin/backups"),
         api("/admin/upload-db"),
         api("/admin/auto-backup-status"),
+        api("/admin/audit-log?limit=100"),
     ]);
     const info = await infoResponse.json();
     const backups = await backupsResponse.json();
     const stagedUpload = await uploadResponse.json();
     const autoBackup = await autoBackupResponse.json();
+    const audits = await auditResponse.json();
     setText("#player-count", info.players);
     setText("#match-count", info.matches);
     setText("#database-size", info.size_mb);
@@ -58,8 +62,36 @@ async function loadDashboard() {
     renderBackups(backups);
     renderStagedUpload(stagedUpload);
     renderAutoBackupStatus(autoBackup);
+    renderAuditLog(audits);
     loginPanel.hidden = true;
     dashboard.hidden = false;
+}
+
+function renderAuditLog(entries) {
+    const actionNames = {
+        backup_created: "백업 생성",
+        backup_downloaded: "백업 다운로드",
+        database_uploaded: "DB 업로드",
+        restore_scheduled: "DB 복원 요청",
+    };
+    auditList.replaceChildren();
+    emptyAudit.hidden = entries.length !== 0;
+    for (const entry of entries) {
+        const row = document.createElement("tr");
+        const timestamp = document.createElement("td");
+        const action = document.createElement("td");
+        const result = document.createElement("td");
+        const clientIp = document.createElement("td");
+        const detail = document.createElement("td");
+        timestamp.textContent = new Date(entry.timestamp).toLocaleString("ko-KR");
+        action.textContent = actionNames[entry.action] || entry.action;
+        result.textContent = entry.result === "success" ? "성공" : "실패";
+        result.className = entry.result === "success" ? "admin-result-success" : "admin-result-failed";
+        clientIp.textContent = entry.client_ip;
+        detail.textContent = entry.detail || "-";
+        row.append(timestamp, action, result, clientIp, detail);
+        auditList.append(row);
+    }
 }
 
 function renderAutoBackupStatus(status) {

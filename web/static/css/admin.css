@@ -42,6 +42,9 @@ button:disabled { cursor: wait; opacity: .55; }
 .admin-status-badge.status-failed { background: #4a252c; color: #ff9ca6; }
 .admin-status-badge.status-disabled { background: #303640; color: #aab3c0; }
 .admin-restore-panel { margin-top: 20px; }
+.admin-audit-panel { margin-top: 20px; }
+.admin-result-success { color: #7ee2a7; font-weight: 700; }
+.admin-result-failed { color: #ff9ca6; font-weight: 700; }
 .admin-danger-badge { padding: 7px 10px; border: 1px solid #75404a; border-radius: 999px; color: #ff9ca6; font-size: 12px; font-weight: 700; }
 .admin-restore-grid { display: grid; gap: 14px; }
 .admin-restore-step { display: grid; grid-template-columns: 38px 1fr; gap: 14px; padding: 20px; border: 1px solid #29313d; border-radius: 12px; background: #12171d; }

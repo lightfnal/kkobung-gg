@@ -26,6 +26,7 @@ templates = Jinja2Templates(directory="web/templates")
 
 _backup_lock = threading.Lock()
 _upload_lock = threading.Lock()
+_audit_lock = threading.Lock()
 _DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _SQLITE_HEADER = b"SQLite format 3\x00"
 
@@ -77,6 +78,14 @@ class AutoBackupStatus(BaseModel):
     last_success_at: str | None = None
     backup: str | None = None
     error: str | None = None
+
+
+class AuditItem(BaseModel):
+    timestamp: str
+    action: str
+    result: str
+    client_ip: str
+    detail: str | None = None
 
 
 def _authenticate(
@@ -230,6 +239,64 @@ def _auto_backup_hour() -> int:
     return hour
 
 
+def _audit_path() -> Path:
+    return Path(DB_PATH).expanduser().resolve().parent / "admin_audit.jsonl"
+
+
+def _write_audit(
+    request: Request,
+    action: str,
+    result: str,
+    detail: str | None = None,
+) -> None:
+    entry = {
+        "timestamp": datetime.now().astimezone().isoformat(),
+        "action": action,
+        "result": result,
+        "client_ip": request.client.host if request.client else "unknown",
+        "detail": detail,
+    }
+    path = _audit_path()
+    temporary = path.with_suffix(".tmp")
+    with _audit_lock:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            entries: list[str] = []
+            if path.is_file():
+                entries = path.read_text(encoding="utf-8").splitlines()[-999:]
+            entries.append(json.dumps(entry, ensure_ascii=False))
+            temporary.write_text("\n".join(entries) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _read_audit(limit: int) -> list[AuditItem]:
+    path = _audit_path()
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Admin audit log could not be read",
+        ) from exc
+    result: list[AuditItem] = []
+    for line in reversed(lines):
+        try:
+            data = json.loads(line)
+            result.append(AuditItem(**data))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if len(result) >= limit:
+            break
+    return result
+
+
 def _validate_uploaded_database(path: Path) -> None:
     try:
         with path.open("rb") as uploaded_file:
@@ -321,7 +388,7 @@ def list_backups() -> list[BackupItem]:
     response_class=FileResponse,
     dependencies=[Depends(_authenticate)],
 )
-def download_backup(filename: str) -> FileResponse:
+def download_backup(filename: str, request: Request) -> FileResponse:
     """Download a backup created by the admin backup endpoint."""
     if (
         Path(filename).name != filename
@@ -341,6 +408,7 @@ def download_backup(filename: str) -> FileResponse:
             detail="Backup file was not found",
         )
 
+    _write_audit(request, "backup_downloaded", "success", target.name)
     return FileResponse(
         path=target,
         media_type="application/vnd.sqlite3",
@@ -380,13 +448,27 @@ def get_auto_backup_status() -> AutoBackupStatus:
     )
 
 
+@router.get(
+    "/audit-log",
+    response_model=list[AuditItem],
+    dependencies=[Depends(_authenticate)],
+)
+def get_audit_log(limit: int = 100) -> list[AuditItem]:
+    if not 1 <= limit <= 500:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audit log limit must be between 1 and 500",
+        )
+    return _read_audit(limit)
+
+
 @router.post(
     "/backup",
     response_model=BackupCreated,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(_authenticate)],
 )
-def create_backup() -> BackupCreated:
+def create_backup(request: Request) -> BackupCreated:
     source = _db_path()
     directory = _backup_dir(create=True)
     retention_limit = _max_backups()
@@ -404,6 +486,7 @@ def create_backup() -> BackupCreated:
                 detail="Database backup could not be created",
             ) from exc
 
+    _write_audit(request, "backup_created", "success", result.path.name)
     return BackupCreated(
         success=True,
         backup=result.path.name,
@@ -419,6 +502,7 @@ def create_backup() -> BackupCreated:
     dependencies=[Depends(_authenticate)],
 )
 def upload_database(
+    request: Request,
     database: Annotated[UploadFile, File(description="SQLite database file")],
 ) -> DatabaseUploaded:
     """Validate and stage a database upload without replacing the live database."""
@@ -466,6 +550,7 @@ def upload_database(
                 detail="Uploaded database could not be stored",
             ) from exc
 
+    _write_audit(request, "database_uploaded", "success", destination.name)
     return DatabaseUploaded(
         success=True,
         upload=destination.name,
@@ -504,7 +589,7 @@ def get_staged_upload() -> StagedUploadInfo:
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(_authenticate)],
 )
-def schedule_restore() -> RestoreScheduled:
+def schedule_restore(request: Request) -> RestoreScheduled:
     live_database = _db_path()
     upload = live_database.parent / "upload.db"
     marker = live_database.parent / "restore.request"
@@ -512,6 +597,7 @@ def schedule_restore() -> RestoreScheduled:
         raise HTTPException(status_code=404, detail="No uploaded database is staged")
     _validate_uploaded_database(upload)
     marker.write_text("restore\n", encoding="utf-8")
+    _write_audit(request, "restore_scheduled", "success", upload.name)
 
     def stop_web_process():
         time.sleep(1.0)
