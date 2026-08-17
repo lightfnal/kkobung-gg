@@ -12,14 +12,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from storage.paths import BACKUP_DIR, DB_PATH
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+templates = Jinja2Templates(directory="web/templates")
 
 _backup_lock = threading.Lock()
 _upload_lock = threading.Lock()
@@ -200,6 +202,15 @@ def _validate_uploaded_database(path: Path) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded database could not be validated",
         ) from exc
+
+
+@router.get("", response_class=HTMLResponse, include_in_schema=False)
+def admin_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="admin.html",
+        context={},
+    )
 
 
 @router.get(
