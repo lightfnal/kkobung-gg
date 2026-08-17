@@ -123,7 +123,10 @@ document.querySelector("#create-backup-button").addEventListener("click", async 
     try {
         const response = await api("/admin/backup", { method: "POST" });
         const result = await response.json();
-        showMessage(actionMessage, `백업을 만들었습니다: ${result.backup}`);
+        const cleanup = result.deleted_old_backups
+            ? ` 오래된 백업 ${result.deleted_old_backups}개를 정리했습니다.`
+            : "";
+        showMessage(actionMessage, `백업을 만들었습니다: ${result.backup}.${cleanup}`);
         await loadDashboard();
     } catch (error) { showMessage(actionMessage, error.message, true); }
     finally { button.disabled = false; }

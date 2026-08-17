@@ -45,6 +45,8 @@ class BackupItem(BaseModel):
 class BackupCreated(BaseModel):
     success: bool
     backup: str
+    retention_limit: int
+    deleted_old_backups: int
 
 
 class DatabaseUploaded(BaseModel):
@@ -182,6 +184,37 @@ def _max_upload_bytes() -> int:
     return megabytes * 1024 * 1024
 
 
+def _max_backups() -> int:
+    raw_value = os.getenv("ADMIN_MAX_BACKUPS", "20")
+    try:
+        limit = int(raw_value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_MAX_BACKUPS must be an integer",
+        ) from exc
+    if not 1 <= limit <= 1000:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_MAX_BACKUPS must be between 1 and 1000",
+        )
+    return limit
+
+
+def _prune_backups(limit: int) -> int:
+    deleted = 0
+    for old_backup in _backup_files()[limit:]:
+        try:
+            old_backup.unlink()
+            deleted += 1
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Old backups could not be cleaned up",
+            ) from exc
+    return deleted
+
+
 def _validate_uploaded_database(path: Path) -> None:
     try:
         with path.open("rb") as uploaded_file:
@@ -309,6 +342,7 @@ def download_backup(filename: str) -> FileResponse:
 def create_backup() -> BackupCreated:
     source = _db_path()
     directory = _backup_dir(create=True)
+    retention_limit = _max_backups()
 
     with _backup_lock:
         timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")
@@ -342,7 +376,14 @@ def create_backup() -> BackupCreated:
                 detail="Database backup could not be created",
             ) from exc
 
-    return BackupCreated(success=True, backup=destination.name)
+        deleted_old_backups = _prune_backups(retention_limit)
+
+    return BackupCreated(
+        success=True,
+        backup=destination.name,
+        retention_limit=retention_limit,
+        deleted_old_backups=deleted_old_backups,
+    )
 
 
 @router.post(
