@@ -1,6 +1,8 @@
 import logging
 import os
 import signal
+import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -15,6 +17,43 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("service")
+
+from storage.paths import BACKUP_DIR, DB_PATH
+
+
+def apply_pending_restore():
+    database = os.fspath(DB_PATH)
+    upload = os.path.join(os.path.dirname(database), "upload.db")
+    marker = os.path.join(os.path.dirname(database), "restore.request")
+    if not os.path.exists(marker):
+        return
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    rollback = BACKUP_DIR / f"pre_restore_{time.strftime('%Y%m%d_%H%M%S')}.db"
+    logger.warning("대기 중인 데이터베이스 복원을 시작합니다.")
+    try:
+        with sqlite3.connect(f"file:{upload}?mode=ro", uri=True) as conn:
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("업로드 DB 무결성 검사 실패")
+        with sqlite3.connect(database, timeout=30) as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        shutil.copy2(database, rollback)
+        os.replace(upload, database)
+        for suffix in ("-wal", "-shm"):
+            try:
+                os.unlink(database + suffix)
+            except FileNotFoundError:
+                pass
+        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as conn:
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("복원 후 무결성 검사 실패")
+        os.unlink(marker)
+        logger.warning("데이터베이스 복원이 완료되었습니다: %s", rollback)
+    except Exception:
+        logger.exception("데이터베이스 복원 실패, 기존 DB를 복구합니다.")
+        if os.path.exists(rollback):
+            shutil.copy2(rollback, database)
+        raise
 
 processes = []
 shutting_down = False
@@ -69,6 +108,7 @@ def start_process(name, command):
 
 
 def main():
+    apply_pending_restore()
     port = os.getenv("PORT", "10000")
 
     signal.signal(

@@ -7,6 +7,7 @@ import os
 import shutil
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -49,6 +50,11 @@ class DatabaseUploaded(BaseModel):
     upload: str
     size_mb: float
     integrity_check: str
+
+
+class RestoreScheduled(BaseModel):
+    success: bool
+    message: str
 
 
 def _authenticate(
@@ -334,4 +340,30 @@ def upload_database(
         upload=destination.name,
         size_mb=round(bytes_written / (1024 * 1024), 2),
         integrity_check="ok",
+    )
+
+
+@router.post(
+    "/restore",
+    response_model=RestoreScheduled,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(_authenticate)],
+)
+def schedule_restore() -> RestoreScheduled:
+    live_database = _db_path()
+    upload = live_database.parent / "upload.db"
+    marker = live_database.parent / "restore.request"
+    if not upload.is_file():
+        raise HTTPException(status_code=404, detail="No uploaded database is staged")
+    _validate_uploaded_database(upload)
+    marker.write_text("restore\n", encoding="utf-8")
+
+    def stop_web_process():
+        time.sleep(1.0)
+        os._exit(75)
+
+    threading.Thread(target=stop_web_process, daemon=True).start()
+    return RestoreScheduled(
+        success=True,
+        message="Restore scheduled; service restart requested",
     )
