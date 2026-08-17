@@ -68,12 +68,55 @@ def calculate_recent_form(
 @router.get("/analysis")
 def analysis_page(
     request: Request,
-    player_id: int | None = None
+    player_id: int | None = None,
+    scope: str = "season"
 ):
 
     with get_db_connection() as conn:
 
         cursor = conn.cursor()
+
+        # 기본 분석 범위는 현재 진행 중인 시즌입니다.
+        # 과거 테스트 경기는 사용자가 "전체 기록"을 선택할 때만 포함합니다.
+        cursor.execute(
+            """
+            SELECT
+                id,
+                season_name,
+                started_at
+            FROM seasons
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        )
+
+        active_season = cursor.fetchone()
+        analysis_scope = (
+            "all"
+            if scope == "all"
+            else "season"
+        )
+        scope_season_id = (
+            active_season["id"]
+            if analysis_scope == "season"
+            and active_season is not None
+            else (
+                -1
+                if analysis_scope == "season"
+                else None
+            )
+        )
+        scope_label = (
+            active_season["season_name"]
+            if analysis_scope == "season"
+            and active_season is not None
+            else (
+                "현재 시즌"
+                if analysis_scope == "season"
+                else "전체 기록"
+            )
+        )
 
         # ==============================
         # 플레이어 선택 목록
@@ -117,7 +160,6 @@ def analysis_page(
         best_duos = []
         opponent_stats = []
 
-        active_season = None
         season_stats = None
 
         # ==============================
@@ -292,12 +334,20 @@ def analysis_page(
                             END
                         ) AS red_wins
 
-                    FROM match_players
+                    FROM match_players mp
+                    JOIN matches m
+                        ON m.id = mp.match_id
 
-                    WHERE discord_id = ?
+                    WHERE mp.discord_id = ?
+                      AND (
+                          ? IS NULL
+                          OR m.season_id = ?
+                      )
                     """,
                     (
                         discord_id,
+                        scope_season_id,
+                        scope_season_id,
                     )
                 )
 
@@ -395,11 +445,17 @@ def analysis_page(
                 cursor.execute(
                     """
                     SELECT COUNT(*) AS count
-                    FROM matches
-                    WHERE mvp_discord_id = ?
+                    FROM matches m
+                    WHERE m.mvp_discord_id = ?
+                      AND (
+                          ? IS NULL
+                          OR m.season_id = ?
+                      )
                     """,
                     (
                         discord_id,
+                        scope_season_id,
+                        scope_season_id,
                     )
                 )
 
@@ -439,11 +495,17 @@ def analysis_page(
                     JOIN matches m
                         ON m.id = mp.match_id
                     WHERE mp.discord_id = ?
+                      AND (
+                          ? IS NULL
+                          OR m.season_id = ?
+                      )
                     ORDER BY m.id DESC
                     LIMIT 20
                     """,
                     (
                         discord_id,
+                        scope_season_id,
+                        scope_season_id,
                     )
                 )
 
@@ -607,23 +669,6 @@ def analysis_page(
                 # 현재 활성 시즌
                 # ==============================
 
-                cursor.execute(
-                    """
-                    SELECT
-                        id,
-                        season_name,
-                        started_at
-                    FROM seasons
-                    WHERE is_active = 1
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """
-                )
-
-                active_season = (
-                    cursor.fetchone()
-                )
-
                 if active_season is not None:
 
                     cursor.execute(
@@ -717,9 +762,15 @@ def analysis_page(
                             )
                         ) AS total_rating_change
 
-                    FROM match_players
+                    FROM match_players mp
+                    JOIN matches m
+                        ON m.id = mp.match_id
 
-                    WHERE discord_id = ?
+                    WHERE mp.discord_id = ?
+                      AND (
+                          ? IS NULL
+                          OR m.season_id = ?
+                      )
 
                     GROUP BY
                         COALESCE(
@@ -736,6 +787,8 @@ def analysis_page(
                     """,
                     (
                         discord_id,
+                        scope_season_id,
+                        scope_season_id,
                     )
                 )
 
@@ -820,6 +873,9 @@ def analysis_page(
 
                     FROM match_players me
 
+                    JOIN matches m
+                        ON m.id = me.match_id
+
                     JOIN match_players teammate
                         ON teammate.match_id = me.match_id
                         AND teammate.team = me.team
@@ -831,6 +887,10 @@ def analysis_page(
                             = teammate.discord_id
 
                     WHERE me.discord_id = ?
+                      AND (
+                          ? IS NULL
+                          OR m.season_id = ?
+                      )
 
                     GROUP BY
                         teammate.discord_id,
@@ -847,6 +907,8 @@ def analysis_page(
                     """,
                     (
                         discord_id,
+                        scope_season_id,
+                        scope_season_id,
                     )
                 )
 
@@ -912,6 +974,9 @@ def analysis_page(
 
                     FROM match_players me
 
+                    JOIN matches m
+                        ON m.id = me.match_id
+
                     JOIN match_players opponent
                         ON opponent.match_id = me.match_id
                         AND opponent.team != me.team
@@ -921,6 +986,10 @@ def analysis_page(
                             = opponent.discord_id
 
                     WHERE me.discord_id = ?
+                      AND (
+                          ? IS NULL
+                          OR m.season_id = ?
+                      )
 
                     GROUP BY
                         opponent.discord_id,
@@ -937,6 +1006,8 @@ def analysis_page(
                     """,
                     (
                         discord_id,
+                        scope_season_id,
+                        scope_season_id,
                     )
                 )
 
@@ -1020,6 +1091,12 @@ def analysis_page(
                 active_season,
 
             "season_stats":
-                season_stats
+                season_stats,
+
+            "analysis_scope":
+                analysis_scope,
+
+            "scope_label":
+                scope_label
         }
     )

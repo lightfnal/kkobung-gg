@@ -24,12 +24,53 @@ HISTORY_LIMIT = 100
 
 @router.get("/history")
 def history_page(
-    request: Request
+    request: Request,
+    scope: str = "season"
 ):
 
     with get_db_connection() as conn:
 
         cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                season_name,
+                started_at
+            FROM seasons
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        )
+
+        active_season = cursor.fetchone()
+        history_scope = (
+            "all"
+            if scope == "all"
+            else "season"
+        )
+        scope_season_id = (
+            active_season["id"]
+            if history_scope == "season"
+            and active_season is not None
+            else (
+                -1
+                if history_scope == "season"
+                else None
+            )
+        )
+        scope_label = (
+            active_season["season_name"]
+            if history_scope == "season"
+            and active_season is not None
+            else (
+                "현재 시즌"
+                if history_scope == "season"
+                else "전체 기록"
+            )
+        )
 
         # ==============================
         # 전체 경기 수
@@ -38,8 +79,16 @@ def history_page(
         cursor.execute(
             """
             SELECT COUNT(*) AS count
-            FROM matches
-            """
+            FROM matches m
+            WHERE (
+                ? IS NULL
+                OR m.season_id = ?
+            )
+            """,
+            (
+                scope_season_id,
+                scope_season_id,
+            )
         )
 
         total_match_count = (
@@ -77,12 +126,19 @@ def history_page(
                 ON s.id
                     = m.season_id
 
+            WHERE (
+                ? IS NULL
+                OR m.season_id = ?
+            )
+
             ORDER BY
                 m.id DESC
 
             LIMIT ?
             """,
             (
+                scope_season_id,
+                scope_season_id,
                 HISTORY_LIMIT,
             )
         )
@@ -273,6 +329,15 @@ def history_page(
                 displayed_match_count,
 
             "history_limit":
-                HISTORY_LIMIT
+                HISTORY_LIMIT,
+
+            "active_season":
+                active_season,
+
+            "history_scope":
+                history_scope,
+
+            "scope_label":
+                scope_label
         }
     )

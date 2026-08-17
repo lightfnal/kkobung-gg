@@ -3,7 +3,7 @@
 {% block content %}
 
 <!-- ==============================
-     전체 전적 헤더
+     전적 헤더
 ============================== -->
 
 <div class="history-header">
@@ -11,7 +11,7 @@
     <div>
 
         <h1>
-            📜 전체 전적
+            📜 {{ scope_label }} 전적
         </h1>
 
         <p>
@@ -30,6 +30,27 @@
         </strong>
 
     </div>
+
+</div>
+
+
+<div class="history-filter-result">
+
+    <span>
+        표시 범위
+    </span>
+
+    {% if history_scope == "season" %}
+        <strong>{{ scope_label }}</strong>
+        <a href="/history?scope=all" class="history-filter-reset">
+            전체 기록 보기
+        </a>
+    {% else %}
+        <strong>전체 기록</strong>
+        <a href="/history?scope=season" class="history-filter-reset">
+            현재 시즌만 보기
+        </a>
+    {% endif %}
 
 </div>
 

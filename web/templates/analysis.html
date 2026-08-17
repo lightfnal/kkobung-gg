@@ -15,7 +15,7 @@
         </h1>
 
         <p>
-            플레이어의 전체 기록, 최근 폼, 포지션,
+            현재 시즌을 기본으로 최근 폼, 포지션,
             듀오, 상대 전적을 분석합니다.
         </p>
 
@@ -68,6 +68,33 @@
 
             {% endfor %}
 
+        </select>
+
+    </div>
+
+    <div class="analysis-select-box">
+
+        <label for="scope">
+            기록 범위
+        </label>
+
+        <select
+            id="scope"
+            name="scope"
+        >
+            <option
+                value="season"
+                {% if analysis_scope == "season" %}selected{% endif %}
+            >
+                {{ active_season.season_name if active_season else "현재 시즌" }}
+            </option>
+
+            <option
+                value="all"
+                {% if analysis_scope == "all" %}selected{% endif %}
+            >
+                전체 기록
+            </option>
         </select>
 
     </div>
@@ -221,7 +248,7 @@
         </h2>
 
         <p>
-            전체 실제 경기 기록 기준
+            {{ scope_label }} 실제 경기 기록 기준
         </p>
 
     </div>
@@ -232,7 +259,7 @@
         <div class="analysis-summary-card">
 
             <div class="analysis-summary-label">
-                전체 전적
+                {{ scope_label }} 전적
             </div>
 
             <div class="analysis-summary-value">
@@ -250,7 +277,7 @@
         <div class="analysis-summary-card">
 
             <div class="analysis-summary-label">
-                전체 승률
+                {{ scope_label }} 승률
             </div>
 
             <div class="analysis-summary-value">
