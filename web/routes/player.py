@@ -73,6 +73,8 @@ def player_detail(
 
         # ==============================
         # 전체 플레이어 수
+        #
+        # 전체 누적 랭킹 정보는 기존 유지
         # ==============================
 
         cursor.execute(
@@ -88,13 +90,9 @@ def player_detail(
         )
 
         # ==============================
-        # 현재 순위
-        # ranking.py와 동일한 기준
+        # 전체 누적 현재 순위
         #
-        # 1. rating DESC
-        # 2. wins DESC
-        # 3. losses ASC
-        # 4. id ASC
+        # 기존 ranking.py와 동일한 기준
         # ==============================
 
         cursor.execute(
@@ -151,7 +149,7 @@ def player_detail(
         )
 
         # ==============================
-        # 상위 퍼센트
+        # 전체 누적 상위 퍼센트
         # ==============================
 
         top_percent = (
@@ -191,6 +189,12 @@ def player_detail(
             cursor.fetchone()
         )
 
+        season_id = (
+            active_season["id"]
+            if active_season is not None
+            else None
+        )
+
         # ==============================
         # 현재 시즌 개인 기록
         # ==============================
@@ -200,11 +204,7 @@ def player_detail(
         season_rank = None
         season_player_count = 0
 
-        if active_season is not None:
-
-            season_id = (
-                active_season["id"]
-            )
+        if season_id is not None:
 
             cursor.execute(
                 """
@@ -252,11 +252,6 @@ def player_detail(
 
                 # ==============================
                 # 시즌 순위
-                #
-                # 1. rating DESC
-                # 2. wins DESC
-                # 3. losses ASC
-                # 4. discord_id ASC
                 # ==============================
 
                 cursor.execute(
@@ -315,9 +310,6 @@ def player_detail(
 
             # ==============================
             # 시즌 실제 참가자 수
-            #
-            # season_player_stats 행 개수가 아니라
-            # 실제 해당 시즌 match_players 기록 기준
             # ==============================
 
             cursor.execute(
@@ -344,48 +336,462 @@ def player_detail(
                 or 0
             )
 
+        # =====================================================
+        # 시즌별 화면 통계
+        #
+        # 활성 시즌이 없으면 과거 전체 기록을 섞지 않고
+        # 모두 빈 상태로 표시
+        # =====================================================
+
+        recent_matches = []
+        rating_history = []
+        recent_results = []
+        duo_players = []
+        opponent_players = []
+        position_stats = []
+
         # ==============================
-        # 최근 5경기
+        # 현재 시즌이 있는 경우만 조회
         # ==============================
 
-        cursor.execute(
-            """
-            SELECT
-                m.id AS match_id,
-                m.match_date,
-                m.winner,
-                m.mvp_discord_id,
+        if season_id is not None:
 
-                mp.team,
-                mp.won,
-                mp.position,
-                mp.rating_before,
-                mp.rating_after,
-                mp.rating_change
+            # ==============================
+            # 현재 시즌 최근 5경기
+            # ==============================
 
-            FROM match_players mp
+            cursor.execute(
+                """
+                SELECT
+                    m.id AS match_id,
+                    m.match_date,
+                    m.winner,
+                    m.mvp_discord_id,
 
-            JOIN matches m
-                ON m.id = mp.match_id
+                    mp.team,
+                    mp.won,
+                    mp.position,
+                    mp.rating_before,
+                    mp.rating_after,
+                    mp.rating_change
 
-            WHERE mp.discord_id = ?
+                FROM match_players mp
 
-            ORDER BY
-                m.id DESC
+                JOIN matches m
+                    ON m.id = mp.match_id
 
-            LIMIT 5
-            """,
-            (
-                discord_id,
+                WHERE mp.discord_id = ?
+                  AND m.season_id = ?
+
+                ORDER BY
+                    m.id DESC
+
+                LIMIT 5
+                """,
+                (
+                    discord_id,
+                    season_id
+                )
             )
-        )
 
-        recent_matches = (
-            cursor.fetchall()
-        )
+            recent_matches = (
+                cursor.fetchall()
+            )
+
+            # ==============================
+            # 현재 시즌 최근 20경기
+            # 레이팅 그래프
+            # ==============================
+
+            cursor.execute(
+                """
+                SELECT
+                    history.match_id,
+                    history.match_date,
+                    history.rating_after
+
+                FROM (
+                    SELECT
+                        m.id AS match_id,
+                        m.match_date,
+                        mp.rating_after
+
+                    FROM match_players mp
+
+                    JOIN matches m
+                        ON m.id = mp.match_id
+
+                    WHERE mp.discord_id = ?
+                      AND m.season_id = ?
+
+                    ORDER BY
+                        m.id DESC
+
+                    LIMIT 20
+                ) AS history
+
+                ORDER BY
+                    history.match_id ASC
+                """,
+                (
+                    discord_id,
+                    season_id
+                )
+            )
+
+            rating_history = (
+                cursor.fetchall()
+            )
+
+            # ==============================
+            # 현재 시즌 최근 20경기
+            # 상세 레이팅 변화
+            # ==============================
+
+            cursor.execute(
+                """
+                SELECT
+                    recent.match_id,
+                    recent.match_date,
+                    recent.won,
+                    recent.rating_before,
+                    recent.rating_after,
+                    recent.rating_change
+
+                FROM (
+                    SELECT
+                        m.id AS match_id,
+                        m.match_date,
+
+                        mp.won,
+                        mp.rating_before,
+                        mp.rating_after,
+                        mp.rating_change
+
+                    FROM match_players mp
+
+                    JOIN matches m
+                        ON m.id = mp.match_id
+
+                    WHERE mp.discord_id = ?
+                      AND m.season_id = ?
+
+                    ORDER BY
+                        m.id DESC
+
+                    LIMIT 20
+                ) AS recent
+
+                ORDER BY
+                    recent.match_id ASC
+                """,
+                (
+                    discord_id,
+                    season_id
+                )
+            )
+
+            recent_results = (
+                cursor.fetchall()
+            )
+
+            # ==============================
+            # 현재 시즌 자주 함께한 팀원 TOP 5
+            # ==============================
+
+            cursor.execute(
+                """
+                SELECT
+                    teammate.discord_id,
+
+                    p.id AS player_id,
+                    p.discord_nickname,
+                    p.riot_name,
+                    p.tier,
+
+                    COUNT(*) AS games,
+
+                    SUM(
+                        CASE
+                            WHEN me.won = 1
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS wins,
+
+                    SUM(
+                        CASE
+                            WHEN me.won = 0
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS losses
+
+                FROM match_players me
+
+                JOIN matches m
+                    ON m.id = me.match_id
+
+                JOIN match_players teammate
+                    ON teammate.match_id = me.match_id
+                    AND teammate.team = me.team
+                    AND teammate.discord_id != me.discord_id
+
+                LEFT JOIN players p
+                    ON p.discord_id = teammate.discord_id
+
+                WHERE me.discord_id = ?
+                  AND m.season_id = ?
+
+                GROUP BY
+                    teammate.discord_id,
+                    p.id,
+                    p.discord_nickname,
+                    p.riot_name,
+                    p.tier
+
+                ORDER BY
+                    games DESC,
+                    wins DESC,
+                    teammate.discord_id ASC
+
+                LIMIT 5
+                """,
+                (
+                    discord_id,
+                    season_id
+                )
+            )
+
+            duo_rows = (
+                cursor.fetchall()
+            )
+
+            for row in duo_rows:
+
+                duo = dict(row)
+
+                duo_games = (
+                    duo["games"]
+                    or 0
+                )
+
+                duo_wins = (
+                    duo["wins"]
+                    or 0
+                )
+
+                duo["win_rate"] = (
+                    round(
+                        duo_wins
+                        / duo_games
+                        * 100,
+                        1
+                    )
+                    if duo_games > 0
+                    else 0
+                )
+
+                duo_players.append(
+                    duo
+                )
+
+            # ==============================
+            # 현재 시즌 상대 전적 TOP 5
+            # ==============================
+
+            cursor.execute(
+                """
+                SELECT
+                    opponent.discord_id,
+
+                    p.id AS player_id,
+                    p.discord_nickname,
+                    p.riot_name,
+                    p.tier,
+
+                    COUNT(*) AS games,
+
+                    SUM(
+                        CASE
+                            WHEN me.won = 1
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS wins,
+
+                    SUM(
+                        CASE
+                            WHEN me.won = 0
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS losses
+
+                FROM match_players me
+
+                JOIN matches m
+                    ON m.id = me.match_id
+
+                JOIN match_players opponent
+                    ON opponent.match_id = me.match_id
+                    AND opponent.team != me.team
+
+                LEFT JOIN players p
+                    ON p.discord_id = opponent.discord_id
+
+                WHERE me.discord_id = ?
+                  AND m.season_id = ?
+
+                GROUP BY
+                    opponent.discord_id,
+                    p.id,
+                    p.discord_nickname,
+                    p.riot_name,
+                    p.tier
+
+                ORDER BY
+                    games DESC,
+                    wins DESC,
+                    opponent.discord_id ASC
+
+                LIMIT 5
+                """,
+                (
+                    discord_id,
+                    season_id
+                )
+            )
+
+            opponent_rows = (
+                cursor.fetchall()
+            )
+
+            for row in opponent_rows:
+
+                opponent = dict(row)
+
+                opponent_games = (
+                    opponent["games"]
+                    or 0
+                )
+
+                opponent_wins = (
+                    opponent["wins"]
+                    or 0
+                )
+
+                opponent["win_rate"] = (
+                    round(
+                        opponent_wins
+                        / opponent_games
+                        * 100,
+                        1
+                    )
+                    if opponent_games > 0
+                    else 0
+                )
+
+                opponent_players.append(
+                    opponent
+                )
+
+            # ==============================
+            # 현재 시즌 포지션별 성적
+            # ==============================
+
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(
+                        NULLIF(
+                            TRIM(mp.position),
+                            ''
+                        ),
+                        'UNKNOWN'
+                    ) AS position,
+
+                    COUNT(*) AS games,
+
+                    SUM(
+                        CASE
+                            WHEN mp.won = 1
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS wins,
+
+                    SUM(
+                        CASE
+                            WHEN mp.won = 0
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS losses
+
+                FROM match_players mp
+
+                JOIN matches m
+                    ON m.id = mp.match_id
+
+                WHERE mp.discord_id = ?
+                  AND m.season_id = ?
+
+                GROUP BY
+                    COALESCE(
+                        NULLIF(
+                            TRIM(mp.position),
+                            ''
+                        ),
+                        'UNKNOWN'
+                    )
+
+                ORDER BY
+                    games DESC,
+                    wins DESC,
+                    position ASC
+                """,
+                (
+                    discord_id,
+                    season_id
+                )
+            )
+
+            position_rows = (
+                cursor.fetchall()
+            )
+
+            for row in position_rows:
+
+                stat = dict(row)
+
+                position_games = (
+                    stat["games"]
+                    or 0
+                )
+
+                position_wins = (
+                    stat["wins"]
+                    or 0
+                )
+
+                stat["win_rate"] = (
+                    round(
+                        position_wins
+                        / position_games
+                        * 100,
+                        1
+                    )
+                    if position_games > 0
+                    else 0
+                )
+
+                position_stats.append(
+                    stat
+                )
 
         # ==============================
-        # 최근 5경기 폼
+        # 현재 시즌 최근 5경기 폼
         # ==============================
 
         recent_5_win_count = sum(
@@ -416,95 +822,8 @@ def player_detail(
         )
 
         # ==============================
-        # 최근 20경기 레이팅 그래프
+        # 현재 시즌 최근 20경기 요약
         # ==============================
-
-        cursor.execute(
-            """
-            SELECT
-                history.match_id,
-                history.match_date,
-                history.rating_after
-
-            FROM (
-                SELECT
-                    m.id AS match_id,
-                    m.match_date,
-                    mp.rating_after
-
-                FROM match_players mp
-
-                JOIN matches m
-                    ON m.id = mp.match_id
-
-                WHERE mp.discord_id = ?
-
-                ORDER BY
-                    m.id DESC
-
-                LIMIT 20
-            ) AS history
-
-            ORDER BY
-                history.match_id ASC
-            """,
-            (
-                discord_id,
-            )
-        )
-
-        rating_history = (
-            cursor.fetchall()
-        )
-
-        # ==============================
-        # 최근 20경기 상세 변화
-        # ==============================
-
-        cursor.execute(
-            """
-            SELECT
-                recent.match_id,
-                recent.match_date,
-                recent.won,
-                recent.rating_before,
-                recent.rating_after,
-                recent.rating_change
-
-            FROM (
-                SELECT
-                    m.id AS match_id,
-                    m.match_date,
-
-                    mp.won,
-                    mp.rating_before,
-                    mp.rating_after,
-                    mp.rating_change
-
-                FROM match_players mp
-
-                JOIN matches m
-                    ON m.id = mp.match_id
-
-                WHERE mp.discord_id = ?
-
-                ORDER BY
-                    m.id DESC
-
-                LIMIT 20
-            ) AS recent
-
-            ORDER BY
-                recent.match_id ASC
-            """,
-            (
-                discord_id,
-            )
-        )
-
-        recent_results = (
-            cursor.fetchall()
-        )
 
         recent_win_count = sum(
             1
@@ -534,7 +853,9 @@ def player_detail(
         )
 
         # ==============================
-        # 전체 승률
+        # 전체 누적 승률
+        #
+        # 기존 프로필 전체 통계는 유지
         # ==============================
 
         total_games = (
@@ -552,292 +873,6 @@ def player_detail(
             if total_games > 0
             else 0
         )
-
-        # ==============================
-        # 자주 함께한 팀원 TOP 5
-        # ==============================
-
-        cursor.execute(
-            """
-            SELECT
-                teammate.discord_id,
-
-                p.id AS player_id,
-                p.discord_nickname,
-                p.riot_name,
-                p.tier,
-
-                COUNT(*) AS games,
-
-                SUM(
-                    CASE
-                        WHEN me.won = 1
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS wins,
-
-                SUM(
-                    CASE
-                        WHEN me.won = 0
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS losses
-
-            FROM match_players me
-
-            JOIN match_players teammate
-                ON teammate.match_id = me.match_id
-                AND teammate.team = me.team
-                AND teammate.discord_id != me.discord_id
-
-            LEFT JOIN players p
-                ON p.discord_id = teammate.discord_id
-
-            WHERE me.discord_id = ?
-
-            GROUP BY
-                teammate.discord_id,
-                p.id,
-                p.discord_nickname,
-                p.riot_name,
-                p.tier
-
-            ORDER BY
-                games DESC,
-                wins DESC,
-                teammate.discord_id ASC
-
-            LIMIT 5
-            """,
-            (
-                discord_id,
-            )
-        )
-
-        duo_rows = (
-            cursor.fetchall()
-        )
-
-        duo_players = []
-
-        for row in duo_rows:
-
-            duo = dict(row)
-
-            duo_games = (
-                duo["games"]
-                or 0
-            )
-
-            duo_wins = (
-                duo["wins"]
-                or 0
-            )
-
-            duo["win_rate"] = (
-                round(
-                    duo_wins
-                    / duo_games
-                    * 100,
-                    1
-                )
-                if duo_games > 0
-                else 0
-            )
-
-            duo_players.append(
-                duo
-            )
-
-        # ==============================
-        # 상대 전적 TOP 5
-        # ==============================
-
-        cursor.execute(
-            """
-            SELECT
-                opponent.discord_id,
-
-                p.id AS player_id,
-                p.discord_nickname,
-                p.riot_name,
-                p.tier,
-
-                COUNT(*) AS games,
-
-                SUM(
-                    CASE
-                        WHEN me.won = 1
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS wins,
-
-                SUM(
-                    CASE
-                        WHEN me.won = 0
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS losses
-
-            FROM match_players me
-
-            JOIN match_players opponent
-                ON opponent.match_id = me.match_id
-                AND opponent.team != me.team
-
-            LEFT JOIN players p
-                ON p.discord_id = opponent.discord_id
-
-            WHERE me.discord_id = ?
-
-            GROUP BY
-                opponent.discord_id,
-                p.id,
-                p.discord_nickname,
-                p.riot_name,
-                p.tier
-
-            ORDER BY
-                games DESC,
-                wins DESC,
-                opponent.discord_id ASC
-
-            LIMIT 5
-            """,
-            (
-                discord_id,
-            )
-        )
-
-        opponent_rows = (
-            cursor.fetchall()
-        )
-
-        opponent_players = []
-
-        for row in opponent_rows:
-
-            opponent = dict(row)
-
-            opponent_games = (
-                opponent["games"]
-                or 0
-            )
-
-            opponent_wins = (
-                opponent["wins"]
-                or 0
-            )
-
-            opponent["win_rate"] = (
-                round(
-                    opponent_wins
-                    / opponent_games
-                    * 100,
-                    1
-                )
-                if opponent_games > 0
-                else 0
-            )
-
-            opponent_players.append(
-                opponent
-            )
-
-        # ==============================
-        # 포지션별 성적
-        # ==============================
-
-        cursor.execute(
-            """
-            SELECT
-                COALESCE(
-                    NULLIF(
-                        TRIM(position),
-                        ''
-                    ),
-                    'UNKNOWN'
-                ) AS position,
-
-                COUNT(*) AS games,
-
-                SUM(
-                    CASE
-                        WHEN won = 1
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS wins,
-
-                SUM(
-                    CASE
-                        WHEN won = 0
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS losses
-
-            FROM match_players
-
-            WHERE discord_id = ?
-
-            GROUP BY
-                COALESCE(
-                    NULLIF(
-                        TRIM(position),
-                        ''
-                    ),
-                    'UNKNOWN'
-                )
-
-            ORDER BY
-                games DESC,
-                wins DESC,
-                position ASC
-            """,
-            (
-                discord_id,
-            )
-        )
-
-        position_rows = (
-            cursor.fetchall()
-        )
-
-        position_stats = []
-
-        for row in position_rows:
-
-            stat = dict(row)
-
-            position_games = (
-                stat["games"]
-                or 0
-            )
-
-            position_wins = (
-                stat["wins"]
-                or 0
-            )
-
-            stat["win_rate"] = (
-                round(
-                    position_wins
-                    / position_games
-                    * 100,
-                    1
-                )
-                if position_games > 0
-                else 0
-            )
-
-            position_stats.append(
-                stat
-            )
 
     return templates.TemplateResponse(
         request=request,
