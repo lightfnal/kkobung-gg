@@ -107,6 +107,12 @@ def analysis_page(
                 else None
             )
         )
+        scope_started_at = (
+            active_season["started_at"]
+            if analysis_scope == "season"
+            and active_season is not None
+            else None
+        )
         scope_label = (
             active_season["season_name"]
             if analysis_scope == "season"
@@ -114,7 +120,7 @@ def analysis_page(
             else (
                 "현재 시즌"
                 if analysis_scope == "season"
-                else "전체 기록"
+                else "역대 전체 기록"
             )
         )
 
@@ -341,13 +347,17 @@ def analysis_page(
                     WHERE mp.discord_id = ?
                       AND (
                           ? IS NULL
-                          OR m.season_id = ?
+                          OR (
+                              m.season_id = ?
+                              AND m.match_date >= ?
+                          )
                       )
                     """,
                     (
                         discord_id,
                         scope_season_id,
                         scope_season_id,
+                        scope_started_at,
                     )
                 )
 
@@ -449,13 +459,17 @@ def analysis_page(
                     WHERE m.mvp_discord_id = ?
                       AND (
                           ? IS NULL
-                          OR m.season_id = ?
+                          OR (
+                              m.season_id = ?
+                              AND m.match_date >= ?
+                          )
                       )
                     """,
                     (
                         discord_id,
                         scope_season_id,
                         scope_season_id,
+                        scope_started_at,
                     )
                 )
 
@@ -497,7 +511,10 @@ def analysis_page(
                     WHERE mp.discord_id = ?
                       AND (
                           ? IS NULL
-                          OR m.season_id = ?
+                          OR (
+                              m.season_id = ?
+                              AND m.match_date >= ?
+                          )
                       )
                     ORDER BY m.id DESC
                     LIMIT 20
@@ -506,6 +523,7 @@ def analysis_page(
                         discord_id,
                         scope_season_id,
                         scope_season_id,
+                        scope_started_at,
                     )
                 )
 
@@ -769,7 +787,10 @@ def analysis_page(
                     WHERE mp.discord_id = ?
                       AND (
                           ? IS NULL
-                          OR m.season_id = ?
+                          OR (
+                              m.season_id = ?
+                              AND m.match_date >= ?
+                          )
                       )
 
                     GROUP BY
@@ -789,6 +810,7 @@ def analysis_page(
                         discord_id,
                         scope_season_id,
                         scope_season_id,
+                        scope_started_at,
                     )
                 )
 
@@ -889,7 +911,10 @@ def analysis_page(
                     WHERE me.discord_id = ?
                       AND (
                           ? IS NULL
-                          OR m.season_id = ?
+                          OR (
+                              m.season_id = ?
+                              AND m.match_date >= ?
+                          )
                       )
 
                     GROUP BY
@@ -909,6 +934,7 @@ def analysis_page(
                         discord_id,
                         scope_season_id,
                         scope_season_id,
+                        scope_started_at,
                     )
                 )
 
@@ -988,7 +1014,10 @@ def analysis_page(
                     WHERE me.discord_id = ?
                       AND (
                           ? IS NULL
-                          OR m.season_id = ?
+                          OR (
+                              m.season_id = ?
+                              AND m.match_date >= ?
+                          )
                       )
 
                     GROUP BY
@@ -1008,6 +1037,7 @@ def analysis_page(
                         discord_id,
                         scope_season_id,
                         scope_season_id,
+                        scope_started_at,
                     )
                 )
 
