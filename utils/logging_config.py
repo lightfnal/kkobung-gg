@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -27,6 +28,7 @@ def configure_logging(
     max_bytes=DEFAULT_MAX_BYTES,
     backup_count=DEFAULT_BACKUP_COUNT
 ):
+    
     """터미널과 순환 로그 파일에 운영 로그를 기록합니다."""
 
     if log_dir is None:
@@ -71,8 +73,23 @@ def configure_logging(
     error_handler.setFormatter(formatter)
     error_handler.inhouse_bot_handler = True
 
+    console_handler = logging.StreamHandler(
+        sys.stdout
+    )
+
+    console_handler.setLevel(
+        logging.INFO
+    )
+
+    console_handler.setFormatter(
+        formatter
+    )
+
+    console_handler.inhouse_bot_handler = True
+
     root_logger.addHandler(bot_handler)
     root_logger.addHandler(error_handler)
+    root_logger.addHandler(console_handler)
 
     return {
         "bot": log_dir / "bot.log",
