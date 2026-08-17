@@ -19,6 +19,9 @@ from web.routes.api_season import (
 from web.routes.api_stats import (
     router as api_stats_router
 )
+from web.routes.api_ranking import (
+    router as api_ranking_router
+)
 from web.routes.home import router as home_router
 from web.routes.search import router as search_router
 from web.routes.api import router as api_router
@@ -117,6 +120,9 @@ app.include_router(
 )
 app.include_router(
     api_stats_router
+)
+app.include_router(
+    api_ranking_router
 )
 app.include_router(admin_router)
 
