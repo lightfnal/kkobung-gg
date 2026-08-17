@@ -35,6 +35,12 @@ button:disabled { cursor: wait; opacity: .55; }
 .admin-message { padding: 12px 14px; border-radius: 9px; background: #1c3529; color: #82e5aa !important; }
 .admin-error { background: #3a2024; color: #ff9ca6 !important; }
 .admin-empty { padding: 30px; text-align: center; }
+.admin-auto-status { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; padding: 15px; border: 1px solid #29313d; border-radius: 11px; background: #12171d; }
+.admin-auto-status p { margin: 4px 0 0; }
+.admin-status-badge { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; background: #293650; color: #adc0ff; font-size: 12px; font-weight: 800; }
+.admin-status-badge.status-success { background: #1c422e; color: #7ee2a7; }
+.admin-status-badge.status-failed { background: #4a252c; color: #ff9ca6; }
+.admin-status-badge.status-disabled { background: #303640; color: #aab3c0; }
 .admin-restore-panel { margin-top: 20px; }
 .admin-danger-badge { padding: 7px 10px; border: 1px solid #75404a; border-radius: 999px; color: #ff9ca6; font-size: 12px; font-weight: 700; }
 .admin-restore-grid { display: grid; gap: 14px; }

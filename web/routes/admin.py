@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import sqlite3
 import threading
@@ -66,6 +67,16 @@ class StagedUploadInfo(BaseModel):
 class RestoreScheduled(BaseModel):
     success: bool
     message: str
+
+
+class AutoBackupStatus(BaseModel):
+    enabled: bool
+    scheduled_hour_kst: int
+    status: str
+    last_attempt_at: str | None = None
+    last_success_at: str | None = None
+    backup: str | None = None
+    error: str | None = None
 
 
 def _authenticate(
@@ -202,6 +213,23 @@ def _max_backups() -> int:
     return limit
 
 
+def _auto_backup_hour() -> int:
+    raw_value = os.getenv("AUTO_BACKUP_HOUR_KST", "4")
+    try:
+        hour = int(raw_value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AUTO_BACKUP_HOUR_KST must be an integer",
+        ) from exc
+    if not 0 <= hour <= 23:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AUTO_BACKUP_HOUR_KST must be between 0 and 23",
+        )
+    return hour
+
+
 def _validate_uploaded_database(path: Path) -> None:
     try:
         with path.open("rb") as uploaded_file:
@@ -317,6 +345,38 @@ def download_backup(filename: str) -> FileResponse:
         path=target,
         media_type="application/vnd.sqlite3",
         filename=target.name,
+    )
+
+
+@router.get(
+    "/auto-backup-status",
+    response_model=AutoBackupStatus,
+    dependencies=[Depends(_authenticate)],
+)
+def get_auto_backup_status() -> AutoBackupStatus:
+    enabled_value = os.getenv("AUTO_BACKUP_ENABLED", "true").strip().lower()
+    enabled = enabled_value in {"1", "true", "yes", "on"}
+    scheduled_hour = _auto_backup_hour()
+    status_path = Path(DB_PATH).expanduser().resolve().parent / ".auto_backup_status.json"
+    data: dict = {}
+    try:
+        if status_path.is_file():
+            loaded = json.loads(status_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Automatic backup status could not be read",
+        ) from exc
+    return AutoBackupStatus(
+        enabled=enabled,
+        scheduled_hour_kst=scheduled_hour,
+        status=str(data.get("status") or ("waiting" if enabled else "disabled")),
+        last_attempt_at=data.get("last_attempt_at"),
+        last_success_at=data.get("last_success_at"),
+        backup=data.get("backup"),
+        error=data.get("error"),
     )
 
 

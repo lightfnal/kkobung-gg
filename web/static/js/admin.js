@@ -41,22 +41,50 @@ async function api(path, options = {}) {
 function setText(selector, value) { document.querySelector(selector).textContent = value; }
 
 async function loadDashboard() {
-    const [infoResponse, backupsResponse, uploadResponse] = await Promise.all([
+    const [infoResponse, backupsResponse, uploadResponse, autoBackupResponse] = await Promise.all([
         api("/admin/db-info"),
         api("/admin/backups"),
         api("/admin/upload-db"),
+        api("/admin/auto-backup-status"),
     ]);
     const info = await infoResponse.json();
     const backups = await backupsResponse.json();
     const stagedUpload = await uploadResponse.json();
+    const autoBackup = await autoBackupResponse.json();
     setText("#player-count", info.players);
     setText("#match-count", info.matches);
     setText("#database-size", info.size_mb);
     setText("#backup-count", info.backup_count);
     renderBackups(backups);
     renderStagedUpload(stagedUpload);
+    renderAutoBackupStatus(autoBackup);
     loginPanel.hidden = true;
     dashboard.hidden = false;
+}
+
+function renderAutoBackupStatus(status) {
+    const badge = document.querySelector("#auto-backup-badge");
+    const detail = document.querySelector("#auto-backup-detail");
+    badge.className = "admin-status-badge";
+    const hour = String(status.scheduled_hour_kst).padStart(2, "0");
+    if (!status.enabled || status.status === "disabled") {
+        badge.textContent = "사용 안 함";
+        badge.classList.add("status-disabled");
+        detail.textContent = "자동 백업이 비활성화되어 있습니다.";
+    } else if (status.status === "success") {
+        badge.textContent = "정상";
+        badge.classList.add("status-success");
+        const successTime = new Date(status.last_success_at).toLocaleString("ko-KR");
+        detail.textContent = `마지막 성공: ${successTime} · ${status.backup} · 매일 ${hour}:00 KST`;
+    } else if (status.status === "failed") {
+        badge.textContent = "실패";
+        badge.classList.add("status-failed");
+        const attemptTime = new Date(status.last_attempt_at).toLocaleString("ko-KR");
+        detail.textContent = `마지막 시도: ${attemptTime} · ${status.error || "오류 발생"}`;
+    } else {
+        badge.textContent = "대기 중";
+        detail.textContent = `아직 자동 백업 실행 기록이 없습니다. 매일 ${hour}:00 KST에 실행됩니다.`;
+    }
 }
 
 function renderStagedUpload(upload) {

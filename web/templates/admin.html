@@ -54,6 +54,13 @@
                     <div><h2>백업 파일</h2><p>매일 오전 4시(KST)에 자동 백업되며, 일반 백업은 최신 20개만 보관됩니다.</p></div>
                     <button id="create-backup-button" type="button" class="admin-primary-button">새 백업 만들기</button>
                 </div>
+                <div class="admin-auto-status">
+                    <span id="auto-backup-badge" class="admin-status-badge">확인 중</span>
+                    <div>
+                        <strong>자동 백업 상태</strong>
+                        <p id="auto-backup-detail">자동 백업 기록을 확인하고 있습니다.</p>
+                    </div>
+                </div>
                 <p id="action-message" class="admin-message" hidden></p>
                 <div class="admin-table-wrap">
                     <table class="admin-table">

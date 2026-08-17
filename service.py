@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import signal
 import shutil
@@ -39,6 +40,25 @@ def _integer_setting(name, default, minimum, maximum):
     return value
 
 
+def _write_auto_backup_status(**updates):
+    status_path = DB_PATH.parent / ".auto_backup_status.json"
+    temporary = status_path.with_suffix(".tmp")
+    current = {}
+    try:
+        if status_path.is_file():
+            current = json.loads(status_path.read_text(encoding="utf-8"))
+            if not isinstance(current, dict):
+                current = {}
+    except (OSError, json.JSONDecodeError):
+        current = {}
+    current.update(updates)
+    temporary.write_text(
+        json.dumps(current, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(temporary, status_path)
+
+
 def run_scheduled_backup_if_due():
     enabled = os.getenv("AUTO_BACKUP_ENABLED", "true").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
@@ -63,12 +83,29 @@ def run_scheduled_backup_if_due():
         temporary_marker = marker.with_suffix(".tmp")
         temporary_marker.write_text(today, encoding="utf-8")
         os.replace(temporary_marker, marker)
+        _write_auto_backup_status(
+            status="success",
+            scheduled_hour_kst=backup_hour,
+            last_attempt_at=now.isoformat(),
+            last_success_at=now.isoformat(),
+            backup=result.path.name,
+            error=None,
+        )
         logger.info(
             "자동 DB 백업 완료: %s (오래된 백업 %s개 정리)",
             result.path,
             result.deleted_old_backups,
         )
     except (BackupError, OSError):
+        try:
+            _write_auto_backup_status(
+                status="failed",
+                scheduled_hour_kst=backup_hour,
+                last_attempt_at=now.isoformat(),
+                error="자동 백업 생성에 실패했습니다.",
+            )
+        except OSError:
+            logger.exception("자동 백업 상태 기록에 실패했습니다.")
         logger.exception("자동 DB 백업에 실패했습니다.")
 
 
