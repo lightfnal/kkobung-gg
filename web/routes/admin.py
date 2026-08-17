@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from storage.database_backup import BackupError, create_database_backup
 from storage.paths import BACKUP_DIR, DB_PATH
 
 
@@ -201,20 +202,6 @@ def _max_backups() -> int:
     return limit
 
 
-def _prune_backups(limit: int) -> int:
-    deleted = 0
-    for old_backup in _backup_files()[limit:]:
-        try:
-            old_backup.unlink()
-            deleted += 1
-        except OSError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Old backups could not be cleaned up",
-            ) from exc
-    return deleted
-
-
 def _validate_uploaded_database(path: Path) -> None:
     try:
         with path.open("rb") as uploaded_file:
@@ -345,44 +332,23 @@ def create_backup() -> BackupCreated:
     retention_limit = _max_backups()
 
     with _backup_lock:
-        timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")
-        destination = directory / f"backup_{timestamp}.db"
-        temporary = directory / f".{destination.name}.tmp"
         try:
-            temporary.unlink(missing_ok=True)
-            with sqlite3.connect(source, timeout=30.0) as source_connection:
-                source_connection.execute("PRAGMA busy_timeout = 30000")
-                with sqlite3.connect(temporary, timeout=30.0) as backup_connection:
-                    source_connection.backup(
-                        backup_connection,
-                        pages=256,
-                        sleep=0.05,
-                    )
-                    integrity = backup_connection.execute(
-                        "PRAGMA integrity_check"
-                    ).fetchone()
-            if integrity is None or integrity[0] != "ok":
-                raise sqlite3.DatabaseError(
-                    "Created backup failed integrity_check"
-                )
-            os.replace(temporary, destination)
-        except (OSError, sqlite3.Error) as exc:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
+            result = create_database_backup(
+                source=source,
+                directory=directory,
+                retention_limit=retention_limit,
+            )
+        except BackupError as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database backup could not be created",
             ) from exc
 
-        deleted_old_backups = _prune_backups(retention_limit)
-
     return BackupCreated(
         success=True,
-        backup=destination.name,
+        backup=result.path.name,
         retention_limit=retention_limit,
-        deleted_old_backups=deleted_old_backups,
+        deleted_old_backups=result.deleted_old_backups,
     )
 
 

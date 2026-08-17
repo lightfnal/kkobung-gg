@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 
 logging.basicConfig(
@@ -18,7 +19,57 @@ logging.basicConfig(
 
 logger = logging.getLogger("service")
 
+from storage.database_backup import BackupError, create_database_backup
 from storage.paths import BACKUP_DIR, DB_PATH
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def _integer_setting(name, default, minimum, maximum):
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} 환경 변수는 정수여야 합니다.") from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeError(
+            f"{name} 환경 변수는 {minimum}~{maximum} 범위여야 합니다."
+        )
+    return value
+
+
+def run_scheduled_backup_if_due():
+    enabled = os.getenv("AUTO_BACKUP_ENABLED", "true").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
+
+    backup_hour = _integer_setting("AUTO_BACKUP_HOUR_KST", 4, 0, 23)
+    retention_limit = _integer_setting("ADMIN_MAX_BACKUPS", 20, 1, 1000)
+    now = datetime.now(KST)
+    if now.hour != backup_hour:
+        return
+
+    marker = DB_PATH.parent / ".last_auto_backup_date"
+    today = now.date().isoformat()
+    try:
+        if marker.is_file() and marker.read_text(encoding="utf-8").strip() == today:
+            return
+        result = create_database_backup(
+            source=DB_PATH,
+            directory=BACKUP_DIR,
+            retention_limit=retention_limit,
+        )
+        temporary_marker = marker.with_suffix(".tmp")
+        temporary_marker.write_text(today, encoding="utf-8")
+        os.replace(temporary_marker, marker)
+        logger.info(
+            "자동 DB 백업 완료: %s (오래된 백업 %s개 정리)",
+            result.path,
+            result.deleted_old_backups,
+        )
+    except (BackupError, OSError):
+        logger.exception("자동 DB 백업에 실패했습니다.")
 
 
 def apply_pending_restore():
@@ -146,9 +197,15 @@ def main():
     )
 
     exit_code = 0
+    next_backup_check = 0.0
 
     try:
         while not shutting_down:
+            current_time = time.monotonic()
+            if current_time >= next_backup_check:
+                run_scheduled_backup_if_due()
+                next_backup_check = current_time + 60.0
+
             for name, process in processes:
                 return_code = process.poll()
 
