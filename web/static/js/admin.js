@@ -1,6 +1,8 @@
 "use strict";
 
 const tokenKey = "kkobung_admin_token";
+const tokenTimeKey = "kkobung_admin_token_time";
+const sessionLifetimeMs = 30 * 60 * 1000;
 const loginPanel = document.querySelector("#login-panel");
 const dashboard = document.querySelector("#dashboard");
 const tokenForm = document.querySelector("#token-form");
@@ -20,7 +22,17 @@ const auditList = document.querySelector("#audit-list");
 const emptyAudit = document.querySelector("#empty-audit");
 let uploadIsStaged = false;
 
-function token() { return sessionStorage.getItem(tokenKey) || ""; }
+function clearSession() {
+    sessionStorage.removeItem(tokenKey);
+    sessionStorage.removeItem(tokenTimeKey);
+}
+function token() {
+    const savedToken = sessionStorage.getItem(tokenKey) || "";
+    const savedAt = Number(sessionStorage.getItem(tokenTimeKey) || "0");
+    if (savedToken && savedAt && Date.now() - savedAt < sessionLifetimeMs) return savedToken;
+    clearSession();
+    return "";
+}
 function headers() { return { Authorization: `Bearer ${token()}` }; }
 function showMessage(element, message, error = false) {
     element.textContent = message;
@@ -32,6 +44,7 @@ function hideMessage(element) { element.hidden = true; }
 async function api(path, options = {}) {
     const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
     if (response.status === 401) throw new Error("관리자 토큰이 올바르지 않습니다.");
+    if (response.status === 429) throw new Error("로그인 실패가 너무 많습니다. 15분 후 다시 시도하세요.");
     if (!response.ok) {
         let detail = "요청을 처리하지 못했습니다.";
         try { detail = (await response.json()).detail || detail; } catch (_) {}
@@ -73,6 +86,8 @@ function renderAuditLog(entries) {
         backup_downloaded: "백업 다운로드",
         database_uploaded: "DB 업로드",
         restore_scheduled: "DB 복원 요청",
+        login_failed: "로그인 실패",
+        login_succeeded: "로그인 성공",
     };
     auditList.replaceChildren();
     emptyAudit.hidden = entries.length !== 0;
@@ -170,12 +185,16 @@ tokenForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     hideMessage(loginError);
     sessionStorage.setItem(tokenKey, tokenInput.value.trim());
-    try { await loadDashboard(); }
-    catch (error) { sessionStorage.removeItem(tokenKey); showMessage(loginError, error.message, true); }
+    sessionStorage.setItem(tokenTimeKey, String(Date.now()));
+    try {
+        await api("/admin/login-check", { method: "POST" });
+        await loadDashboard();
+    }
+    catch (error) { clearSession(); showMessage(loginError, error.message, true); }
 });
 
 document.querySelector("#refresh-button").addEventListener("click", () => loadDashboard().catch((error) => showMessage(actionMessage, error.message, true)));
-document.querySelector("#logout-button").addEventListener("click", () => { sessionStorage.removeItem(tokenKey); location.reload(); });
+document.querySelector("#logout-button").addEventListener("click", () => { clearSession(); location.reload(); });
 document.querySelector("#create-backup-button").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
@@ -230,4 +249,4 @@ restoreButton.addEventListener("click", async () => {
     }
 });
 
-if (token()) loadDashboard().catch(() => sessionStorage.removeItem(tokenKey));
+if (token()) loadDashboard().catch(() => clearSession());

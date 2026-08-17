@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -27,8 +27,14 @@ templates = Jinja2Templates(directory="web/templates")
 _backup_lock = threading.Lock()
 _upload_lock = threading.Lock()
 _audit_lock = threading.Lock()
+_login_lock = threading.Lock()
+_login_failures: dict[str, list[float]] = {}
+_login_blocked_until: dict[str, float] = {}
 _DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _SQLITE_HEADER = b"SQLite format 3\x00"
+_LOGIN_WINDOW_SECONDS = 15 * 60
+_LOGIN_BLOCK_SECONDS = 15 * 60
+_LOGIN_MAX_FAILURES = 5
 
 
 class DatabaseInfo(BaseModel):
@@ -89,15 +95,37 @@ class AuditItem(BaseModel):
 
 
 def _authenticate(
+    request: Request,
+    response: Response,
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
     """Validate an RFC 6750-style Authorization: Bearer token header."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
     configured_token = os.getenv("ADMIN_TOKEN")
     if not configured_token:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Admin API is not configured",
         )
+
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    with _login_lock:
+        blocked_until = _login_blocked_until.get(client_ip, 0.0)
+        if blocked_until > now:
+            retry_after = max(1, int(blocked_until - now))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed admin login attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
+        if blocked_until:
+            _login_blocked_until.pop(client_ip, None)
 
     scheme, separator, supplied_token = (authorization or "").partition(" ")
     if (
@@ -106,11 +134,29 @@ def _authenticate(
         or not supplied_token
         or not hmac.compare_digest(supplied_token, configured_token)
     ):
+        with _login_lock:
+            recent = [
+                attempt
+                for attempt in _login_failures.get(client_ip, [])
+                if now - attempt < _LOGIN_WINDOW_SECONDS
+            ]
+            recent.append(now)
+            _login_failures[client_ip] = recent
+            if len(recent) >= _LOGIN_MAX_FAILURES:
+                _login_blocked_until[client_ip] = now + _LOGIN_BLOCK_SECONDS
+                _login_failures.pop(client_ip, None)
+        _write_audit(request, "login_failed", "failed", "invalid token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing admin token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    with _login_lock:
+        had_failures = bool(_login_failures.pop(client_ip, None))
+        _login_blocked_until.pop(client_ip, None)
+    if had_failures:
+        _write_audit(request, "login_succeeded", "success", "authenticated after failed attempt")
 
 
 def _db_path() -> Path:
@@ -331,6 +377,16 @@ def admin_page(request: Request) -> HTMLResponse:
         name="admin.html",
         context={},
     )
+
+
+@router.post("/login-check")
+def login_check(
+    request: Request,
+    _: Annotated[None, Depends(_authenticate)],
+) -> dict[str, bool]:
+    """Validate a dashboard login once and record the successful sign-in."""
+    _write_audit(request, "login_succeeded", "success", "dashboard login")
+    return {"success": True}
 
 
 @router.get(
