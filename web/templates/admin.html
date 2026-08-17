@@ -63,6 +63,53 @@
                 </div>
                 <p id="empty-backups" class="admin-empty" hidden>생성된 백업이 없습니다.</p>
             </section>
+
+            <section class="admin-panel admin-restore-panel">
+                <div class="admin-section-heading">
+                    <div>
+                        <h2>데이터베이스 교체</h2>
+                        <p>새 DB를 먼저 검사하여 올린 뒤, 별도의 확인 과정을 거쳐 복원합니다.</p>
+                    </div>
+                    <span class="admin-danger-badge">주의가 필요한 작업</span>
+                </div>
+
+                <div class="admin-restore-grid">
+                    <div class="admin-restore-step">
+                        <span class="admin-step-number">1</span>
+                        <div>
+                            <h3>DB 파일 업로드</h3>
+                            <p>SQLite 데이터베이스 파일만 선택하세요. 업로드만으로 현재 DB가 바뀌지는 않습니다.</p>
+                            <form id="upload-form" class="admin-upload-form">
+                                <input id="database-file" type="file" accept=".db,application/vnd.sqlite3" required>
+                                <button id="upload-button" type="submit" class="admin-secondary-button">검사 후 업로드</button>
+                            </form>
+                            <p id="upload-message" class="admin-message" hidden></p>
+                        </div>
+                    </div>
+
+                    <div class="admin-restore-step">
+                        <span class="admin-step-number">2</span>
+                        <div>
+                            <h3>업로드 상태</h3>
+                            <p id="staged-upload-status">업로드된 DB를 확인하는 중입니다.</p>
+                        </div>
+                    </div>
+
+                    <div class="admin-restore-step admin-danger-step">
+                        <span class="admin-step-number">3</span>
+                        <div>
+                            <h3>현재 DB 교체</h3>
+                            <p>복원 직전에 현재 DB가 자동 백업되며 웹과 봇이 잠시 재시작됩니다.</p>
+                            <label for="restore-confirmation">계속하려면 아래에 <strong>복원</strong>이라고 입력하세요.</label>
+                            <div class="admin-confirm-row">
+                                <input id="restore-confirmation" type="text" autocomplete="off" disabled>
+                                <button id="restore-button" type="button" class="admin-danger-button" disabled>DB 복원 실행</button>
+                            </div>
+                            <p id="restore-message" class="admin-message" hidden></p>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </div>
     </main>
 </body>

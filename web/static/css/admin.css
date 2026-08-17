@@ -35,9 +35,25 @@ button:disabled { cursor: wait; opacity: .55; }
 .admin-message { padding: 12px 14px; border-radius: 9px; background: #1c3529; color: #82e5aa !important; }
 .admin-error { background: #3a2024; color: #ff9ca6 !important; }
 .admin-empty { padding: 30px; text-align: center; }
+.admin-restore-panel { margin-top: 20px; }
+.admin-danger-badge { padding: 7px 10px; border: 1px solid #75404a; border-radius: 999px; color: #ff9ca6; font-size: 12px; font-weight: 700; }
+.admin-restore-grid { display: grid; gap: 14px; }
+.admin-restore-step { display: grid; grid-template-columns: 38px 1fr; gap: 14px; padding: 20px; border: 1px solid #29313d; border-radius: 12px; background: #12171d; }
+.admin-restore-step h3 { margin: 2px 0 6px; }
+.admin-restore-step p { margin: 0 0 14px; }
+.admin-step-number { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #293650; color: #9eb4ff; font-weight: 800; }
+.admin-upload-form, .admin-confirm-row { display: flex; align-items: center; gap: 10px; }
+.admin-upload-form input[type="file"] { width: 100%; padding: 10px; border: 1px dashed #465366; border-radius: 9px; color: #cdd8e8; }
+.admin-danger-step { border-color: #59343b; }
+.admin-danger-step label { display: block; margin-bottom: 9px; color: #dce5f2; }
+.admin-confirm-row input { flex: 1; min-width: 0; padding: 12px; border: 1px solid #59343b; border-radius: 9px; background: #0f141a; color: white; }
+.admin-danger-button { padding: 11px 16px; border: 1px solid #a94c5b; border-radius: 9px; background: #7d2e3b; color: white; font-weight: 800; }
+.admin-danger-button:disabled { border-color: #4a3337; background: #302328; }
 @media (max-width: 760px) {
     .admin-shell { padding-top: 24px; }
     .admin-header, .admin-section-heading { align-items: flex-start; flex-direction: column; }
     .admin-stat-grid { grid-template-columns: repeat(2, 1fr); }
     .admin-section-heading button { width: 100%; }
+    .admin-upload-form, .admin-confirm-row { align-items: stretch; flex-direction: column; }
+    .admin-upload-form button, .admin-confirm-row button { width: 100%; }
 }

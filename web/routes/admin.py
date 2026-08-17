@@ -55,6 +55,12 @@ class DatabaseUploaded(BaseModel):
     integrity_check: str
 
 
+class StagedUploadInfo(BaseModel):
+    staged: bool
+    upload: str | None = None
+    size_mb: float | None = None
+
+
 class RestoreScheduled(BaseModel):
     success: bool
     message: str
@@ -384,6 +390,30 @@ def upload_database(
         upload=destination.name,
         size_mb=round(bytes_written / (1024 * 1024), 2),
         integrity_check="ok",
+    )
+
+
+@router.get(
+    "/upload-db",
+    response_model=StagedUploadInfo,
+    dependencies=[Depends(_authenticate)],
+)
+def get_staged_upload() -> StagedUploadInfo:
+    live_database = _db_path()
+    upload = live_database.parent / "upload.db"
+    if not upload.is_file():
+        return StagedUploadInfo(staged=False)
+    try:
+        size_mb = round(upload.stat().st_size / (1024 * 1024), 2)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Staged database information could not be read",
+        ) from exc
+    return StagedUploadInfo(
+        staged=True,
+        upload=upload.name,
+        size_mb=size_mb,
     )
 
 
