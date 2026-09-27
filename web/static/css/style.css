@@ -1754,6 +1754,101 @@ nav a:hover{
    플레이어 현재 시즌
 ========================================================= */
 
+.champion-stats-section{
+    margin-top: 24px;
+    padding: 24px;
+    border: 1px solid #303844;
+    border-radius: 14px;
+    background: #1c222a;
+}
+
+.champion-stats-header{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.champion-stats-header h2{
+    margin: 0 0 6px;
+}
+
+.champion-stats-header p{
+    margin: 0;
+    color: #91a0b5;
+}
+
+.most-champion-badge{
+    padding: 8px 12px;
+    border: 1px solid #b89625;
+    border-radius: 999px;
+    color: #ffd84d;
+    background: rgba(184, 150, 37, .12);
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.champion-stats-grid{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.champion-stat-card{
+    display: grid;
+    grid-template-columns: 28px 54px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid #303844;
+    border-radius: 10px;
+    background: #171c23;
+}
+
+.champion-stat-rank{
+    color: #7f8ca0;
+    font-weight: 800;
+    text-align: center;
+}
+
+.champion-stat-image{
+    width: 54px;
+    height: 54px;
+    border-radius: 10px;
+    object-fit: cover;
+}
+
+.champion-stat-info{
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.champion-stat-info strong{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.champion-stat-info span,
+.champion-stat-winrate small{
+    color: #91a0b5;
+    font-size: 13px;
+}
+
+.champion-stat-winrate{
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.champion-stat-winrate strong{
+    color: #48b9ff;
+}
+
 .player-season-section{
     margin:40px 0;
 }
@@ -8695,5 +8790,30 @@ nav a:hover{
     .compare-stat-label{
         padding:12px 10px;
         font-size:12px;
+    }
+}
+
+@media(max-width:700px){
+    .champion-stats-section{
+        padding:16px;
+    }
+
+    .champion-stats-header{
+        align-items:flex-start;
+        flex-direction:column;
+    }
+
+    .champion-stats-grid{
+        grid-template-columns:1fr;
+    }
+
+    .champion-stat-card{
+        grid-template-columns:24px 48px minmax(0, 1fr) auto;
+        gap:9px;
+    }
+
+    .champion-stat-image{
+        width:48px;
+        height:48px;
     }
 }
