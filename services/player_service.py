@@ -4,6 +4,8 @@ from storage.sqlite_db import (
     update_player,
     update_stats,
     update_player_discord_nickname,
+    sync_player_guild_membership,
+    set_player_guild_membership,
     delete_player,
     get_all_players_dict
 )
@@ -53,6 +55,22 @@ class PlayerService:
         return update_player_discord_nickname(
             discord_id,
             discord_nickname
+        )
+
+    @staticmethod
+    def sync_guild_membership(member_ids):
+        return sync_player_guild_membership(
+            member_ids
+        )
+
+    @staticmethod
+    def set_guild_membership(
+        discord_id,
+        is_member
+    ):
+        return set_player_guild_membership(
+            discord_id,
+            is_member
         )
 
     @staticmethod
