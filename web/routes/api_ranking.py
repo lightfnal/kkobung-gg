@@ -56,6 +56,8 @@ def ranking_api():
 
             FROM players
 
+            WHERE is_guild_member = 1
+
             ORDER BY
                 rating DESC,
                 wins DESC,
