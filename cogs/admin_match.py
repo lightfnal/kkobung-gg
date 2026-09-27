@@ -36,6 +36,40 @@ class AdminMatch(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self._guild_commands_synced = False
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """전역 명령 전파를 기다리지 않고 현재 서버에 즉시 반영합니다."""
+        if self._guild_commands_synced:
+            return
+
+        self._guild_commands_synced = True
+
+        for guild in self.bot.guilds:
+            try:
+                self.bot.tree.copy_global_to(guild=guild)
+                synced = await self.bot.tree.sync(guild=guild)
+                logger.info(
+                    "서버 슬래시 명령어 즉시 동기화 완료 | "
+                    "서버=%s(%s) | 명령어=%s개",
+                    guild.name,
+                    guild.id,
+                    len(synced)
+                )
+                for command in synced:
+                    logger.info(
+                        "서버 동기화 명령어 | 서버=%s | /%s",
+                        guild.id,
+                        command.name
+                    )
+            except Exception:
+                logger.exception(
+                    "서버 슬래시 명령어 즉시 동기화 실패 | "
+                    "서버=%s(%s)",
+                    guild.name,
+                    guild.id
+                )
 
     @discord.app_commands.command(
         name="경기강제종료",
