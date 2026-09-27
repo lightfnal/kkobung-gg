@@ -20,9 +20,87 @@ class Profile(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self._nickname_sync_done = False
 
     def get_join_cog(self):
         return self.bot.get_cog("Join")
+
+    def refresh_join_profiles(self):
+        join_cog = self.get_join_cog()
+
+        if join_cog is not None:
+            join_cog.reload_profiles()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """재시작 시 가입자 이름을 현재 Discord 서버 별명과 맞춥니다."""
+
+        if self._nickname_sync_done:
+            return
+
+        self._nickname_sync_done = True
+        updated_count = 0
+
+        for guild in self.bot.guilds:
+            for member in guild.members:
+                if member.bot:
+                    continue
+
+                try:
+                    changed = (
+                        PlayerService.update_discord_nickname(
+                            str(member.id),
+                            member.display_name
+                        )
+                    )
+
+                    if changed:
+                        updated_count += 1
+
+                except Exception:
+                    logger.exception(
+                        "Discord 닉네임 동기화 실패 | 사용자=%s",
+                        member.id
+                    )
+
+        if updated_count:
+            self.refresh_join_profiles()
+
+        logger.info(
+            "Discord 닉네임 초기 동기화 완료 | 변경=%s명",
+            updated_count
+        )
+
+    @commands.Cog.listener()
+    async def on_member_update(
+        self,
+        before: discord.Member,
+        after: discord.Member
+    ):
+        """가입자가 서버 별명을 바꾸면 사이트 표시 이름도 갱신합니다."""
+
+        if after.bot or before.display_name == after.display_name:
+            return
+
+        try:
+            changed = PlayerService.update_discord_nickname(
+                str(after.id),
+                after.display_name
+            )
+
+            if changed:
+                self.refresh_join_profiles()
+                logger.info(
+                    "Discord 닉네임 자동 동기화 | 사용자=%s | 닉네임=%s",
+                    after.id,
+                    after.display_name
+                )
+
+        except Exception:
+            logger.exception(
+                "Discord 닉네임 자동 동기화 실패 | 사용자=%s",
+                after.id
+            )
 
     async def process_registration(
         self,
