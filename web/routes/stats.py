@@ -36,6 +36,7 @@ def stats_page(
             """
             SELECT COUNT(*) AS count
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -70,6 +71,7 @@ def stats_page(
                 AVG(rating) AS average_rating,
                 MAX(rating) AS highest_rating
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -191,6 +193,8 @@ def stats_page(
 
             FROM players
 
+            WHERE is_guild_member = 1
+
             ORDER BY
                 rating DESC,
                 wins DESC,
@@ -231,6 +235,7 @@ def stats_page(
             JOIN players p
                 ON p.discord_id
                     = m.mvp_discord_id
+               AND p.is_guild_member = 1
 
             WHERE m.mvp_discord_id IS NOT NULL
               AND TRIM(m.mvp_discord_id) != ''
@@ -291,6 +296,7 @@ def stats_page(
             JOIN players p
                 ON p.discord_id
                     = mp.discord_id
+               AND p.is_guild_member = 1
 
             GROUP BY
                 p.id,
@@ -377,6 +383,7 @@ def stats_page(
             JOIN players p
                 ON p.discord_id
                     = mp.discord_id
+               AND p.is_guild_member = 1
 
             GROUP BY
                 p.id,
@@ -469,7 +476,8 @@ def stats_page(
 
             FROM players
 
-            WHERE best_win_streak > 0
+            WHERE is_guild_member = 1
+              AND best_win_streak > 0
 
             ORDER BY
                 best_win_streak DESC,
@@ -731,6 +739,7 @@ def stats_page(
             JOIN players p
                 ON p.discord_id
                     = rf.discord_id
+               AND p.is_guild_member = 1
             """
         )
 
@@ -883,6 +892,8 @@ def stats_page(
                     AS average_rating
 
             FROM players
+
+            WHERE is_guild_member = 1
 
             GROUP BY
 

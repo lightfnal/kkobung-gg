@@ -140,6 +140,7 @@ def analysis_page(
                 wins,
                 losses
             FROM players
+            WHERE is_guild_member = 1
             ORDER BY
                 rating DESC,
                 wins DESC,
@@ -195,6 +196,7 @@ def analysis_page(
                     mvp
                 FROM players
                 WHERE id = ?
+                  AND is_guild_member = 1
                 """,
                 (
                     player_id,
@@ -226,10 +228,13 @@ def analysis_page(
                     SELECT COUNT(*) AS count
                     FROM players
                     WHERE
-                        rating > ?
-                        OR (
-                            rating = ?
-                            AND id < ?
+                        is_guild_member = 1
+                        AND (
+                            rating > ?
+                            OR (
+                                rating = ?
+                                AND id < ?
+                            )
                         )
                     """,
                     (
@@ -248,6 +253,7 @@ def analysis_page(
                     """
                     SELECT COUNT(*) AS count
                     FROM players
+                    WHERE is_guild_member = 1
                     """
                 )
 
@@ -909,6 +915,7 @@ def analysis_page(
                             = teammate.discord_id
 
                     WHERE me.discord_id = ?
+                      AND p.is_guild_member = 1
                       AND (
                           ? IS NULL
                           OR (
@@ -1012,6 +1019,7 @@ def analysis_page(
                             = opponent.discord_id
 
                     WHERE me.discord_id = ?
+                      AND p.is_guild_member = 1
                       AND (
                           ? IS NULL
                           OR (

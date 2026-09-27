@@ -53,6 +53,7 @@ def player_detail(
                 mvp
             FROM players
             WHERE id = ?
+              AND is_guild_member = 1
             """,
             (
                 player_id,
@@ -81,6 +82,7 @@ def player_detail(
             """
             SELECT COUNT(*) AS count
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -102,24 +104,27 @@ def player_detail(
             FROM players
 
             WHERE
-                rating > ?
+                is_guild_member = 1
+                AND (
+                    rating > ?
 
-                OR (
-                    rating = ?
-                    AND wins > ?
-                )
+                    OR (
+                        rating = ?
+                        AND wins > ?
+                    )
 
-                OR (
-                    rating = ?
-                    AND wins = ?
-                    AND losses < ?
-                )
+                    OR (
+                        rating = ?
+                        AND wins = ?
+                        AND losses < ?
+                    )
 
-                OR (
-                    rating = ?
-                    AND wins = ?
-                    AND losses = ?
-                    AND id < ?
+                    OR (
+                        rating = ?
+                        AND wins = ?
+                        AND losses = ?
+                        AND id < ?
+                    )
                 )
             """,
             (
@@ -541,6 +546,7 @@ def player_detail(
                     ON p.discord_id = teammate.discord_id
 
                 WHERE me.discord_id = ?
+                  AND p.is_guild_member = 1
                   AND m.season_id = ?
 
                 GROUP BY
@@ -641,6 +647,7 @@ def player_detail(
                     ON p.discord_id = opponent.discord_id
 
                 WHERE me.discord_id = ?
+                  AND p.is_guild_member = 1
                   AND m.season_id = ?
 
                 GROUP BY

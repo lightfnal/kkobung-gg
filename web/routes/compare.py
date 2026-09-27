@@ -363,10 +363,13 @@ def get_player_compare_data(
         SELECT COUNT(*) AS count
         FROM players
         WHERE
-            rating > ?
-            OR (
-                rating = ?
-                AND id < ?
+            is_guild_member = 1
+            AND (
+                rating > ?
+                OR (
+                    rating = ?
+                    AND id < ?
+                )
             )
         """,
         (
@@ -508,6 +511,7 @@ def compare_page(
                 wins,
                 losses
             FROM players
+            WHERE is_guild_member = 1
             ORDER BY
                 rating DESC,
                 wins DESC,
@@ -556,6 +560,7 @@ def compare_page(
                     mvp
                 FROM players
                 WHERE id = ?
+                  AND is_guild_member = 1
                 """,
                 (
                     player1_id,
@@ -585,6 +590,7 @@ def compare_page(
                     mvp
                 FROM players
                 WHERE id = ?
+                  AND is_guild_member = 1
                 """,
                 (
                     player2_id,

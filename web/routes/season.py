@@ -138,6 +138,7 @@ def season_page(
                     = sps.discord_id
 
             WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
 
             ORDER BY
                 sps.rating DESC,
@@ -265,6 +266,7 @@ def season_page(
                     = sps.discord_id
 
             WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
               AND sps.mvp > 0
 
             ORDER BY
@@ -311,6 +313,7 @@ def season_page(
                     = sps.discord_id
 
             WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
               AND sps.best_win_streak > 0
 
             ORDER BY
@@ -387,6 +390,7 @@ def season_page(
                     = sps.discord_id
 
             WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
               AND (
                     sps.wins
                     + sps.losses
@@ -440,6 +444,7 @@ def season_page(
                     = sps.discord_id
 
             WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
               AND (
                     sps.wins
                     + sps.losses

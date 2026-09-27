@@ -44,8 +44,11 @@ def search(
             FROM players
 
             WHERE
-                discord_nickname LIKE ?
-                OR riot_name LIKE ?
+                is_guild_member = 1
+                AND (
+                    discord_nickname LIKE ?
+                    OR riot_name LIKE ?
+                )
 
             ORDER BY
                 rating DESC,

@@ -36,6 +36,7 @@ def stats_api():
             """
             SELECT COUNT(*) AS count
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -72,6 +73,7 @@ def stats_api():
                 AVG(rating) AS average_rating
 
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -94,6 +96,7 @@ def stats_api():
                 SUM(mvp) AS total_mvp
 
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -194,6 +197,8 @@ def stats_api():
 
             FROM players
 
+            WHERE is_guild_member = 1
+
             ORDER BY
                 rating DESC,
                 wins DESC,
@@ -228,7 +233,8 @@ def stats_api():
 
             FROM players
 
-            WHERE mvp > 0
+            WHERE is_guild_member = 1
+              AND mvp > 0
 
             ORDER BY
                 mvp DESC,
@@ -274,6 +280,8 @@ def stats_api():
             LEFT JOIN match_players mp
                 ON mp.discord_id
                     = p.discord_id
+
+            WHERE p.is_guild_member = 1
 
             GROUP BY
                 p.id,
@@ -369,6 +377,8 @@ def stats_api():
                 ON mp.discord_id
                     = p.discord_id
 
+            WHERE p.is_guild_member = 1
+
             GROUP BY
                 p.id,
                 p.discord_nickname,
@@ -462,7 +472,8 @@ def stats_api():
 
             FROM players
 
-            WHERE best_win_streak > 0
+            WHERE is_guild_member = 1
+              AND best_win_streak > 0
 
             ORDER BY
                 best_win_streak DESC,
@@ -653,6 +664,7 @@ def stats_api():
                 rating
 
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -814,6 +826,8 @@ def stats_api():
                     AS average_rating
 
             FROM players
+
+            WHERE is_guild_member = 1
 
             GROUP BY
                 COALESCE(

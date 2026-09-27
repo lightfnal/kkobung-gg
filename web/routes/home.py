@@ -423,6 +423,7 @@ def home(
             """
             SELECT COUNT(*) AS count
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -463,6 +464,8 @@ def home(
                 losses
 
             FROM players
+
+            WHERE is_guild_member = 1
 
             ORDER BY
                 rating DESC,

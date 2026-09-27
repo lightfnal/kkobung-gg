@@ -36,6 +36,7 @@ def home_api():
             """
             SELECT COUNT(*) AS count
             FROM players
+            WHERE is_guild_member = 1
             """
         )
 
@@ -76,6 +77,8 @@ def home_api():
                 losses
 
             FROM players
+
+            WHERE is_guild_member = 1
 
             ORDER BY
                 rating DESC,

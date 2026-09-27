@@ -35,6 +35,7 @@ def players():
                 best_win_streak,
                 mvp
             FROM players
+            WHERE is_guild_member = 1
             ORDER BY
                 rating DESC,
                 discord_nickname ASC
