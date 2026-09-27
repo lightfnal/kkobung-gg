@@ -101,6 +101,55 @@ class MVPVoteView(discord.ui.View):
     async def on_timeout(self):
         await self.finish_vote_once()
 
+    def get_server_display_name(self, user_id):
+        """MVP 버튼에는 전역 사용자명이 아닌 현재 서버 별명을 표시합니다."""
+
+        numeric_user_id = int(user_id)
+        guild = None
+        room_guild_id = getattr(
+            self.room,
+            "guild_id",
+            None
+        )
+
+        get_guild = getattr(
+            self.bot,
+            "get_guild",
+            None
+        )
+
+        if room_guild_id is not None and callable(get_guild):
+            guild = get_guild(room_guild_id)
+
+        member = (
+            guild.get_member(numeric_user_id)
+            if guild is not None
+            else None
+        )
+
+        if member is None:
+            for candidate_guild in getattr(
+                self.bot,
+                "guilds",
+                []
+            ):
+                member = candidate_guild.get_member(
+                    numeric_user_id
+                )
+
+                if member is not None:
+                    break
+
+        if member is not None:
+            return member.display_name
+
+        user = self.bot.get_user(numeric_user_id)
+
+        if user is not None:
+            return user.display_name
+
+        return str(user_id)
+
     def create_buttons(self):
         self.join_cog.activate_room(
             self.room
@@ -109,13 +158,8 @@ class MVPVoteView(discord.ui.View):
         team = self.join_cog.current_teams[self.winner]
 
         for position, user_id in team.items():
-
-            member = self.bot.get_user(int(user_id))
-
-            nickname = (
-                member.display_name
-                if member
-                else str(user_id)
+            nickname = self.get_server_display_name(
+                user_id
             )
 
             button = Button(
