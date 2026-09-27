@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Literal
 
 import discord
@@ -19,6 +20,8 @@ TEAM_LABELS = {
     "레드": "red",
     "블루": "blue"
 }
+
+logger = logging.getLogger(__name__)
 
 
 class ChampionRecordModal(discord.ui.Modal):
@@ -116,9 +119,15 @@ class ChampionRecordModal(discord.ui.Modal):
                 ephemeral=True
             )
             return
-        except Exception:
+        except Exception as error:
+            logger.exception(
+                "챔피언 기록 저장 실패 | 경기=%s | 팀=%s",
+                self.match_id,
+                self.team
+            )
             await interaction.followup.send(
-                "❌ 챔피언 기록 저장 중 오류가 발생했습니다.",
+                "❌ 챔피언 기록 저장 중 오류가 발생했습니다.\n"
+                f"오류 종류: `{type(error).__name__}`",
                 ephemeral=True
             )
             return
