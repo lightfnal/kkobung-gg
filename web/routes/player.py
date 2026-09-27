@@ -73,6 +73,55 @@ def player_detail(
         )
 
         # ==============================
+        # 챔피언별 전체 내전 기록
+        # ==============================
+
+        cursor.execute(
+            """
+            SELECT
+                mpc.champion_key,
+                mpc.champion_name,
+                mpc.champion_image_url,
+                COUNT(*) AS games,
+                SUM(CASE WHEN mp.won = 1 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN mp.won = 0 THEN 1 ELSE 0 END) AS losses
+            FROM match_player_champions mpc
+            JOIN match_players mp
+                ON mp.match_id = mpc.match_id
+               AND mp.discord_id = mpc.discord_id
+            WHERE mpc.discord_id = ?
+            GROUP BY
+                mpc.champion_key,
+                mpc.champion_name,
+                mpc.champion_image_url
+            ORDER BY
+                games DESC,
+                wins DESC,
+                mpc.champion_name ASC
+            LIMIT 10
+            """,
+            (discord_id,)
+        )
+
+        champion_stats = []
+
+        for row in cursor.fetchall():
+            champion = dict(row)
+            champion["win_rate"] = round(
+                (champion["wins"] or 0)
+                / champion["games"]
+                * 100,
+                1
+            ) if champion["games"] else 0
+            champion_stats.append(champion)
+
+        most_champion = (
+            champion_stats[0]
+            if champion_stats
+            else None
+        )
+
+        # ==============================
         # 전체 플레이어 수
         #
         # 전체 누적 랭킹 정보는 기존 유지
@@ -955,6 +1004,12 @@ def player_detail(
                 opponent_players,
 
             "position_stats":
-                position_stats
+                position_stats,
+
+            "champion_stats":
+                champion_stats,
+
+            "most_champion":
+                most_champion
         }
     )
