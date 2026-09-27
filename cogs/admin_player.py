@@ -1024,6 +1024,7 @@ class AdminPlayer(commands.Cog):
         name="mmr수정",
         description="관리자가 플레이어의 Hidden MMR을 직접 수정합니다."
     )
+    @discord.app_commands.default_permissions(administrator=True)
     async def edit_mmr(
         self,
         interaction: discord.Interaction,
@@ -1146,6 +1147,7 @@ class AdminPlayer(commands.Cog):
         name="mmr초기화",
         description="선수의 Hidden MMR을 라이엇 티어 기준으로 초기화합니다."
     )
+    @discord.app_commands.default_permissions(administrator=True)
     async def reset_mmr(
         self,
         interaction: discord.Interaction,
@@ -1265,6 +1267,7 @@ class AdminPlayer(commands.Cog):
         name="mmr확인",
         description="관리자가 플레이어의 Hidden MMR을 확인합니다."
     )
+    @discord.app_commands.default_permissions(administrator=True)
     async def check_mmr(
         self,
         interaction: discord.Interaction,
@@ -1397,6 +1400,7 @@ class AdminPlayer(commands.Cog):
         name="mmr기록",
         description="관리자가 플레이어의 최근 Hidden MMR 변동을 확인합니다."
     )
+    @discord.app_commands.default_permissions(administrator=True)
     async def mmr_history(
         self,
         interaction: discord.Interaction,
