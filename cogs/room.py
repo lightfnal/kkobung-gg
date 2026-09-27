@@ -1,5 +1,4 @@
 import discord
-from contextlib import AsyncExitStack
 
 from discord.ext import commands
 
@@ -184,21 +183,6 @@ class Room(commands.Cog):
             )
             return
 
-        existing_output_channel_id = next(
-            (
-                current_room.output_channel_id
-                for current_room
-                in room_manager.get_rooms()
-                if (
-                    current_room.guild_id
-                    == interaction.guild.id
-                    and current_room.output_channel_id
-                    is not None
-                )
-            ),
-            None
-        )
-
         # 기존 호환용 1번 방이 아직 채널에 연결되지 않았다면
         # 새 방을 만들지 않고 현재 채널에 연결합니다.
         room = next(
@@ -257,12 +241,6 @@ class Room(commands.Cog):
                 )
                 room.channel_id = (
                     interaction.channel_id
-                )
-
-        async with room.operation_lock:
-            if room.output_channel_id is None:
-                room.output_channel_id = (
-                    existing_output_channel_id
                 )
 
         join_cog.save_rooms_state()
@@ -395,12 +373,6 @@ class Room(commands.Cog):
             else "⏳ 대기 중"
         )
 
-        output_channel_text = (
-            f"<#{room.output_channel_id}>"
-            if room.output_channel_id is not None
-            else "설정되지 않음"
-        )
-
         waiting_channel_text = (
             f"<#{room.waiting_voice_channel_id}>"
             if room.waiting_voice_channel_id is not None
@@ -430,147 +402,11 @@ class Room(commands.Cog):
             f"{room.series_score['blue']} 블루\n"
             f"상태: {status_text}\n\n"
             "📢 **진행 채널**\n"
-            f"{output_channel_text}\n\n"
+            f"<#{room.channel_id}> (현재 모집 채널)\n\n"
             "🔊 **음성채널**\n"
             f"대기: {waiting_channel_text}\n"
             f"레드팀: {red_channel_text}\n"
             f"블루팀: {blue_channel_text}"
-        )
-
-    @discord.app_commands.command(
-        name="내전진행채널설정",
-        description="현재 채널을 모든 내전의 공용 진행 채널로 설정합니다."
-    )
-    async def set_output_channel(
-        self,
-        interaction: discord.Interaction
-    ):
-        if not is_admin(interaction):
-            await send_admin_only_message(
-                interaction
-            )
-            return
-
-        if (
-            interaction.guild is None
-            or interaction.channel_id is None
-        ):
-            await interaction.response.send_message(
-                "❌ 서버 채널에서만 사용할 수 있습니다.",
-                ephemeral=True
-            )
-            return
-
-        join_cog = get_join_cog(
-            self.bot
-        )
-
-        if join_cog is None:
-            await interaction.response.send_message(
-                "❌ 내전 관리 기능을 불러오지 못했습니다.",
-                ephemeral=True
-            )
-            return
-
-        output_channel = interaction.channel
-
-        if not isinstance(
-            output_channel,
-            discord.TextChannel
-        ):
-            await interaction.response.send_message(
-                "❌ 일반 텍스트 채널만 공용 진행 "
-                "채널로 설정할 수 있습니다.",
-                ephemeral=True
-            )
-            return
-
-        bot_member = interaction.guild.me
-
-        if bot_member is None:
-            await interaction.response.send_message(
-                "❌ 서버에서 봇의 권한 정보를 "
-                "확인할 수 없습니다.",
-                ephemeral=True
-            )
-            return
-
-        permissions = output_channel.permissions_for(
-            bot_member
-        )
-
-        missing_permissions = []
-
-        if not permissions.view_channel:
-            missing_permissions.append(
-                "채널 보기"
-            )
-
-        if not permissions.send_messages:
-            missing_permissions.append(
-                "메시지 보내기"
-            )
-
-        if not permissions.embed_links:
-            missing_permissions.append(
-                "링크 첨부"
-            )
-
-        if missing_permissions:
-            await interaction.response.send_message(
-                "❌ 꼬붕봇이 현재 채널을 공용 진행 "
-                "채널로 사용할 수 없습니다.\n"
-                "필요한 권한: "
-                + ", ".join(
-                    missing_permissions
-                ),
-                ephemeral=True
-            )
-            return
-
-        guild_rooms = [
-            room
-            for room
-            in join_cog.room_manager.get_rooms()
-            if room.guild_id == interaction.guild.id
-        ]
-
-        if not guild_rooms:
-            await interaction.response.send_message(
-                "❌ 이 서버에 연결된 내전 방이 없습니다.\n"
-                "먼저 모집 채널에서 `/내전방생성`을 실행해주세요.",
-                ephemeral=True
-            )
-            return
-
-        guild_rooms.sort(
-            key=lambda room: str(room.room_id)
-        )
-
-        async with AsyncExitStack() as lock_stack:
-            for room in guild_rooms:
-                await lock_stack.enter_async_context(
-                    room.operation_lock
-                )
-
-            for room in guild_rooms:
-                room.output_channel_id = (
-                    interaction.channel_id
-                )
-
-            join_cog.save_rooms_state()
-
-        room_names = ", ".join(
-            room.room_name
-            for room in guild_rooms
-        )
-
-        await interaction.response.send_message(
-            "✅ 현재 채널을 공용 내전 진행 채널로 설정했습니다.\n\n"
-            f"진행 채널: <#{interaction.channel_id}>\n"
-            f"적용된 내전: **{room_names}**\n\n"
-            "앞으로 팀 생성 이후의 진행 정보가 "
-            "이 채널에 표시됩니다."
         )
 
     @discord.app_commands.command(

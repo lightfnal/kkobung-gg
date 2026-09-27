@@ -812,58 +812,17 @@ class Join(commands.Cog):
         fallback_channel=None
     ):
         """
-        내전 진행 정보를 출력할 채널을 반환합니다.
-
-        공용 진행 채널을 찾지 못하면
-        기존 모집 채널을 반환합니다.
+        방별 내전 진행 정보를 해당 방의 모집 채널로 반환합니다.
         """
 
         if room is None:
             room = self.active_room
 
-        if (
-            room is None
-            or room.output_channel_id is None
-        ):
-            return fallback_channel
-
-        try:
-            output_channel_id = int(
-                room.output_channel_id
-            )
-
-        except (
-            TypeError,
-            ValueError
-        ):
-            return fallback_channel
-
-        output_channel = self.bot.get_channel(
-            output_channel_id
+        recruit_channel = await self.get_room_recruit_channel(
+            room
         )
 
-        if output_channel is None:
-            try:
-                output_channel = (
-                    await self.bot.fetch_channel(
-                        output_channel_id
-                    )
-                )
-
-            except (
-                discord.NotFound,
-                discord.Forbidden,
-                discord.HTTPException
-            ):
-                return fallback_channel
-
-        if not hasattr(
-            output_channel,
-            "send"
-        ):
-            return fallback_channel
-
-        return output_channel
+        return recruit_channel or fallback_channel
 
     async def send_output_message(
         self,
@@ -872,14 +831,11 @@ class Join(commands.Cog):
         **send_kwargs
     ):
         """
-        공용 진행 채널에 메시지를 전송합니다.
-
-        공용 채널에 접근하거나 전송할 수 없으면
-        모집 채널로 대체 전송합니다.
+        내전 방에 연결된 모집 채널에 진행 메시지를 전송합니다.
 
         반환값:
         - message: 전송된 Discord 메시지 또는 None
-        - used_fallback: 대체 채널을 사용했는지 여부
+        - used_fallback: 저장된 모집 채널 대신 전달받은 채널을 사용했는지 여부
         """
 
         if room is None:
@@ -893,65 +849,21 @@ class Join(commands.Cog):
         )
 
 
-        has_configured_output = (
-            room is not None
-            and room.output_channel_id is not None
+        room_channel_id = getattr(
+            room,
+            "channel_id",
+            None
         )
-
-        configured_channel_id = None
-
-        if has_configured_output:
-            try:
-                configured_channel_id = int(
-                    room.output_channel_id
-                )
-
-            except (
-                TypeError,
-                ValueError
-            ):
-                configured_channel_id = None
-
         used_fallback = (
-            has_configured_output
-            and (
-                configured_channel_id is None
-                or output_channel is None
-                or getattr(
-                    output_channel,
-                    "id",
-                    None
-                ) != configured_channel_id
-            )
+            output_channel is None
+            or getattr(output_channel, "id", None)
+            != room_channel_id
         )
-
-        fallback_notice = (
-            "⚠️ 설정된 내전 진행 채널이 삭제되었거나 "
-            "봇이 채널을 볼 수 없어 현재 모집 채널로 "
-            "대체 전송했습니다. 관리자께서는 채널 설정과 "
-            "`채널 보기`·`메시지 보내기` 권한을 확인해주세요."
-        )
-
-        def add_fallback_notice(kwargs):
-            if not used_fallback:
-                return kwargs
-
-            updated_kwargs = dict(kwargs)
-            content = updated_kwargs.get("content")
-
-            if isinstance(content, str):
-                updated_kwargs["content"] = (
-                    f"{fallback_notice}\n\n{content}"
-                )
-            else:
-                updated_kwargs["content"] = fallback_notice
-
-            return updated_kwargs
 
         if output_channel is not None:
             try:
                 message = await output_channel.send(
-                    **add_fallback_notice(send_kwargs)
+                    **send_kwargs
                 )
 
                 return (
@@ -960,35 +872,22 @@ class Join(commands.Cog):
                 )
 
             except discord.Forbidden:
-                used_fallback = True
-                fallback_notice = (
-                    "⚠️ 설정된 내전 진행 채널에 메시지를 보낼 "
-                    "권한이 없어 현재 모집 채널로 대체 전송했습니다. "
-                    "관리자께서는 `채널 보기`·`메시지 보내기`·"
-                    "`링크 첨부` 권한을 확인해주세요."
-                )
                 logger.warning(
-                    "진행 채널 전송 권한 부족 | 방=%s | 채널=%s",
+                    "모집 채널 전송 권한 부족 | 방=%s | 채널=%s",
                     getattr(room, "room_id", "알 수 없음"),
-                    configured_channel_id
+                    getattr(output_channel, "id", None)
                 )
 
             except discord.HTTPException as error:
-                used_fallback = True
-                fallback_notice = (
-                    "⚠️ Discord 오류로 설정된 내전 진행 채널에 "
-                    "전송하지 못해 현재 모집 채널로 대체했습니다."
-                )
                 logger.warning(
-                    "진행 채널 Discord 전송 오류 | 방=%s | "
+                    "모집 채널 Discord 전송 오류 | 방=%s | "
                     "채널=%s | 오류=%s",
                     getattr(room, "room_id", "알 수 없음"),
-                    configured_channel_id,
+                    getattr(output_channel, "id", None),
                     error
                 )
 
-        # 공용 채널 전송에 실패했다면
-        # 기존 모집 채널로 한 번 더 시도합니다.
+        # 저장된 모집 채널을 찾지 못했을 때만 명령 실행 채널을 사용합니다.
         if (
             fallback_channel is not None
             and getattr(
@@ -1003,7 +902,7 @@ class Join(commands.Cog):
         ):
             try:
                 message = await fallback_channel.send(
-                    **add_fallback_notice(send_kwargs)
+                    **send_kwargs
                 )
 
                 return (
@@ -1038,8 +937,7 @@ class Join(commands.Cog):
         """
         내전 방에 연결된 기존 모집 채널을 반환합니다.
 
-        공용 진행 채널 전송에 실패했을 때
-        대체 채널로 사용합니다.
+        모든 경기 진행 메시지가 이 채널에 표시됩니다.
         """
 
         if room is None:

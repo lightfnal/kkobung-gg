@@ -188,7 +188,7 @@ class Match(commands.Cog):
             confirmation_message = (
                 "❌ 승리팀 선택창을 전송하지 못했습니다.\n"
                 "경기 상태는 변경하지 않았습니다.\n"
-                "공용 진행 채널과 모집 채널에서 꼬붕봇의 "
+                "현재 모집 채널에서 꼬붕봇의 "
                 "`채널 보기`, `메시지 보내기`, "
                 "`링크 첨부` 권한을 확인한 뒤 "
                 "`/경기결과`를 다시 실행해주세요."
@@ -196,8 +196,8 @@ class Match(commands.Cog):
 
         elif used_fallback:
             confirmation_message = (
-                "⚠️ 공용 진행 채널에 접근할 수 없어 "
-                "현재 모집 채널에 승리팀 선택창을 "
+                "⚠️ 저장된 모집 채널을 찾을 수 없어 "
+                "현재 명령 채널에 승리팀 선택창을 "
                 "표시했습니다."
             )
 
@@ -211,7 +211,7 @@ class Match(commands.Cog):
 
         else:
             confirmation_message = (
-                "✅ 승리팀 선택창을 공용 진행 채널에 "
+                "✅ 승리팀 선택창을 해당 내전 모집 채널에 "
                 "표시했습니다.\n"
                 f"진행 채널: "
                 f"<#{output_message.channel.id}>"
@@ -541,7 +541,7 @@ class Match(commands.Cog):
             await interaction.followup.send(
                 "❌ MVP 투표창을 전송하지 못했습니다.\n"
                 "MVP 투표 잠금은 자동으로 해제했습니다.\n"
-                "공용 진행 채널과 모집 채널의 봇 권한을 "
+                "현재 모집 채널의 봇 권한을 "
                 "확인한 뒤 `/경기결과`를 다시 실행해주세요.",
                 ephemeral=True
             )
@@ -554,8 +554,8 @@ class Match(commands.Cog):
         if used_fallback:
             try:
                 await interaction.followup.send(
-                    "⚠️ 공용 진행 채널에 접근할 수 없어 "
-                    "모집 채널에 MVP 투표창을 표시했습니다.",
+                    "⚠️ 저장된 모집 채널을 찾을 수 없어 "
+                    "현재 명령 채널에 MVP 투표창을 표시했습니다.",
                     ephemeral=True
                 )
 
@@ -1582,15 +1582,15 @@ class Match(commands.Cog):
                 "✅ 팀 교체는 정상적으로 완료됐습니다.\n"
                 "⚠️ 다만 교체 결과 메시지를 전송하지 "
                 "못했습니다.\n"
-                "공용 진행 채널과 모집 채널의 "
+                "현재 모집 채널의 "
                 "봇 권한을 확인해주세요."
             )
 
         elif used_fallback:
             confirmation_message = (
                 "✅ 팀 교체는 정상적으로 완료됐습니다.\n"
-                "⚠️ 공용 진행 채널에 접근할 수 없어 "
-                "현재 모집 채널에 결과를 표시했습니다."
+                "⚠️ 저장된 모집 채널을 찾을 수 없어 "
+                "현재 명령 채널에 결과를 표시했습니다."
             )
 
         elif (
@@ -1603,7 +1603,7 @@ class Match(commands.Cog):
 
         else:
             confirmation_message = (
-                "✅ 팀 교체 결과를 공용 진행 채널에 "
+                "✅ 팀 교체 결과를 해당 내전 모집 채널에 "
                 "표시했습니다.\n"
                 f"진행 채널: "
                 f"<#{output_message.channel.id}>"
@@ -1739,15 +1739,15 @@ class Match(commands.Cog):
                 "✅ 현재 세트는 정상적으로 취소됐습니다.\n"
                 "⚠️ 다만 세트 취소 안내 메시지를 "
                 "전송하지 못했습니다.\n"
-                "공용 진행 채널과 모집 채널의 "
+                "현재 모집 채널의 "
                 "봇 권한을 확인해주세요."
             )
 
         elif used_fallback:
             confirmation_message = (
                 "✅ 현재 세트를 정상적으로 취소했습니다.\n"
-                "⚠️ 공용 진행 채널에 접근할 수 없어 "
-                "현재 모집 채널에 안내를 표시했습니다."
+                "⚠️ 저장된 모집 채널을 찾을 수 없어 "
+                "현재 명령 채널에 안내를 표시했습니다."
             )
 
         elif (
@@ -1760,7 +1760,7 @@ class Match(commands.Cog):
 
         else:
             confirmation_message = (
-                "✅ 세트 취소 안내를 공용 진행 채널에 "
+                "✅ 세트 취소 안내를 해당 내전 모집 채널에 "
                 "표시했습니다.\n"
                 f"진행 채널: "
                 f"<#{output_message.channel.id}>"
@@ -1845,15 +1845,15 @@ class Match(commands.Cog):
                 "✅ 경기 상태는 정상적으로 시작됐습니다.\n"
                 "⚠️ 다만 경기 시작 안내 메시지를 "
                 "전송하지 못했습니다.\n"
-                "공용 진행 채널과 모집 채널의 "
+                "현재 모집 채널의 "
                 "봇 권한을 확인해주세요."
             )
 
         elif used_fallback:
             confirmation_message = (
                 "✅ 경기를 정상적으로 시작했습니다.\n"
-                "⚠️ 공용 진행 채널에 접근할 수 없어 "
-                "현재 모집 채널에 안내를 표시했습니다."
+                "⚠️ 저장된 모집 채널을 찾을 수 없어 "
+                "현재 명령 채널에 안내를 표시했습니다."
             )
 
         elif (
@@ -1866,7 +1866,7 @@ class Match(commands.Cog):
 
         else:
             confirmation_message = (
-                "✅ 경기 시작 안내를 공용 진행 채널에 "
+                "✅ 경기 시작 안내를 해당 내전 모집 채널에 "
                 "표시했습니다.\n"
                 f"진행 채널: "
                 f"<#{output_message.channel.id}>"
