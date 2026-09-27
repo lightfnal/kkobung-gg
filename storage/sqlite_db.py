@@ -2235,8 +2235,12 @@ def save_match_team_champions(match_id, team, champion_records):
     if expected_ids != received_ids:
         raise ValueError("챔피언 기록 대상이 경기 참가자와 일치하지 않습니다.")
 
+    savepoint_name = "save_match_team_champions"
+
     try:
-        conn.execute("BEGIN IMMEDIATE")
+        # 경기 결과 처리 등 다른 DB 작업과 같은 연결을 사용하므로
+        # 중첩 가능한 SAVEPOINT로 이 작업만 원자적으로 저장합니다.
+        conn.execute(f"SAVEPOINT {savepoint_name}")
 
         for record in champion_records:
             cursor.execute(
@@ -2265,8 +2269,12 @@ def save_match_team_champions(match_id, team, champion_records):
                 )
             )
 
-        conn.commit()
+        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
 
     except Exception:
-        conn.rollback()
+        try:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        except sqlite3.Error:
+            pass
         raise
