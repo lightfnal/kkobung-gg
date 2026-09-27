@@ -8,8 +8,8 @@ from config import (
 )
 
 from utils.permissions import (
-    is_admin,
-    send_admin_only_message
+    is_match_operator as is_admin,
+    send_match_operator_only_message as send_admin_only_message
 )
 
 from services.team_balancer import (
