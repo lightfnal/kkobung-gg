@@ -1045,7 +1045,7 @@ class JoinView(discord.ui.View):
             confirmation_message = (
                 "⚠️ 팀 생성은 정상적으로 완료됐지만 "
                 "결과 메시지를 전송하지 못했습니다.\n"
-                "공용 진행 채널과 모집 채널에서 꼬붕봇의 "
+                "현재 모집 채널에서 꼬붕봇의 "
                 "`채널 보기`, `메시지 보내기`, "
                 "`링크 첨부` 권한을 확인해주세요."
             )
@@ -1053,9 +1053,9 @@ class JoinView(discord.ui.View):
         elif used_fallback:
             confirmation_message = (
                 "⚠️ 팀 생성은 정상적으로 완료됐습니다.\n"
-                "공용 진행 채널에 접근할 수 없어 "
-                "현재 모집 채널에 결과를 표시했습니다.\n"
-                "공용 진행 채널에서 꼬붕봇의 "
+                "저장된 모집 채널을 찾을 수 없어 "
+                "현재 명령 채널에 결과를 표시했습니다.\n"
+                "모집 채널에서 꼬붕봇의 "
                 "`채널 보기`와 `메시지 보내기` "
                 "권한을 확인해주세요."
             )
@@ -1070,7 +1070,7 @@ class JoinView(discord.ui.View):
 
         else:
             confirmation_message = (
-                "✅ 팀 생성 결과를 공용 진행 채널에 "
+                "✅ 팀 생성 결과를 해당 내전 모집 채널에 "
                 "표시했습니다.\n"
                 f"진행 채널: "
                 f"<#{output_message.channel.id}>"
