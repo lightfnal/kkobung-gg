@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS players (
 
     mvp INTEGER DEFAULT 0,
 
+    is_guild_member INTEGER NOT NULL DEFAULT 1,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """)
@@ -756,6 +758,73 @@ def update_player_discord_nickname(
             nickname,
             str(discord_id),
             nickname
+        )
+    )
+
+    changed = cursor.rowcount > 0
+
+    if changed:
+        conn.commit()
+
+    return changed
+
+
+def sync_player_guild_membership(member_ids):
+    """현재 서버에 남아 있는 가입자만 멤버 상태로 표시합니다."""
+
+    normalized_ids = {
+        str(member_id)
+        for member_id in member_ids
+    }
+
+    before_changes = conn.total_changes
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            """
+            UPDATE players
+            SET is_guild_member = 0
+            WHERE is_guild_member <> 0
+            """
+        )
+
+        cursor.executemany(
+            """
+            UPDATE players
+            SET is_guild_member = 1
+            WHERE discord_id = ?
+              AND is_guild_member <> 1
+            """,
+            (
+                (member_id,)
+                for member_id in normalized_ids
+            )
+        )
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    return conn.total_changes - before_changes
+
+
+def set_player_guild_membership(
+    discord_id,
+    is_member
+):
+    cursor.execute(
+        """
+        UPDATE players
+        SET is_guild_member = ?
+        WHERE discord_id = ?
+          AND is_guild_member <> ?
+        """,
+        (
+            1 if is_member else 0,
+            str(discord_id),
+            1 if is_member else 0
         )
     )
 

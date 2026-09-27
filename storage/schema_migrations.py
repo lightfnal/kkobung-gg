@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 REQUIRED_SCHEMA = {
     "players": {"discord_id", "rating", "hidden_mmr", "placement_games"},
@@ -79,6 +79,23 @@ def create_operations_events_table(connection):
         )
         """
     )
+
+
+def add_player_guild_membership_column(connection):
+    columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(players)"
+        ).fetchall()
+    }
+
+    if "is_guild_member" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE players
+            ADD COLUMN is_guild_member INTEGER NOT NULL DEFAULT 1
+            """
+        )
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_operations_events_created_at
@@ -89,7 +106,8 @@ def create_operations_events_table(connection):
 
 MIGRATIONS = {
     1: validate_current_schema,
-    2: create_operations_events_table
+    2: create_operations_events_table,
+    3: add_player_guild_membership_column
 }
 
 
