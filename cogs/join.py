@@ -1,4 +1,5 @@
 import logging
+from typing import Literal, Optional
 
 import discord
 from contextvars import ContextVar
@@ -21,6 +22,10 @@ from config import (
     MAX_WAITING_PLAYERS
 )
 from utils.room_display import format_room_status
+from utils.permissions import (
+    is_admin,
+    send_admin_only_message
+)
 
 
 logger = logging.getLogger(__name__)
@@ -1784,6 +1789,84 @@ class Join(commands.Cog):
             f"📋 **현재 참가자 명단**\n\n"
             f"{message}"
             f"{waiting_message}"
+        )
+
+
+    @discord.app_commands.command(
+        name="모집시작설정",
+        description="모집창에 경기 시작 방식 또는 예정 시간을 표시합니다."
+    )
+    @discord.app_commands.describe(
+        방식="경기 시작 방식",
+        시작시간="시간 지정일 때 표시할 안내 (예: 오늘 21시)"
+    )
+    async def set_recruit_start_notice(
+        self,
+        interaction: discord.Interaction,
+        방식: Literal["인원 모이면 시작", "시간 지정", "미정"],
+        시작시간: Optional[str] = None
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        if not await self.require_room(interaction):
+            return
+
+        room = self.active_room
+        normalized_time = (
+            시작시간.strip()
+            if 시작시간
+            else None
+        )
+
+        if 방식 == "시간 지정" and not normalized_time:
+            await interaction.response.send_message(
+                "❌ `시간 지정`을 선택한 경우 시작시간도 입력해주세요.\n"
+                "예: `오늘 21시`, `21:00~22:00 예정`",
+                ephemeral=True
+            )
+            return
+
+        if normalized_time and len(normalized_time) > 80:
+            await interaction.response.send_message(
+                "❌ 시작시간 안내는 80자 이하로 입력해주세요.",
+                ephemeral=True
+            )
+            return
+
+        async with room.operation_lock:
+            if 방식 == "인원 모이면 시작":
+                room.recruit_start_mode = "when_full"
+                room.recruit_start_time = None
+                result_text = "10명 모이면 바로 시작"
+            elif 방식 == "시간 지정":
+                room.recruit_start_mode = "scheduled"
+                room.recruit_start_time = normalized_time
+                result_text = normalized_time
+            else:
+                room.recruit_start_mode = "undecided"
+                room.recruit_start_time = None
+                result_text = "아직 미정"
+
+            self.save_rooms_state()
+
+            recruit_view = room.current_recruit_view
+            if recruit_view is not None and recruit_view.message is not None:
+                try:
+                    await recruit_view.message.edit(
+                        embed=recruit_view.create_embed(),
+                        view=recruit_view
+                    )
+                except discord.HTTPException:
+                    logger.exception(
+                        "모집 시작 안내 화면 갱신 실패 | 방=%s",
+                        room.room_id
+                    )
+
+        await interaction.response.send_message(
+            f"✅ 모집 시작 안내를 변경했습니다: **{result_text}**",
+            ephemeral=True
         )
 
 
