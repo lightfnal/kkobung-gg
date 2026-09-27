@@ -707,21 +707,21 @@ class AdminMatch(commands.Cog):
 
     @discord.app_commands.command(
         name="관리자일괄참가",
-        description="관리자가 선택한 10명을 내전 방에 한 번에 참가시킵니다."
+        description="관리자가 선택한 실제 선수들을 내전 방에 한 번에 참가시킵니다."
     )
     async def admin_bulk_join(
         self,
         interaction: discord.Interaction,
         참가자1: discord.Member,
-        참가자2: discord.Member,
-        참가자3: discord.Member,
-        참가자4: discord.Member,
-        참가자5: discord.Member,
-        참가자6: discord.Member,
-        참가자7: discord.Member,
-        참가자8: discord.Member,
-        참가자9: discord.Member,
-        참가자10: discord.Member
+        참가자2: Optional[discord.Member] = None,
+        참가자3: Optional[discord.Member] = None,
+        참가자4: Optional[discord.Member] = None,
+        참가자5: Optional[discord.Member] = None,
+        참가자6: Optional[discord.Member] = None,
+        참가자7: Optional[discord.Member] = None,
+        참가자8: Optional[discord.Member] = None,
+        참가자9: Optional[discord.Member] = None,
+        참가자10: Optional[discord.Member] = None
     ):
         if not is_admin(interaction):
             await send_admin_only_message(interaction)
@@ -738,15 +738,15 @@ class AdminMatch(commands.Cog):
         if not await join_cog.require_room(interaction):
             return
 
-        members = [
+        members = [member for member in [
             참가자1, 참가자2, 참가자3, 참가자4, 참가자5,
             참가자6, 참가자7, 참가자8, 참가자9, 참가자10
-        ]
+        ] if member is not None]
         member_ids = [str(member.id) for member in members]
 
-        if len(set(member_ids)) != MAX_PLAYERS:
+        if len(set(member_ids)) != len(member_ids):
             await interaction.response.send_message(
-                "❌ 서로 다른 10명을 선택해주세요.",
+                "❌ 같은 참가자를 두 번 선택할 수 없습니다.",
                 ephemeral=True
             )
             return
@@ -820,7 +820,7 @@ class AdminMatch(commands.Cog):
                 f"{index}. {member.mention}"
                 for index, member in enumerate(members, start=1)
             )
-            + "\n\n이제 `/관리자팀생성`을 실행해주세요.",
+            + "\n\n빈 자리는 `/테스트참가자생성`으로 채울 수 있습니다.",
             ephemeral=True
         )
 
@@ -960,6 +960,122 @@ class AdminMatch(commands.Cog):
         )
 
     @discord.app_commands.command(
+        name="관리자팀id지정",
+        description="실제·테스트 참가자의 Discord ID로 팀과 포지션을 지정합니다."
+    )
+    async def admin_assign_teams_by_id(
+        self,
+        interaction: discord.Interaction,
+        레드_top: str,
+        레드_jungle: str,
+        레드_mid: str,
+        레드_adc: str,
+        레드_support: str,
+        블루_top: str,
+        블루_jungle: str,
+        블루_mid: str,
+        블루_adc: str,
+        블루_support: str
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if not await join_cog.require_room(interaction):
+            return
+
+        def normalize_id(value):
+            normalized = value.strip()
+            if normalized.startswith("<@") and normalized.endswith(">"):
+                normalized = normalized[2:-1]
+            if normalized.startswith("!"):
+                normalized = normalized[1:]
+            return normalized
+
+        red_ids = [
+            normalize_id(value)
+            for value in [
+                레드_top, 레드_jungle, 레드_mid, 레드_adc, 레드_support
+            ]
+        ]
+        blue_ids = [
+            normalize_id(value)
+            for value in [
+                블루_top, 블루_jungle, 블루_mid, 블루_adc, 블루_support
+            ]
+        ]
+        selected_ids = set(red_ids + blue_ids)
+        room = join_cog.active_room
+
+        if (
+            len(selected_ids) != MAX_PLAYERS
+            or not all(user_id.isdigit() for user_id in selected_ids)
+        ):
+            await interaction.response.send_message(
+                "❌ 서로 다른 10개의 Discord ID 또는 멘션을 입력해주세요.",
+                ephemeral=True
+            )
+            return
+
+        if selected_ids != set(room.players.keys()):
+            missing = set(room.players.keys()) - selected_ids
+            unknown = selected_ids - set(room.players.keys())
+            details = []
+            if missing:
+                details.append("누락: " + ", ".join(sorted(missing)))
+            if unknown:
+                details.append("명단에 없음: " + ", ".join(sorted(unknown)))
+            await interaction.response.send_message(
+                "❌ 입력한 ID 10개가 현재 참가 명단과 일치하지 않습니다.\n"
+                + "\n".join(details),
+                ephemeral=True
+            )
+            return
+
+        async with room.operation_lock:
+            if (
+                room.match_in_progress
+                or room.mvp_vote_in_progress
+                or room.match_transaction_active
+            ):
+                await interaction.response.send_message(
+                    "❌ 진행 중인 경기 처리가 있어 팀을 지정할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            positions = ["TOP", "JUNGLE", "MID", "ADC", "SUPPORT"]
+            room.current_teams = {
+                "red": dict(zip(positions, red_ids)),
+                "blue": dict(zip(positions, blue_ids))
+            }
+            room.last_team_signature = None
+            join_cog.save_rooms_state()
+
+        await interaction.response.send_message(
+            "✅ ID 기반 팀 지정이 완료되었습니다.\n\n"
+            "🔴 레드팀\n"
+            + "\n".join(
+                f"{position}: <@{user_id}> (`{user_id}`)"
+                for position, user_id in zip(positions, red_ids)
+            )
+            + "\n\n🔵 블루팀\n"
+            + "\n".join(
+                f"{position}: <@{user_id}> (`{user_id}`)"
+                for position, user_id in zip(positions, blue_ids)
+            ),
+            ephemeral=True
+        )
+
+    @discord.app_commands.command(
         name="관리자경기결과",
         description="MVP 투표 없이 관리자가 승리팀과 MVP를 직접 기록합니다."
     )
@@ -1083,7 +1199,10 @@ class AdminMatch(commands.Cog):
         시작세트="복구를 시작할 세트",
         일세트_mvp="1세트 MVP (레드팀 승리)",
         이세트_mvp="2세트 MVP (블루팀 승리)",
-        삼세트_mvp="3세트 MVP (레드팀 승리)"
+        삼세트_mvp="3세트 MVP (레드팀 승리)",
+        일세트_mvp_id="1세트 MVP ID (멤버 선택 불가 시)",
+        이세트_mvp_id="2세트 MVP ID (멤버 선택 불가 시)",
+        삼세트_mvp_id="3세트 MVP ID (멤버 선택 불가 시)"
     )
     async def recover_match(
         self,
@@ -1091,7 +1210,10 @@ class AdminMatch(commands.Cog):
         시작세트: Literal["1세트", "2세트", "3세트"],
         일세트_mvp: Optional[discord.Member] = None,
         이세트_mvp: Optional[discord.Member] = None,
-        삼세트_mvp: Optional[discord.Member] = None
+        삼세트_mvp: Optional[discord.Member] = None,
+        일세트_mvp_id: Optional[str] = None,
+        이세트_mvp_id: Optional[str] = None,
+        삼세트_mvp_id: Optional[str] = None
     ):
         """선택한 시작 세트부터 기존 정상 경기 처리 경로로 복구합니다."""
         if not is_admin(interaction):
@@ -1122,7 +1244,10 @@ class AdminMatch(commands.Cog):
                 시작세트,
                 일세트_mvp,
                 이세트_mvp,
-                삼세트_mvp
+                삼세트_mvp,
+                일세트_mvp_id,
+                이세트_mvp_id,
+                삼세트_mvp_id
             )
 
     async def _recover_match_locked(
@@ -1134,7 +1259,10 @@ class AdminMatch(commands.Cog):
         start_set: str,
         first_mvp: Optional[discord.Member],
         second_mvp: Optional[discord.Member],
-        third_mvp: Optional[discord.Member]
+        third_mvp: Optional[discord.Member],
+        first_mvp_id_text: Optional[str],
+        second_mvp_id_text: Optional[str],
+        third_mvp_id_text: Optional[str]
     ):
         if room.match_transaction_active:
             await interaction.response.send_message(
@@ -1169,10 +1297,29 @@ class AdminMatch(commands.Cog):
             )
             return
 
+        def resolve_mvp_id(member, id_text):
+            normalized_text = None
+            if id_text:
+                normalized_text = id_text.strip()
+                if (
+                    normalized_text.startswith("<@")
+                    and normalized_text.endswith(">")
+                ):
+                    normalized_text = normalized_text[2:-1]
+                if normalized_text.startswith("!"):
+                    normalized_text = normalized_text[1:]
+            member_id = str(member.id) if member is not None else None
+            if member_id and normalized_text and member_id != normalized_text:
+                return "CONFLICT"
+            return member_id or normalized_text
+
+        first_mvp_id = resolve_mvp_id(first_mvp, first_mvp_id_text)
+        second_mvp_id = resolve_mvp_id(second_mvp, second_mvp_id_text)
+        third_mvp_id = resolve_mvp_id(third_mvp, third_mvp_id_text)
         all_results = [
-            ("1세트", "red", first_mvp),
-            ("2세트", "blue", second_mvp),
-            ("3세트", "red", third_mvp)
+            ("1세트", "red", first_mvp_id),
+            ("2세트", "blue", second_mvp_id),
+            ("3세트", "red", third_mvp_id)
         ]
         start_index = {
             "1세트": 0,
@@ -1182,8 +1329,8 @@ class AdminMatch(commands.Cog):
         results_to_apply = all_results[start_index:]
         missing_mvp_sets = [
             set_name
-            for set_name, _, mvp_member in results_to_apply
-            if mvp_member is None
+            for set_name, _, mvp_id in results_to_apply
+            if not mvp_id
         ]
         if missing_mvp_sets:
             await interaction.response.send_message(
@@ -1195,8 +1342,10 @@ class AdminMatch(commands.Cog):
 
         invalid_mvp_sets = [
             set_name
-            for set_name, _, mvp_member in results_to_apply
-            if str(mvp_member.id) not in player_ids
+            for set_name, _, mvp_id in results_to_apply
+            if mvp_id == "CONFLICT"
+            or not mvp_id.isdigit()
+            or mvp_id not in player_ids
         ]
         if invalid_mvp_sets:
             await interaction.response.send_message(
@@ -1245,11 +1394,11 @@ class AdminMatch(commands.Cog):
                 for player in get_match_players(last_match["id"])
             }
             previous_set = all_results[start_index - 1]
-            _, previous_winner, previous_mvp = previous_set
+            _, previous_winner, previous_mvp_id = previous_set
             previous_mvp_matches = (
-                previous_mvp is None
+                previous_mvp_id is None
                 or str(last_match["mvp_discord_id"])
-                == str(previous_mvp.id)
+                == previous_mvp_id
             )
             if (
                 recorded_ids != player_ids
@@ -1278,8 +1427,7 @@ class AdminMatch(commands.Cog):
                 else None
             )
 
-            for set_name, winner, mvp_member in results_to_apply:
-                mvp_id = str(mvp_member.id)
+            for set_name, winner, mvp_id in results_to_apply:
                 room.match_in_progress = True
                 join_cog.save_rooms_state()
 
@@ -1304,7 +1452,7 @@ class AdminMatch(commands.Cog):
                 previous_match_id = saved_match["id"]
                 team_icon = "🔴 레드" if winner == "red" else "🔵 블루"
                 completed_lines.append(
-                    f"{set_name}: {team_icon} 승 / MVP {mvp_member.mention}"
+                    f"{set_name}: {team_icon} 승 / MVP <@{mvp_id}>"
                 )
 
         except Exception:
