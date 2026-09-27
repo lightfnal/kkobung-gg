@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 REQUIRED_SCHEMA = {
     "players": {"discord_id", "rating", "hidden_mmr", "placement_games"},
@@ -104,10 +104,36 @@ def add_player_guild_membership_column(connection):
     )
 
 
+def create_match_player_champions_table(connection):
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS match_player_champions (
+            match_id INTEGER NOT NULL,
+            discord_id TEXT NOT NULL,
+            champion_key TEXT NOT NULL,
+            champion_name TEXT NOT NULL,
+            champion_image_url TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (match_id, discord_id),
+            FOREIGN KEY (match_id)
+                REFERENCES matches(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_match_player_champions_discord_id
+        ON match_player_champions(discord_id)
+        """
+    )
+
+
 MIGRATIONS = {
     1: validate_current_schema,
     2: create_operations_events_table,
-    3: add_player_guild_membership_column
+    3: add_player_guild_membership_column,
+    4: create_match_player_champions_table
 }
 
 

@@ -209,6 +209,26 @@ CREATE TABLE IF NOT EXISTS match_players (
 """)
 
 cursor.execute("""
+CREATE TABLE IF NOT EXISTS match_player_champions (
+    match_id INTEGER NOT NULL,
+    discord_id TEXT NOT NULL,
+    champion_key TEXT NOT NULL,
+    champion_name TEXT NOT NULL,
+    champion_image_url TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (match_id, discord_id),
+    FOREIGN KEY (match_id)
+        REFERENCES matches(id)
+        ON DELETE CASCADE
+)
+""")
+
+cursor.execute("""
+CREATE INDEX IF NOT EXISTS idx_match_player_champions_discord_id
+ON match_player_champions(discord_id)
+""")
+
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS season_results (
     season_id INTEGER PRIMARY KEY,
 
@@ -2156,3 +2176,97 @@ def validate_rating_history():
         "issues":
             issues
     }
+
+
+def get_match_team_players(match_id, team):
+    """경기 번호와 팀에 해당하는 선수 5명을 포지션 순서로 반환합니다."""
+    normalized_team = str(team).strip().lower()
+
+    if normalized_team not in {"red", "blue"}:
+        return []
+
+    cursor.execute(
+        """
+        SELECT
+            mp.match_id,
+            mp.discord_id,
+            mp.team,
+            mp.position,
+            mp.won,
+            p.discord_nickname,
+            p.riot_name
+        FROM match_players mp
+        LEFT JOIN players p
+            ON p.discord_id = mp.discord_id
+        WHERE mp.match_id = ?
+          AND LOWER(mp.team) = ?
+        ORDER BY CASE UPPER(COALESCE(mp.position, ''))
+            WHEN 'TOP' THEN 1
+            WHEN 'JUNGLE' THEN 2
+            WHEN 'JUN' THEN 2
+            WHEN 'MID' THEN 3
+            WHEN 'ADC' THEN 4
+            WHEN 'SUPPORT' THEN 5
+            WHEN 'SUP' THEN 5
+            ELSE 6
+        END
+        """,
+        (int(match_id), normalized_team)
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def save_match_team_champions(match_id, team, champion_records):
+    """한 팀의 챔피언 기록을 검증 후 한 번에 저장하거나 갱신합니다."""
+    team_players = get_match_team_players(match_id, team)
+
+    if len(team_players) != 5:
+        raise ValueError("해당 경기의 팀 선수 5명을 찾지 못했습니다.")
+
+    expected_ids = {
+        str(player["discord_id"])
+        for player in team_players
+    }
+    received_ids = {
+        str(record["discord_id"])
+        for record in champion_records
+    }
+
+    if expected_ids != received_ids:
+        raise ValueError("챔피언 기록 대상이 경기 참가자와 일치하지 않습니다.")
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+
+        for record in champion_records:
+            cursor.execute(
+                """
+                INSERT INTO match_player_champions (
+                    match_id,
+                    discord_id,
+                    champion_key,
+                    champion_name,
+                    champion_image_url,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(match_id, discord_id) DO UPDATE SET
+                    champion_key = excluded.champion_key,
+                    champion_name = excluded.champion_name,
+                    champion_image_url = excluded.champion_image_url,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(match_id),
+                    str(record["discord_id"]),
+                    str(record["champion_key"]),
+                    str(record["champion_name"]),
+                    str(record["champion_image_url"])
+                )
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
