@@ -730,6 +730,42 @@ def get_player(discord_id):
 
     return cursor.fetchone()
 
+
+def update_player_discord_nickname(
+    discord_id,
+    discord_nickname
+):
+    """가입된 플레이어의 Discord 표시 이름만 갱신합니다."""
+
+    nickname = str(
+        discord_nickname
+        or ""
+    ).strip()
+
+    if not nickname:
+        return False
+
+    cursor.execute(
+        """
+        UPDATE players
+        SET discord_nickname = ?
+        WHERE discord_id = ?
+          AND discord_nickname <> ?
+        """,
+        (
+            nickname,
+            str(discord_id),
+            nickname
+        )
+    )
+
+    changed = cursor.rowcount > 0
+
+    if changed:
+        conn.commit()
+
+    return changed
+
 def update_player(discord_id, profile):
 
     current_player = get_player(
