@@ -2,7 +2,10 @@ import asyncio
 import logging
 import discord
 
-from config import MAX_PLAYERS
+from config import (
+    MAX_PLAYERS,
+    MAX_WAITING_PLAYERS
+)
 
 from utils.permissions import (
     is_admin,
@@ -207,6 +210,7 @@ class JoinView(discord.ui.View):
         """현재 참가자 정보를 모집 메시지로 만듭니다."""
 
         players = self.join_cog.players
+        waiting_players = self.room.waiting_players
 
         self.make_teams_button.disabled = (
             len(players) < MAX_PLAYERS
@@ -216,13 +220,17 @@ class JoinView(discord.ui.View):
             title = "🔒 내전 모집 종료"
             description = (
                 "모집이 종료되었습니다.\n\n"
-                f"👥 현재 참가자: **{len(players)}/{MAX_PLAYERS}명**"
+                f"👥 현재 참가자: **{len(players)}/{MAX_PLAYERS}명**\n"
+                f"🕒 현재 대기자: "
+                f"**{len(waiting_players)}/{MAX_WAITING_PLAYERS}명**"
             )
         else:
             title = "🎮 내전 참가 모집"
             description = (
                 "아래 버튼을 눌러 내전에 참가하세요.\n\n"
-                f"👥 현재 참가자: **{len(players)}/{MAX_PLAYERS}명**"
+                f"👥 현재 참가자: **{len(players)}/{MAX_PLAYERS}명**\n"
+                f"🕒 현재 대기자: "
+                f"**{len(waiting_players)}/{MAX_WAITING_PLAYERS}명**"
             )
 
         description = (
@@ -310,6 +318,26 @@ class JoinView(discord.ui.View):
                 inline=False
             )
 
+        if waiting_players:
+            waiting_list = [
+                f"**{index}.** <@{user_id}>"
+                for index, user_id in enumerate(
+                    waiting_players,
+                    start=1
+                )
+            ]
+            embed.add_field(
+                name="🕒 대기자 명단",
+                value="\n".join(waiting_list),
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🕒 대기자 명단",
+                value="아직 대기자가 없습니다.",
+                inline=False
+            )
+
         if self.recruit_closed:
             embed.set_footer(
                 text="모집이 종료되었습니다."
@@ -383,6 +411,17 @@ class JoinView(discord.ui.View):
                 )
                 return
 
+            if user_id in room.waiting_players:
+                waiting_number = (
+                    list(room.waiting_players).index(user_id) + 1
+                )
+                await interaction.response.send_message(
+                    f"❌ 이미 대기 **{waiting_number}번**으로 "
+                    "등록되어 있습니다.",
+                    ephemeral=True
+                )
+                return
+
             other_room = (
                 self.join_cog.room_manager
                 .find_player_room(
@@ -400,8 +439,25 @@ class JoinView(discord.ui.View):
                 return
 
             if len(players) >= MAX_PLAYERS:
-                await interaction.response.send_message(
-                    f"❌ 참가 인원이 {MAX_PLAYERS}명으로 마감되었습니다.",
+                if len(room.waiting_players) >= MAX_WAITING_PLAYERS:
+                    await interaction.response.send_message(
+                        "❌ 참가자와 대기자 모집이 모두 마감되었습니다.",
+                        ephemeral=True
+                    )
+                    return
+
+                room.waiting_players[user_id] = {
+                    "nickname": interaction.user.display_name
+                }
+                self.join_cog.save_rooms_state()
+                waiting_number = len(room.waiting_players)
+
+                await interaction.response.edit_message(
+                    embed=self.create_embed(),
+                    view=self
+                )
+                await interaction.followup.send(
+                    f"🕒 대기 **{waiting_number}번**으로 등록되었습니다.",
                     ephemeral=True
                 )
                 return
@@ -457,14 +513,31 @@ class JoinView(discord.ui.View):
                 )
                 return
 
-            if user_id not in players:
+            if (
+                user_id not in players
+                and user_id not in room.waiting_players
+            ):
                 await interaction.response.send_message(
-                    "❌ 현재 참가 중이 아닙니다.",
+                    "❌ 현재 참가 또는 대기 중이 아닙니다.",
                     ephemeral=True
                 )
                 return
 
-            del players[user_id]
+            promoted_user_id = None
+
+            if user_id in room.waiting_players:
+                del room.waiting_players[user_id]
+                cancellation_message = "✅ 대기 등록이 취소되었습니다."
+            else:
+                del players[user_id]
+                cancellation_message = "✅ 참가가 취소되었습니다."
+
+                if room.waiting_players:
+                    promoted_user_id = next(iter(room.waiting_players))
+                    players[promoted_user_id] = (
+                        room.waiting_players.pop(promoted_user_id)
+                    )
+
             self.join_cog.save_rooms_state()
 
             self.make_teams_button.disabled = (
@@ -477,7 +550,13 @@ class JoinView(discord.ui.View):
             )
 
             await interaction.followup.send(
-                "✅ 참가가 취소되었습니다.",
+                cancellation_message
+                + (
+                    f"\n🎉 대기 1번 <@{promoted_user_id}>님이 "
+                    "참가자로 자동 승격되었습니다."
+                    if promoted_user_id is not None
+                    else ""
+                ),
                 ephemeral=True
             )
 
@@ -499,9 +578,13 @@ class JoinView(discord.ui.View):
                 room.players.keys()
             )
 
-        if not player_ids:
+            waiting_ids = list(
+                room.waiting_players.keys()
+            )
+
+        if not player_ids and not waiting_ids:
             await interaction.response.send_message(
-                "📋 현재 참가자가 없습니다.",
+                "📋 현재 참가자와 대기자가 없습니다.",
                 ephemeral=True
             )
             return
@@ -516,10 +599,25 @@ class JoinView(discord.ui.View):
                 f"{index}. <@{user_id}>"
             )
 
+        waiting_text = ""
+        if waiting_ids:
+            waiting_text = (
+                "\n\n🕒 **대기자 "
+                f"({len(waiting_ids)}/{MAX_WAITING_PLAYERS}명)**\n"
+                + "\n".join(
+                    f"{index}. <@{user_id}>"
+                    for index, user_id in enumerate(
+                        waiting_ids,
+                        start=1
+                    )
+                )
+            )
+
         await interaction.response.send_message(
             f"📋 **현재 참가자 "
             f"({len(player_ids)}/{MAX_PLAYERS}명)**\n\n"
-            + "\n".join(participant_list),
+            + "\n".join(participant_list)
+            + waiting_text,
             ephemeral=True
         )
 
