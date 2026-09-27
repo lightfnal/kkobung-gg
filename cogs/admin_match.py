@@ -674,7 +674,6 @@ class AdminMatch(commands.Cog):
         이세트_mvp="2세트 MVP (블루팀 승리)",
         삼세트_mvp="3세트 MVP (레드팀 승리)"
     )
-    @discord.app_commands.default_permissions(administrator=True)
     async def recover_match(
         self,
         interaction: discord.Interaction,
