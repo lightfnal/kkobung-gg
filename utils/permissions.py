@@ -3,6 +3,9 @@ import discord
 from config import ADMIN_IDS
 
 
+MATCH_OPERATOR_ROLE_NAME = "내전진행자"
+
+
 def is_admin(
     interaction: discord.Interaction
 ) -> bool:
@@ -37,10 +40,54 @@ def is_admin(
     return False
 
 
+def is_match_operator(
+    interaction: discord.Interaction
+) -> bool:
+    """관리자 또는 내전진행자 역할인지 확인합니다."""
+
+    if is_admin(interaction):
+        return True
+
+    if interaction.guild is None:
+        return False
+
+    roles = getattr(
+        interaction.user,
+        "roles",
+        []
+    )
+
+    return any(
+        getattr(role, "name", None)
+        == MATCH_OPERATOR_ROLE_NAME
+        for role in roles
+    )
+
+
 async def send_admin_only_message(
     interaction: discord.Interaction
 ):
     message = "❌ 관리자만 사용할 수 있습니다."
+
+    if interaction.response.is_done():
+        await interaction.followup.send(
+            message,
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            message,
+            ephemeral=True
+        )
+
+
+async def send_match_operator_only_message(
+    interaction: discord.Interaction
+):
+    message = (
+        "❌ 관리자 또는 `내전진행자` 역할만 "
+        "사용할 수 있습니다."
+    )
 
     if interaction.response.is_done():
         await interaction.followup.send(
