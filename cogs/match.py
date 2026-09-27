@@ -1152,7 +1152,10 @@ class Match(commands.Cog):
             f"📉 **패배팀 레이팅 변화**\n"
             f"{chr(10).join(loser_changes)}"
             f"{placement_message}"
-            f"{series_message}"
+            f"{series_message}\n\n"
+            f"🖼️ **챔피언 기록 (선택)**\n"
+            f"`/챔피언기록 경기번호:{match_id} 팀:레드`\n"
+            f"`/챔피언기록 경기번호:{match_id} 팀:블루`"
         )
 
         recruitment_channel = self.bot.get_channel(
