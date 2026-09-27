@@ -316,7 +316,7 @@ class JoinView(discord.ui.View):
             )
         else:
             embed.set_footer(
-                text="참가 또는 참가취소 버튼을 눌러주세요."
+                text="참가 버튼을 눌러주세요."
             )
 
         return embed
@@ -423,61 +423,6 @@ class JoinView(discord.ui.View):
 
             await interaction.followup.send(
                 "✅ 내전에 참가했습니다.",
-                ephemeral=True
-            )
-
-    @discord.ui.button(
-        label="참가취소",
-        emoji="❌",
-        style=discord.ButtonStyle.danger,
-        custom_id="inhouse_cancel"
-    )
-    async def cancel_button(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        user_id = str(interaction.user.id)
-        room = self.join_cog.active_room
-
-        async with room.operation_lock:
-            players = room.players
-
-            if self.recruit_closed:
-                await interaction.response.send_message(
-                    "🔒 모집이 종료되어 참가 취소가 불가능합니다.",
-                    ephemeral=True
-                )
-                return
-
-            if room.match_in_progress:
-                await interaction.response.send_message(
-                    "❌ 경기 중에는 참가 취소가 불가능합니다.",
-                    ephemeral=True
-                )
-                return
-
-            if user_id not in players:
-                await interaction.response.send_message(
-                    "❌ 현재 참가 중이 아닙니다.",
-                    ephemeral=True
-                )
-                return
-
-            del players[user_id]
-            self.join_cog.save_rooms_state()
-
-            self.make_teams_button.disabled = (
-                len(players) < MAX_PLAYERS
-            )
-
-            await interaction.response.edit_message(
-                embed=self.create_embed(),
-                view=self
-            )
-
-            await interaction.followup.send(
-                "✅ 참가가 취소되었습니다.",
                 ephemeral=True
             )
 
