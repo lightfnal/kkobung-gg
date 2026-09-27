@@ -95,6 +95,61 @@
 
 
 <!-- ==============================
+     모스트 챔피언
+============================== -->
+
+<section class="champion-stats-section">
+
+    <div class="champion-stats-header">
+        <div>
+            <h2>🎭 모스트 챔피언</h2>
+            <p>내전에서 기록된 챔피언별 사용 횟수와 승률입니다.</p>
+        </div>
+
+        {% if most_champion %}
+        <div class="most-champion-badge">
+            MOST · {{ most_champion.champion_name }}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if champion_stats %}
+    <div class="champion-stats-grid">
+
+        {% for champion in champion_stats %}
+        <article class="champion-stat-card">
+            <div class="champion-stat-rank">{{ loop.index }}</div>
+            <img
+                class="champion-stat-image"
+                src="{{ champion.champion_image_url }}"
+                alt="{{ champion.champion_name }}"
+                loading="lazy"
+            >
+            <div class="champion-stat-info">
+                <strong>{{ champion.champion_name }}</strong>
+                <span>
+                    {{ champion.games }}회 ·
+                    {{ champion.wins }}승 {{ champion.losses }}패
+                </span>
+            </div>
+            <div class="champion-stat-winrate">
+                <small>승률</small>
+                <strong>{{ champion.win_rate }}%</strong>
+            </div>
+        </article>
+        {% endfor %}
+
+    </div>
+    {% else %}
+    <div class="empty-match-card">
+        아직 등록된 챔피언 기록이 없습니다.
+    </div>
+    {% endif %}
+
+</section>
+
+
+<!-- ==============================
      현재 시즌
 ============================== -->
 
