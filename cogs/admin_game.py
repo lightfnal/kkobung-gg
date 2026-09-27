@@ -10,7 +10,9 @@ from discord.ext import commands
 
 from utils.permissions import (
     is_admin,
-    send_admin_only_message
+    is_match_operator,
+    send_admin_only_message,
+    send_match_operator_only_message
 )
 
 from utils.cog_helper import get_join_cog
@@ -417,8 +419,11 @@ class AdminGame(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
+        if not (
+            is_admin(interaction)
+            or is_match_operator(interaction)
+        ):
+            await send_match_operator_only_message(interaction)
             return
 
         join_cog = get_join_cog(
@@ -448,8 +453,11 @@ class AdminGame(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
+        if not (
+            is_admin(interaction)
+            or is_match_operator(interaction)
+        ):
+            await send_match_operator_only_message(interaction)
             return
 
         join_cog = get_join_cog(

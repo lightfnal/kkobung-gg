@@ -15,7 +15,9 @@ from utils.mmr import (
 
 from utils.permissions import (
     is_admin,
-    send_admin_only_message
+    is_match_operator,
+    send_admin_only_message,
+    send_match_operator_only_message
 )
 
 from services.player_service import PlayerService
@@ -430,8 +432,11 @@ class AdminPlayer(commands.Cog):
         interaction: discord.Interaction,
         discord_id: str
     ):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
+        if not (
+            is_admin(interaction)
+            or is_match_operator(interaction)
+        ):
+            await send_match_operator_only_message(interaction)
             return
 
         join_cog = get_join_cog(

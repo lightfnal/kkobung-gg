@@ -23,8 +23,8 @@ from config import (
 )
 from utils.room_display import format_room_status
 from utils.permissions import (
-    is_admin,
-    send_admin_only_message
+    is_match_operator as is_admin,
+    send_match_operator_only_message as send_admin_only_message
 )
 
 
@@ -1777,6 +1777,10 @@ class Join(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
         if not await self.require_room(
             interaction
         ):

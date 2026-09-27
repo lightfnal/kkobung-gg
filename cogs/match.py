@@ -14,8 +14,8 @@ from datetime import datetime
 from uuid import uuid4
 
 from utils.permissions import (
-    is_admin,
-    send_admin_only_message
+    is_match_operator as is_admin,
+    send_match_operator_only_message as send_admin_only_message
 )
 
 from storage.team_history import (
