@@ -40,6 +40,12 @@ class InhouseRoom:
         default_factory=dict
     )
 
+    # 참가 정원 초과 시 등록되는 대기 명단입니다.
+    # dict 삽입 순서가 곧 대기 순서입니다.
+    waiting_players: dict = field(
+        default_factory=dict
+    )
+
     current_teams: dict | None = None
 
     match_in_progress: bool = False
@@ -115,6 +121,7 @@ class InhouseRoom:
 
         self.invalidate_game_views()
         self.players.clear()
+        self.waiting_players.clear()
         self.current_teams = None
         self.match_in_progress = False
 
@@ -164,6 +171,7 @@ class InhouseRoom:
                 self.blue_voice_channel_id
             ),
             "players": self.players,
+            "waiting_players": self.waiting_players,
             "current_teams": self.current_teams,
             "match_in_progress": (
                 self.match_in_progress
@@ -233,6 +241,13 @@ class InhouseRoom:
 
         players = data.get("players", {})
         room.players = dict(players) if isinstance(players, dict) else {}
+
+        waiting_players = data.get("waiting_players", {})
+        room.waiting_players = (
+            dict(waiting_players)
+            if isinstance(waiting_players, dict)
+            else {}
+        )
 
         room.current_teams = data.get(
             "current_teams"

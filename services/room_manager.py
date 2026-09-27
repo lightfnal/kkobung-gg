@@ -123,7 +123,10 @@ class RoomManager:
         user_id = str(user_id)
 
         for room in self.rooms.values():
-            if user_id in room.players:
+            if (
+                user_id in room.players
+                or user_id in room.waiting_players
+            ):
                 return room
 
         return None
