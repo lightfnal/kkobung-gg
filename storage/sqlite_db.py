@@ -2185,35 +2185,43 @@ def get_match_team_players(match_id, team):
     if normalized_team not in {"red", "blue"}:
         return []
 
-    cursor.execute(
-        """
-        SELECT
-            mp.match_id,
-            mp.discord_id,
-            mp.team,
-            mp.position,
-            mp.won,
-            p.discord_nickname,
-            p.riot_name
-        FROM match_players mp
-        LEFT JOIN players p
-            ON p.discord_id = mp.discord_id
-        WHERE mp.match_id = ?
-          AND LOWER(mp.team) = ?
-        ORDER BY CASE UPPER(COALESCE(mp.position, ''))
-            WHEN 'TOP' THEN 1
-            WHEN 'JUNGLE' THEN 2
-            WHEN 'JUN' THEN 2
-            WHEN 'MID' THEN 3
-            WHEN 'ADC' THEN 4
-            WHEN 'SUPPORT' THEN 5
-            WHEN 'SUP' THEN 5
-            ELSE 6
-        END
-        """,
-        (int(match_id), normalized_team)
-    )
-    return [dict(row) for row in cursor.fetchall()]
+    champion_connection = sqlite3.connect(DB_PATH, timeout=10)
+    champion_connection.row_factory = sqlite3.Row
+    champion_connection.execute("PRAGMA foreign_keys = ON")
+    champion_connection.execute("PRAGMA busy_timeout = 10000")
+
+    try:
+        rows = champion_connection.execute(
+            """
+            SELECT
+                mp.match_id,
+                mp.discord_id,
+                mp.team,
+                mp.position,
+                mp.won,
+                p.discord_nickname,
+                p.riot_name
+            FROM match_players mp
+            LEFT JOIN players p
+                ON p.discord_id = mp.discord_id
+            WHERE mp.match_id = ?
+              AND LOWER(mp.team) = ?
+            ORDER BY CASE UPPER(COALESCE(mp.position, ''))
+                WHEN 'TOP' THEN 1
+                WHEN 'JUNGLE' THEN 2
+                WHEN 'JUN' THEN 2
+                WHEN 'MID' THEN 3
+                WHEN 'ADC' THEN 4
+                WHEN 'SUPPORT' THEN 5
+                WHEN 'SUP' THEN 5
+                ELSE 6
+            END
+            """,
+            (int(match_id), normalized_team)
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        champion_connection.close()
 
 
 def save_match_team_champions(match_id, team, champion_records):
@@ -2235,15 +2243,15 @@ def save_match_team_champions(match_id, team, champion_records):
     if expected_ids != received_ids:
         raise ValueError("챔피언 기록 대상이 경기 참가자와 일치하지 않습니다.")
 
-    savepoint_name = "save_match_team_champions"
+    champion_connection = sqlite3.connect(DB_PATH, timeout=10)
+    champion_connection.execute("PRAGMA foreign_keys = ON")
+    champion_connection.execute("PRAGMA busy_timeout = 10000")
 
     try:
-        # 경기 결과 처리 등 다른 DB 작업과 같은 연결을 사용하므로
-        # 중첩 가능한 SAVEPOINT로 이 작업만 원자적으로 저장합니다.
-        conn.execute(f"SAVEPOINT {savepoint_name}")
+        champion_connection.execute("BEGIN IMMEDIATE")
 
         for record in champion_records:
-            cursor.execute(
+            champion_connection.execute(
                 """
                 INSERT INTO match_player_champions (
                     match_id,
@@ -2269,12 +2277,10 @@ def save_match_team_champions(match_id, team, champion_records):
                 )
             )
 
-        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        champion_connection.commit()
 
     except Exception:
-        try:
-            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
-        except sqlite3.Error:
-            pass
+        champion_connection.rollback()
         raise
+    finally:
+        champion_connection.close()
