@@ -127,7 +127,8 @@ class ChampionRecordModal(discord.ui.Modal):
             )
             await interaction.followup.send(
                 "❌ 챔피언 기록 저장 중 오류가 발생했습니다.\n"
-                f"오류 종류: `{type(error).__name__}`",
+                f"오류 종류: `{type(error).__name__}`\n"
+                f"오류 내용: `{str(error)[:180]}`",
                 ephemeral=True
             )
             return
