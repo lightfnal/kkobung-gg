@@ -2,6 +2,20 @@
 
 {% block content %}
 
+<style>
+    .ranking-player-cell{
+        min-width:0;
+        overflow:hidden;
+    }
+
+    .ranking-player-cell .ranking-player-name-link{
+        display:block;
+        overflow:hidden;
+        white-space:nowrap;
+        text-overflow:ellipsis;
+    }
+</style>
+
 <!-- ==============================
      랭킹 헤더
 ============================== -->
@@ -561,13 +575,6 @@ document.addEventListener(
                 );
 
 
-            const riotName =
-                escapeHtml(
-                    player.riot_name
-                    || ""
-                );
-
-
             const tier =
                 escapeHtml(
                     player.tier
@@ -613,51 +620,6 @@ document.addEventListener(
                 );
 
 
-            let subText =
-                riotName;
-
-
-            if(
-                mainPosition
-            ){
-
-                if(
-                    subText
-                ){
-
-                    subText +=
-                        " · ";
-
-                }
-
-
-                subText +=
-                    mainPosition;
-
-
-                if(
-                    subPosition
-                ){
-
-                    subText +=
-                        " / "
-                        + subPosition;
-
-                }
-
-            }
-
-
-            if(
-                !subText
-            ){
-
-                subText =
-                    "Riot ID 없음";
-
-            }
-
-
             return `
                 <div
                     class="ranking-player-wrapper"
@@ -694,7 +656,7 @@ document.addEventListener(
 
                         <!-- 플레이어 -->
 
-                        <div>
+                        <div class="ranking-player-cell">
 
                             <a
                                 href="/player/${playerId}"
@@ -702,13 +664,6 @@ document.addEventListener(
                             >
                                 ${nickname}
                             </a>
-
-
-                            <div class="ranking-player-riot">
-
-                                ${subText}
-
-                            </div>
 
                         </div>
 
