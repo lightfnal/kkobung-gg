@@ -46,6 +46,10 @@ class InhouseRoom:
         default_factory=dict
     )
 
+    # 모집창에 표시할 시작 방식과 시간 안내
+    recruit_start_mode: str = "undecided"
+    recruit_start_time: str | None = None
+
     current_teams: dict | None = None
 
     match_in_progress: bool = False
@@ -122,6 +126,8 @@ class InhouseRoom:
         self.invalidate_game_views()
         self.players.clear()
         self.waiting_players.clear()
+        self.recruit_start_mode = "undecided"
+        self.recruit_start_time = None
         self.current_teams = None
         self.match_in_progress = False
 
@@ -172,6 +178,8 @@ class InhouseRoom:
             ),
             "players": self.players,
             "waiting_players": self.waiting_players,
+            "recruit_start_mode": self.recruit_start_mode,
+            "recruit_start_time": self.recruit_start_time,
             "current_teams": self.current_teams,
             "match_in_progress": (
                 self.match_in_progress
@@ -247,6 +255,25 @@ class InhouseRoom:
             dict(waiting_players)
             if isinstance(waiting_players, dict)
             else {}
+        )
+
+        recruit_start_mode = data.get(
+            "recruit_start_mode",
+            "undecided"
+        )
+        if recruit_start_mode not in {
+            "undecided",
+            "when_full",
+            "scheduled"
+        }:
+            recruit_start_mode = "undecided"
+        room.recruit_start_mode = recruit_start_mode
+
+        recruit_start_time = data.get("recruit_start_time")
+        room.recruit_start_time = (
+            str(recruit_start_time).strip()
+            if recruit_start_time
+            else None
         )
 
         room.current_teams = data.get(
