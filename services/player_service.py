@@ -3,6 +3,7 @@ from storage.sqlite_db import (
     add_player,
     update_player,
     update_stats,
+    update_player_discord_nickname,
     delete_player,
     get_all_players_dict
 )
@@ -42,6 +43,16 @@ class PlayerService:
         update_player(
             discord_id,
             profile
+        )
+
+    @staticmethod
+    def update_discord_nickname(
+        discord_id,
+        discord_nickname
+    ):
+        return update_player_discord_nickname(
+            discord_id,
+            discord_nickname
         )
 
     @staticmethod
