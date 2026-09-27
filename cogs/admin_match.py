@@ -1,7 +1,10 @@
 import logging
+from typing import Literal, Optional
 
 import discord
 from discord.ext import commands
+
+from config import MAX_PLAYERS
 
 from services.player_service import PlayerService
 
@@ -9,6 +12,7 @@ from storage.sqlite_db import (
     get_last_match,
     get_match_players,
     get_match,
+    get_player,
     delete_last_match,
     delete_match_only,
     update_season_player_stats,
@@ -18,6 +22,7 @@ from storage.sqlite_db import (
 )
 
 from utils.cog_helper import get_join_cog
+from views.join_view import JoinView
 from utils.permissions import (
     is_admin,
     send_admin_only_message
@@ -667,25 +672,394 @@ class AdminMatch(commands.Cog):
             join_cog.save_rooms_state()
 
     @discord.app_commands.command(
+        name="관리자일괄참가",
+        description="관리자가 선택한 10명을 내전 방에 한 번에 참가시킵니다."
+    )
+    async def admin_bulk_join(
+        self,
+        interaction: discord.Interaction,
+        참가자1: discord.Member,
+        참가자2: discord.Member,
+        참가자3: discord.Member,
+        참가자4: discord.Member,
+        참가자5: discord.Member,
+        참가자6: discord.Member,
+        참가자7: discord.Member,
+        참가자8: discord.Member,
+        참가자9: discord.Member,
+        참가자10: discord.Member
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if not await join_cog.require_room(interaction):
+            return
+
+        members = [
+            참가자1, 참가자2, 참가자3, 참가자4, 참가자5,
+            참가자6, 참가자7, 참가자8, 참가자9, 참가자10
+        ]
+        member_ids = [str(member.id) for member in members]
+
+        if len(set(member_ids)) != MAX_PLAYERS:
+            await interaction.response.send_message(
+                "❌ 서로 다른 10명을 선택해주세요.",
+                ephemeral=True
+            )
+            return
+
+        missing_profiles = [
+            member.mention
+            for member in members
+            if get_player(str(member.id)) is None
+        ]
+        if missing_profiles:
+            await interaction.response.send_message(
+                "❌ 프로필이 없는 참가자가 있습니다: "
+                + ", ".join(missing_profiles),
+                ephemeral=True
+            )
+            return
+
+        room = join_cog.active_room
+
+        async with join_cog.room_manager.management_lock:
+            async with room.operation_lock:
+                if (
+                    room.match_in_progress
+                    or room.mvp_vote_in_progress
+                    or room.match_transaction_active
+                    or room.current_teams is not None
+                ):
+                    await interaction.response.send_message(
+                        "❌ 진행 중인 경기나 생성된 팀이 있어 명단을 복구할 수 없습니다.",
+                        ephemeral=True
+                    )
+                    return
+
+                if room.players:
+                    await interaction.response.send_message(
+                        "❌ 현재 참가 명단이 비어 있지 않습니다. 기존 명단을 먼저 확인해주세요.",
+                        ephemeral=True
+                    )
+                    return
+
+                occupied = []
+                for member in members:
+                    other_room = join_cog.room_manager.find_player_room(
+                        str(member.id)
+                    )
+                    if other_room is not None and other_room is not room:
+                        occupied.append(
+                            f"{member.mention}({other_room.room_name})"
+                        )
+
+                if occupied:
+                    await interaction.response.send_message(
+                        "❌ 다른 내전에 참가 중인 선수가 있습니다: "
+                        + ", ".join(occupied),
+                        ephemeral=True
+                    )
+                    return
+
+                room.players = {
+                    str(member.id): {"nickname": member.display_name}
+                    for member in members
+                }
+                room.series_score = {"red": 0, "blue": 0}
+                room.series_game = 0
+                room.last_team_signature = None
+                join_cog.save_rooms_state()
+
+        await interaction.response.send_message(
+            "✅ 관리자 일괄 참가가 완료되었습니다.\n"
+            + "\n".join(
+                f"{index}. {member.mention}"
+                for index, member in enumerate(members, start=1)
+            )
+            + "\n\n이제 `/관리자팀생성`을 실행해주세요.",
+            ephemeral=True
+        )
+
+    @discord.app_commands.command(
+        name="관리자팀생성",
+        description="모집창 없이 현재 참가자 10명으로 팀을 생성합니다."
+    )
+    async def admin_generate_teams(
+        self,
+        interaction: discord.Interaction
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        if len(room.players) != MAX_PLAYERS:
+            await interaction.response.send_message(
+                f"❌ 참가자가 {MAX_PLAYERS}명이어야 합니다. "
+                f"현재 {len(room.players)}/{MAX_PLAYERS}명입니다.",
+                ephemeral=True
+            )
+            return
+
+        view = JoinView(join_cog)
+        await view.generate_teams(interaction)
+
+    @discord.app_commands.command(
+        name="관리자팀지정",
+        description="관리자가 레드·블루팀의 선수와 포지션을 직접 지정합니다."
+    )
+    async def admin_assign_teams(
+        self,
+        interaction: discord.Interaction,
+        레드_top: discord.Member,
+        레드_jungle: discord.Member,
+        레드_mid: discord.Member,
+        레드_adc: discord.Member,
+        레드_support: discord.Member,
+        블루_top: discord.Member,
+        블루_jungle: discord.Member,
+        블루_mid: discord.Member,
+        블루_adc: discord.Member,
+        블루_support: discord.Member
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        red_members = [
+            레드_top, 레드_jungle, 레드_mid, 레드_adc, 레드_support
+        ]
+        blue_members = [
+            블루_top, 블루_jungle, 블루_mid, 블루_adc, 블루_support
+        ]
+        selected_ids = {
+            str(member.id)
+            for member in red_members + blue_members
+        }
+
+        if len(selected_ids) != MAX_PLAYERS:
+            await interaction.response.send_message(
+                "❌ 서로 다른 10명을 각 팀과 포지션에 지정해주세요.",
+                ephemeral=True
+            )
+            return
+
+        if selected_ids != set(room.players.keys()):
+            await interaction.response.send_message(
+                "❌ 팀에 지정한 10명이 현재 참가 명단과 정확히 일치해야 합니다.",
+                ephemeral=True
+            )
+            return
+
+        async with room.operation_lock:
+            if (
+                room.match_in_progress
+                or room.mvp_vote_in_progress
+                or room.match_transaction_active
+            ):
+                await interaction.response.send_message(
+                    "❌ 진행 중인 경기 처리가 있어 팀을 지정할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            positions = ["TOP", "JUNGLE", "MID", "ADC", "SUPPORT"]
+            room.current_teams = {
+                "red": {
+                    position: str(member.id)
+                    for position, member in zip(positions, red_members)
+                },
+                "blue": {
+                    position: str(member.id)
+                    for position, member in zip(positions, blue_members)
+                }
+            }
+            room.last_team_signature = None
+            join_cog.save_rooms_state()
+
+        await interaction.response.send_message(
+            "✅ 관리자 팀 지정이 완료되었습니다.\n\n"
+            "🔴 레드팀\n"
+            + "\n".join(
+                f"{position}: {member.mention}"
+                for position, member in zip(positions, red_members)
+            )
+            + "\n\n🔵 블루팀\n"
+            + "\n".join(
+                f"{position}: {member.mention}"
+                for position, member in zip(positions, blue_members)
+            ),
+            ephemeral=True
+        )
+
+    @discord.app_commands.command(
+        name="관리자경기결과",
+        description="MVP 투표 없이 관리자가 승리팀과 MVP를 직접 기록합니다."
+    )
+    async def admin_match_result(
+        self,
+        interaction: discord.Interaction,
+        승리팀: Literal["레드", "블루"],
+        mvp: discord.Member
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        match_cog = self.bot.get_cog("Match")
+        if join_cog is None or match_cog is None:
+            await interaction.response.send_message(
+                "❌ 경기 처리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        async with room.operation_lock:
+            if room.mvp_vote_in_progress:
+                await interaction.response.send_message(
+                    "❌ 이미 MVP 투표가 진행 중입니다.",
+                    ephemeral=True
+                )
+                return
+
+            if room.match_transaction_active:
+                await interaction.response.send_message(
+                    "❌ 현재 경기 결과를 처리 중입니다.",
+                    ephemeral=True
+                )
+                return
+
+            if not room.match_in_progress or room.current_teams is None:
+                await interaction.response.send_message(
+                    "❌ 먼저 팀을 생성하고 `/경기시작`을 실행해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            player_ids = {
+                str(user_id)
+                for team in room.current_teams.values()
+                for user_id in team.values()
+            }
+            if str(mvp.id) not in player_ids:
+                await interaction.response.send_message(
+                    "❌ MVP는 현재 경기 참가자만 선택할 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            winner = "red" if 승리팀 == "레드" else "blue"
+
+            try:
+                previous_match = get_last_match(room_id=room.room_id)
+                previous_match_id = (
+                    previous_match["id"]
+                    if previous_match is not None
+                    else None
+                )
+                await match_cog.process_match_result(
+                    interaction,
+                    winner,
+                    str(mvp.id),
+                    room
+                )
+                saved_match = get_last_match(room_id=room.room_id)
+                if (
+                    saved_match is None
+                    or saved_match["id"] == previous_match_id
+                    or saved_match["winner"] != winner
+                    or str(saved_match["mvp_discord_id"]) != str(mvp.id)
+                ):
+                    raise RuntimeError("관리자 경기 결과 검증에 실패했습니다.")
+
+            except Exception:
+                logger.exception(
+                    "관리자 경기 결과 처리 실패 | 방=%s",
+                    room.room_id
+                )
+                if room.match_transaction_active:
+                    rollback_transaction()
+                    room.match_transaction_active = False
+                    room.match_transaction_committed = False
+                    if room.transaction_series_score is not None:
+                        room.series_score = dict(room.transaction_series_score)
+                    if room.transaction_series_game is not None:
+                        room.series_game = room.transaction_series_game
+                    room.pending_match_token = None
+                    room.pending_series_score = None
+                    room.pending_series_game = None
+                room.match_in_progress = False
+                join_cog.save_rooms_state()
+                await interaction.followup.send(
+                    "❌ 경기 결과 처리 중 오류가 발생했습니다. 로그를 확인해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            await interaction.followup.send(
+                "✅ 관리자 경기 결과 처리가 완료되었습니다.\n"
+                f"승리팀: {승리팀}\nMVP: {mvp.mention}",
+                ephemeral=True
+            )
+
+    @discord.app_commands.command(
         name="경기복구",
-        description="누락된 BO3 2·3세트 결과를 정상 경기 처리로 복구합니다."
+        description="누락된 BO3 결과를 선택한 세트부터 정상 처리로 복구합니다."
     )
     @discord.app_commands.describe(
+        시작세트="복구를 시작할 세트",
+        일세트_mvp="1세트 MVP (레드팀 승리)",
         이세트_mvp="2세트 MVP (블루팀 승리)",
         삼세트_mvp="3세트 MVP (레드팀 승리)"
     )
     async def recover_match(
         self,
         interaction: discord.Interaction,
-        이세트_mvp: discord.Member,
-        삼세트_mvp: discord.Member
+        시작세트: Literal["1세트", "2세트", "3세트"],
+        일세트_mvp: Optional[discord.Member] = None,
+        이세트_mvp: Optional[discord.Member] = None,
+        삼세트_mvp: Optional[discord.Member] = None
     ):
-        """특정 누락 사고의 2·3세트를 기존 정상 처리 경로로 복구합니다.
-
-        최초 실행은 1세트 완료(레드 1:0), 중단 후 재실행은
-        2세트 완료(1:1) 상태에서만 허용합니다. 기존 1세트는 수정하지
-        않으며, 실제 기록은 Match.process_match_result가 담당합니다.
-        """
+        """선택한 시작 세트부터 기존 정상 경기 처리 경로로 복구합니다."""
         if not is_admin(interaction):
             await send_admin_only_message(interaction)
             return
@@ -711,6 +1085,8 @@ class AdminMatch(commands.Cog):
                 join_cog,
                 match_cog,
                 room,
+                시작세트,
+                일세트_mvp,
                 이세트_mvp,
                 삼세트_mvp
             )
@@ -721,8 +1097,10 @@ class AdminMatch(commands.Cog):
         join_cog,
         match_cog,
         room,
-        second_mvp: discord.Member,
-        third_mvp: discord.Member
+        start_set: str,
+        first_mvp: Optional[discord.Member],
+        second_mvp: Optional[discord.Member],
+        third_mvp: Optional[discord.Member]
     ):
         if room.match_transaction_active:
             await interaction.response.send_message(
@@ -745,121 +1123,155 @@ class AdminMatch(commands.Cog):
             )
             return
 
-        red_ids = {
+        player_ids = {
             str(user_id)
-            for user_id in room.current_teams.get("red", {}).values()
+            for team in room.current_teams.values()
+            for user_id in team.values()
         }
-        blue_ids = {
-            str(user_id)
-            for user_id in room.current_teams.get("blue", {}).values()
+        if len(player_ids) != MAX_PLAYERS:
+            await interaction.response.send_message(
+                "❌ 현재 팀 구성이 정확히 10명이 아닙니다.",
+                ephemeral=True
+            )
+            return
+
+        all_results = [
+            ("1세트", "red", first_mvp),
+            ("2세트", "blue", second_mvp),
+            ("3세트", "red", third_mvp)
+        ]
+        start_index = {
+            "1세트": 0,
+            "2세트": 1,
+            "3세트": 2
+        }[start_set]
+        results_to_apply = all_results[start_index:]
+        missing_mvp_sets = [
+            set_name
+            for set_name, _, mvp_member in results_to_apply
+            if mvp_member is None
+        ]
+        if missing_mvp_sets:
+            await interaction.response.send_message(
+                "❌ 복구할 세트의 MVP를 모두 선택해주세요: "
+                + ", ".join(missing_mvp_sets),
+                ephemeral=True
+            )
+            return
+
+        invalid_mvp_sets = [
+            set_name
+            for set_name, _, mvp_member in results_to_apply
+            if str(mvp_member.id) not in player_ids
+        ]
+        if invalid_mvp_sets:
+            await interaction.response.send_message(
+                "❌ 현재 팀 참가자가 아닌 MVP가 있습니다: "
+                + ", ".join(invalid_mvp_sets),
+                ephemeral=True
+            )
+            return
+
+        expected_states = {
+            "1세트": ({"red": 0, "blue": 0}, 0),
+            "2세트": ({"red": 1, "blue": 0}, 1),
+            "3세트": ({"red": 1, "blue": 1}, 2)
         }
-        player_ids = red_ids | blue_ids
-        second_mvp_id = str(second_mvp.id)
-        third_mvp_id = str(third_mvp.id)
+        expected_score, expected_game = expected_states[start_set]
+        current_score = dict(room.series_score)
+        current_game = int(room.series_game)
+        reset_state = (
+            current_score == {"red": 0, "blue": 0}
+            and current_game == 0
+        )
 
-        if second_mvp_id not in player_ids or third_mvp_id not in player_ids:
-            await interaction.response.send_message(
-                "❌ 두 MVP 모두 현재 시리즈 참가자여야 합니다.",
-                ephemeral=True
+        if (current_score, current_game) != (expected_score, expected_game):
+            if start_index == 0 or not reset_state:
+                await interaction.response.send_message(
+                    "❌ 선택한 시작 세트와 현재 시리즈 상태가 다릅니다.\n"
+                    f"현재 상태: 레드 {current_score.get('red', 0)} : "
+                    f"{current_score.get('blue', 0)} 블루 / "
+                    f"완료 {current_game}세트",
+                    ephemeral=True
+                )
+                return
+
+            # `/경기종료`로 메모리 상태가 초기화된 경우에는 DB의
+            # 마지막 완료 세트를 확인한 뒤 시작 직전 점수만 복원합니다.
+            last_match = get_last_match(room_id=room.room_id)
+            if last_match is None:
+                await interaction.response.send_message(
+                    "❌ 시작 세트 이전의 경기 기록을 찾을 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            recorded_ids = {
+                str(player["discord_id"])
+                for player in get_match_players(last_match["id"])
+            }
+            previous_set = all_results[start_index - 1]
+            _, previous_winner, previous_mvp = previous_set
+            previous_mvp_matches = (
+                previous_mvp is None
+                or str(last_match["mvp_discord_id"])
+                == str(previous_mvp.id)
             )
-            return
+            if (
+                recorded_ids != player_ids
+                or last_match["winner"] != previous_winner
+                or not previous_mvp_matches
+            ):
+                await interaction.response.send_message(
+                    "❌ 최근 DB 기록이 선택한 시작 세트의 직전 결과와 "
+                    "일치하지 않습니다.",
+                    ephemeral=True
+                )
+                return
 
-        score = dict(room.series_score)
-        game = int(room.series_game)
-        initial_state = score == {"red": 1, "blue": 0} and game == 1
-        resumable_state = score == {"red": 1, "blue": 1} and game == 2
-
-        if not initial_state and not resumable_state:
-            await interaction.response.send_message(
-                "❌ 안전 조건이 맞지 않아 중단했습니다.\n"
-                f"현재 상태: 레드 {score.get('red', 0)} : "
-                f"{score.get('blue', 0)} 블루 / 완료 {game}세트",
-                ephemeral=True
-            )
-            return
-
-        last_match = get_last_match(room_id=room.room_id)
-
-        if last_match is None:
-            await interaction.response.send_message(
-                "❌ 기존 1세트 경기 기록을 찾을 수 없습니다.",
-                ephemeral=True
-            )
-            return
-
-        last_players = get_match_players(last_match["id"])
-        recorded_ids = {
-            str(player["discord_id"])
-            for player in last_players
-        }
-
-        if recorded_ids != player_ids:
-            await interaction.response.send_message(
-                "❌ 최근 경기 참가자와 현재 팀 구성이 달라 중단했습니다.",
-                ephemeral=True
-            )
-            return
-
-        if initial_state and last_match["winner"] != "red":
-            await interaction.response.send_message(
-                "❌ 최근 기록이 1세트 레드 승리와 일치하지 않습니다.",
-                ephemeral=True
-            )
-            return
-
-        if resumable_state and (
-            last_match["winner"] != "blue"
-            or str(last_match["mvp_discord_id"]) != second_mvp_id
-        ):
-            await interaction.response.send_message(
-                "❌ 기록된 2세트 결과가 지정한 블루 승/MVP와 달라 중단했습니다.",
-                ephemeral=True
-            )
-            return
+            room.series_score = dict(expected_score)
+            room.series_game = expected_game
+            join_cog.save_rooms_state()
 
         await interaction.response.defer(ephemeral=True)
 
+        completed_lines = []
         try:
-            if initial_state:
-                previous_match_id = last_match["id"]
+            previous_match = get_last_match(room_id=room.room_id)
+            previous_match_id = (
+                previous_match["id"]
+                if previous_match is not None
+                else None
+            )
+
+            for set_name, winner, mvp_member in results_to_apply:
+                mvp_id = str(mvp_member.id)
                 room.match_in_progress = True
                 join_cog.save_rooms_state()
 
                 await match_cog.process_match_result(
                     interaction,
-                    "blue",
-                    second_mvp_id,
+                    winner,
+                    mvp_id,
                     room
                 )
 
-                second_match = get_last_match(room_id=room.room_id)
+                saved_match = get_last_match(room_id=room.room_id)
                 if (
-                    second_match is None
-                    or second_match["id"] == previous_match_id
-                    or second_match["winner"] != "blue"
-                    or str(second_match["mvp_discord_id"]) != second_mvp_id
-                    or room.series_score != {"red": 1, "blue": 1}
-                    or int(room.series_game) != 2
+                    saved_match is None
+                    or saved_match["id"] == previous_match_id
+                    or saved_match["winner"] != winner
+                    or str(saved_match["mvp_discord_id"]) != mvp_id
                 ):
-                    raise RuntimeError("2세트 결과 검증에 실패했습니다.")
+                    raise RuntimeError(
+                        f"{set_name} 결과 검증에 실패했습니다."
+                    )
 
-            room.match_in_progress = True
-            join_cog.save_rooms_state()
-
-            await match_cog.process_match_result(
-                interaction,
-                "red",
-                third_mvp_id,
-                room
-            )
-
-            third_match = get_last_match(room_id=room.room_id)
-            if (
-                third_match is None
-                or third_match["winner"] != "red"
-                or str(third_match["mvp_discord_id"]) != third_mvp_id
-            ):
-                raise RuntimeError("3세트 결과 검증에 실패했습니다.")
+                previous_match_id = saved_match["id"]
+                team_icon = "🔴 레드" if winner == "red" else "🔵 블루"
+                completed_lines.append(
+                    f"{set_name}: {team_icon} 승 / MVP {mvp_member.mention}"
+                )
 
         except Exception:
             logger.exception(
@@ -894,11 +1306,8 @@ class AdminMatch(commands.Cog):
 
         await interaction.followup.send(
             "✅ 경기 복구가 완료되었습니다.\n"
-            "2세트: 🔵 블루 승 / "
-            f"MVP {second_mvp.mention}\n"
-            "3세트: 🔴 레드 승 / "
-            f"MVP {third_mvp.mention}\n"
-            "최종 결과: 🔴 레드 2 : 1 블루",
+            + "\n".join(completed_lines)
+            + "\n최종 결과: 🔴 레드 2 : 1 블루",
             ephemeral=True
         )
 
