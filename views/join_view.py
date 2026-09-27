@@ -238,6 +238,18 @@ class JoinView(discord.ui.View):
             f"{description}"
         )
 
+        if self.room.recruit_start_mode == "when_full":
+            start_notice = "🚀 **시작 안내:** 10명 모이면 바로 시작"
+        elif self.room.recruit_start_mode == "scheduled":
+            start_notice = (
+                "⏰ **시작 예정:** "
+                f"{self.room.recruit_start_time or '시간 미정'}"
+            )
+        else:
+            start_notice = "🗓️ **시작 안내:** 아직 미정"
+
+        description = f"{description}\n\n{start_notice}"
+
         embed = discord.Embed(
             title=title,
             description=description
