@@ -25,6 +25,9 @@ RIOT_REGION = os.getenv(
 
 MAX_PLAYERS = 10
 
+# 내전 방마다 받을 수 있는 대기자 수
+MAX_WAITING_PLAYERS = 10
+
 # 동시에 운영할 수 있는 최대 내전 방 수
 MAX_INHOUSE_ROOMS = 3
 
