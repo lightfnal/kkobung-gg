@@ -99,6 +99,7 @@ EXTENSIONS = (
     "cogs.operations_monitor",
     "cogs.riot",
     "cogs.register",
+    "cogs.champion_record",
 )
 
 
