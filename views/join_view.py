@@ -1057,15 +1057,55 @@ class JoinView(discord.ui.View):
         room = self.join_cog.active_room
 
         async with room.operation_lock:
-            self.recruit_closed = True
+            if self.recruit_closed:
+                if (
+                    room.current_teams is not None
+                    or room.match_in_progress
+                    or room.mvp_vote_in_progress
+                    or room.match_transaction_active
+                ):
+                    await interaction.response.send_message(
+                        "❌ 팀이 생성됐거나 경기를 처리 중일 때는 "
+                        "모집을 다시 열 수 없습니다.",
+                        ephemeral=True
+                    )
+                    return
 
-            for item in self.children:
-                if isinstance(item, discord.ui.Button):
-                    if item.custom_id not in [
-                        "inhouse_list",
-                        "inhouse_reset"
-                    ]:
-                        item.disabled = True
+                self.recruit_closed = False
+
+                for item in self.children:
+                    if not isinstance(item, discord.ui.Button):
+                        continue
+
+                    if item.custom_id == "inhouse_make_teams":
+                        item.disabled = (
+                            len(room.players) < MAX_PLAYERS
+                        )
+                    else:
+                        item.disabled = False
+
+                button.label = "모집 종료"
+                button.emoji = "🔒"
+                button.style = discord.ButtonStyle.secondary
+                result_message = "🔓 모집을 다시 시작했습니다."
+
+            else:
+                self.recruit_closed = True
+
+                for item in self.children:
+                    if isinstance(item, discord.ui.Button):
+                        if item.custom_id not in [
+                            "inhouse_list",
+                            "inhouse_reset",
+                            "inhouse_close"
+                        ]:
+                            item.disabled = True
+
+                button.disabled = False
+                button.label = "모집 재개"
+                button.emoji = "🔓"
+                button.style = discord.ButtonStyle.success
+                result_message = "🔒 모집을 종료했습니다."
 
             await interaction.response.edit_message(
                 embed=self.create_embed(),
@@ -1073,7 +1113,7 @@ class JoinView(discord.ui.View):
             )
 
             await interaction.followup.send(
-                "🔒 모집을 종료했습니다.",
+                result_message,
                 ephemeral=True
             )
 
@@ -1106,6 +1146,11 @@ class JoinView(discord.ui.View):
             for item in self.children:
                 if isinstance(item, discord.ui.Button):
                     item.disabled = False
+
+                    if item.custom_id == "inhouse_close":
+                        item.label = "모집 종료"
+                        item.emoji = "🔒"
+                        item.style = discord.ButtonStyle.secondary
 
             self.make_teams_button.disabled = True
 
