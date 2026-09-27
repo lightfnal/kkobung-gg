@@ -40,6 +40,18 @@ class Profile(commands.Cog):
 
         self._nickname_sync_done = True
         updated_count = 0
+        current_member_ids = {
+            str(member.id)
+            for guild in self.bot.guilds
+            for member in guild.members
+            if not member.bot
+        }
+
+        membership_change_count = (
+            PlayerService.sync_guild_membership(
+                current_member_ids
+            )
+        )
 
         for guild in self.bot.guilds:
             for member in guild.members:
@@ -63,13 +75,60 @@ class Profile(commands.Cog):
                         member.id
                     )
 
-        if updated_count:
+        if updated_count or membership_change_count:
             self.refresh_join_profiles()
 
         logger.info(
-            "Discord 닉네임 초기 동기화 완료 | 변경=%s명",
-            updated_count
+            "Discord 프로필 초기 동기화 완료 | 닉네임=%s명 | 멤버상태=%s건",
+            updated_count,
+            membership_change_count
         )
+
+    @commands.Cog.listener()
+    async def on_member_join(
+        self,
+        member: discord.Member
+    ):
+        """가입자가 서버에 재입장하면 랭킹에 다시 표시합니다."""
+
+        if member.bot:
+            return
+
+        membership_changed = PlayerService.set_guild_membership(
+            str(member.id),
+            True
+        )
+        nickname_changed = PlayerService.update_discord_nickname(
+            str(member.id),
+            member.display_name
+        )
+
+        if membership_changed or nickname_changed:
+            self.refresh_join_profiles()
+
+    @commands.Cog.listener()
+    async def on_member_remove(
+        self,
+        member: discord.Member
+    ):
+        """가입자가 서버를 나가면 기록은 보존하고 랭킹에서 숨깁니다."""
+
+        if member.bot:
+            return
+
+        still_in_another_guild = any(
+            guild.get_member(member.id) is not None
+            for guild in self.bot.guilds
+        )
+
+        if still_in_another_guild:
+            return
+
+        if PlayerService.set_guild_membership(
+            str(member.id),
+            False
+        ):
+            self.refresh_join_profiles()
 
     @commands.Cog.listener()
     async def on_member_update(
