@@ -7,7 +7,11 @@ from discord.ext import commands
 
 from services.champion_service import ChampionService
 from storage.sqlite_db import (
+    get_match_champion_progress,
+    get_match_champion_status,
+    get_match_player_for_champion,
     get_match_team_players,
+    save_match_player_champion,
     save_match_team_champions
 )
 from utils.permissions import (
@@ -22,6 +26,111 @@ TEAM_LABELS = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+async def resolve_champion_or_reply(interaction, raw_name):
+    try:
+        champion = await asyncio.to_thread(
+            ChampionService.resolve,
+            raw_name
+        )
+    except Exception:
+        await interaction.followup.send(
+            "❌ Riot 챔피언 목록을 불러오지 못했습니다. "
+            "잠시 후 다시 시도해주세요.",
+            ephemeral=True
+        )
+        return None
+
+    if champion is None:
+        await interaction.followup.send(
+            f"❌ `{raw_name}` 챔피언을 찾지 못했습니다.\n"
+            "한글 정식 이름 또는 영문 이름으로 입력해주세요.",
+            ephemeral=True
+        )
+        return None
+
+    return champion
+
+
+class SelfChampionRecordModal(discord.ui.Modal):
+
+    def __init__(self, match_id, player):
+        super().__init__(title=f"{match_id}번 경기 · 내 챔피언")
+        self.match_id = int(match_id)
+        self.player = player
+        self.champion = discord.ui.TextInput(
+            label=(
+                f"{str(player.get('team') or '').upper()} · "
+                f"{str(player.get('position') or '미정').upper()}"
+            ),
+            placeholder="내가 사용한 챔피언 이름",
+            required=True,
+            max_length=30
+        )
+        self.add_item(self.champion)
+
+    async def on_submit(self, interaction):
+        if str(interaction.user.id) != str(self.player["discord_id"]):
+            await interaction.response.send_message(
+                "❌ 자신의 챔피언만 등록할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        raw_name = str(self.champion.value).strip()
+        champion = await resolve_champion_or_reply(interaction, raw_name)
+
+        if champion is None:
+            return
+
+        try:
+            progress = save_match_player_champion(
+                self.match_id,
+                interaction.user.id,
+                champion
+            )
+        except (TypeError, ValueError) as error:
+            await interaction.followup.send(
+                f"❌ 저장할 수 없습니다: {error}",
+                ephemeral=True
+            )
+            return
+        except Exception as error:
+            logger.exception(
+                "개인 챔피언 기록 저장 실패 | 경기=%s | 사용자=%s",
+                self.match_id,
+                interaction.user.id
+            )
+            await interaction.followup.send(
+                "❌ 챔피언 기록 저장 중 오류가 발생했습니다.\n"
+                f"오류 종류: `{type(error).__name__}`\n"
+                f"오류 내용: `{str(error)[:180]}`",
+                ephemeral=True
+            )
+            return
+
+        action = "수정" if progress["updated"] else "등록"
+        completed = progress["completed_count"]
+        total = progress["total_count"]
+        await interaction.followup.send(
+            f"✅ **{champion['champion_name']}**으로 {action}했습니다.\n"
+            f"현재 입력 현황: **{completed}/{total}명**",
+            ephemeral=True
+        )
+
+        if total > 0 and completed >= total and not progress["updated"]:
+            try:
+                await interaction.channel.send(
+                    f"✅ **{self.match_id}번 경기** 참가자 {total}명의 "
+                    "챔피언 기록이 모두 완료되었습니다."
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "챔피언 입력 완료 안내 전송 실패 | 경기=%s",
+                    self.match_id
+                )
 
 
 def get_both_team_players(match_id):
@@ -175,7 +284,29 @@ class ChampionRecordView(discord.ui.View):
         self.match_id = int(match_id)
 
     @discord.ui.button(
-        label="챔피언 기록",
+        label="내 챔피언 입력",
+        emoji="✅",
+        style=discord.ButtonStyle.success
+    )
+    async def open_self_record_modal(self, interaction, button):
+        player = get_match_player_for_champion(
+            self.match_id,
+            interaction.user.id
+        )
+
+        if player is None:
+            await interaction.response.send_message(
+                "❌ 이 경기의 참가자만 자신의 챔피언을 입력할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(
+            SelfChampionRecordModal(self.match_id, player)
+        )
+
+    @discord.ui.button(
+        label="관리자 일괄 입력",
         emoji="🎭",
         style=discord.ButtonStyle.primary
     )
@@ -199,6 +330,43 @@ class ChampionRecordView(discord.ui.View):
                 teams[0],
                 teams[1]
             )
+        )
+
+    @discord.ui.button(
+        label="입력 현황",
+        emoji="📋",
+        style=discord.ButtonStyle.secondary
+    )
+    async def show_record_status(self, interaction, button):
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        rows = get_match_champion_status(self.match_id)
+
+        if not rows:
+            await interaction.response.send_message(
+                "❌ 해당 경기 참가자 정보를 찾지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        lines = []
+
+        for row in rows:
+            mark = "✅" if row["champion_name"] else "❌"
+            champion = row["champion_name"] or "미입력"
+            lines.append(
+                f"{mark} **{str(row['team']).upper()} "
+                f"{row['position'] or '미정'}** · "
+                f"<@{row['discord_id']}> — {champion}"
+            )
+
+        completed = sum(1 for row in rows if row["champion_name"])
+        await interaction.response.send_message(
+            f"📋 **{self.match_id}번 경기 입력 현황 "
+            f"({completed}/{len(rows)}명)**\n" + "\n".join(lines),
+            ephemeral=True
         )
 
 
@@ -324,6 +492,60 @@ class ChampionRecord(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
+    @discord.app_commands.command(
+        name="내챔피언",
+        description="완료된 내전에서 자신이 사용한 챔피언을 등록합니다."
+    )
+    async def my_champion(
+        self,
+        interaction: discord.Interaction,
+        경기번호: int,
+        챔피언: str
+    ):
+        player = get_match_player_for_champion(
+            경기번호,
+            interaction.user.id
+        )
+
+        if player is None:
+            await interaction.response.send_message(
+                "❌ 해당 경기의 참가자만 등록할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        resolved = await resolve_champion_or_reply(interaction, 챔피언)
+
+        if resolved is None:
+            return
+
+        try:
+            progress = save_match_player_champion(
+                경기번호,
+                interaction.user.id,
+                resolved
+            )
+        except Exception as error:
+            logger.exception(
+                "개인 챔피언 명령 저장 실패 | 경기=%s | 사용자=%s",
+                경기번호,
+                interaction.user.id
+            )
+            await interaction.followup.send(
+                "❌ 저장 중 오류가 발생했습니다.\n"
+                f"오류 내용: `{str(error)[:180]}`",
+                ephemeral=True
+            )
+            return
+
+        await interaction.followup.send(
+            f"✅ **{resolved['champion_name']}**으로 저장했습니다.\n"
+            f"현재 입력 현황: **{progress['completed_count']}/"
+            f"{progress['total_count']}명**",
+            ephemeral=True
+        )
 
     @discord.app_commands.command(
         name="챔피언기록",

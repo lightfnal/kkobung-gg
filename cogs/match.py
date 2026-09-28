@@ -1155,8 +1155,10 @@ class Match(commands.Cog):
             f"{placement_message}"
             f"{series_message}\n\n"
             f"🖼️ **챔피언 기록 (선택)**\n"
-            "아래 버튼을 한 번 눌러 양 팀 챔피언을 기록하세요.\n"
-            f"버튼이 만료되면 `/챔피언기록 경기번호:{match_id}`"
+            "참가자는 `내 챔피언 입력`으로 자기 챔피언만 등록하세요.\n"
+            "관리자는 `입력 현황`에서 누락자만 확인하면 됩니다.\n"
+            f"필요할 때만 `/챔피언기록 경기번호:{match_id}`로 "
+            "양 팀을 일괄 입력하세요."
         )
 
         recruitment_channel = self.bot.get_channel(
