@@ -23,7 +23,8 @@ templates = Jinja2Templates(
 @router.get("/player/{player_id}")
 def player_detail(
     request: Request,
-    player_id: int
+    player_id: int,
+    position: str = "ALL"
 ):
 
     with get_db_connection() as conn:
@@ -103,7 +104,7 @@ def player_detail(
             (discord_id,)
         )
 
-        champion_stats = []
+        all_champion_stats = []
 
         for row in cursor.fetchall():
             champion = dict(row)
@@ -113,7 +114,65 @@ def player_detail(
                 * 100,
                 1
             ) if champion["games"] else 0
-            champion_stats.append(champion)
+            all_champion_stats.append(champion)
+
+        positions = ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+        selected_position = str(position or "ALL").strip().upper()
+        if selected_position not in {"ALL", *positions}:
+            selected_position = "ALL"
+
+        champion_stats = all_champion_stats
+
+        # 경기 #445부터 참가자가 직접 입력한 실제 포지션만 라인별
+        # 통계로 집계합니다. #444까지의 기록은 전체 통계에만 남습니다.
+        if selected_position != "ALL":
+            champion_columns = {
+                row[1]
+                for row in cursor.execute(
+                    "PRAGMA table_info(match_player_champions)"
+                ).fetchall()
+            }
+            champion_stats = []
+
+            if "actual_position" in champion_columns:
+                cursor.execute(
+                    """
+                    SELECT
+                        mpc.champion_key,
+                        mpc.champion_name,
+                        mpc.champion_image_url,
+                        COUNT(*) AS games,
+                        SUM(CASE WHEN mp.won = 1 THEN 1 ELSE 0 END) AS wins,
+                        SUM(CASE WHEN mp.won = 0 THEN 1 ELSE 0 END) AS losses
+                    FROM match_player_champions mpc
+                    JOIN match_players mp
+                        ON mp.match_id = mpc.match_id
+                       AND mp.discord_id = mpc.discord_id
+                    WHERE mpc.discord_id = ?
+                      AND mpc.match_id >= 445
+                      AND UPPER(mpc.actual_position) = ?
+                    GROUP BY
+                        mpc.champion_key,
+                        mpc.champion_name,
+                        mpc.champion_image_url
+                    ORDER BY
+                        games DESC,
+                        wins DESC,
+                        mpc.champion_name ASC
+                    LIMIT 10
+                    """,
+                    (discord_id, selected_position)
+                )
+
+                for row in cursor.fetchall():
+                    champion = dict(row)
+                    champion["win_rate"] = round(
+                        (champion["wins"] or 0)
+                        / champion["games"]
+                        * 100,
+                        1
+                    ) if champion["games"] else 0
+                    champion_stats.append(champion)
 
         most_champion = (
             champion_stats[0]
@@ -1010,6 +1069,12 @@ def player_detail(
                 champion_stats,
 
             "most_champion":
-                most_champion
+                most_champion,
+
+            "selected_champion_position":
+                selected_position,
+
+            "champion_positions":
+                positions
         }
     )
