@@ -2278,3 +2278,145 @@ def save_match_team_champions(match_id, team, champion_records):
         except sqlite3.Error:
             conn.rollback()
         raise
+
+
+def get_match_player_for_champion(match_id, discord_id):
+    """해당 경기 참가자 1명의 팀·포지션·표시 이름을 반환합니다."""
+    cursor.execute(
+        """
+        SELECT
+            mp.match_id,
+            mp.discord_id,
+            mp.team,
+            mp.position,
+            mp.won,
+            p.discord_nickname,
+            p.riot_name
+        FROM match_players mp
+        LEFT JOIN players p
+            ON p.discord_id = mp.discord_id
+        WHERE mp.match_id = ?
+          AND mp.discord_id = ?
+        LIMIT 1
+        """,
+        (int(match_id), str(discord_id))
+    )
+    row = cursor.fetchone()
+    return dict(row) if row is not None else None
+
+
+def get_match_champion_progress(match_id):
+    """경기의 챔피언 입력 완료 인원과 전체 참가 인원을 반환합니다."""
+    cursor.execute(
+        """
+        SELECT
+            COUNT(DISTINCT mp.discord_id) AS total_count,
+            COUNT(DISTINCT mpc.discord_id) AS completed_count
+        FROM match_players mp
+        LEFT JOIN match_player_champions mpc
+            ON mpc.match_id = mp.match_id
+           AND mpc.discord_id = mp.discord_id
+        WHERE mp.match_id = ?
+        """,
+        (int(match_id),)
+    )
+    row = cursor.fetchone()
+    return {
+        "completed_count": int(row["completed_count"] or 0),
+        "total_count": int(row["total_count"] or 0)
+    }
+
+
+def get_match_champion_status(match_id):
+    """팀·포지션 순서로 참가자의 챔피언 입력 현황을 반환합니다."""
+    cursor.execute(
+        """
+        SELECT
+            mp.discord_id,
+            mp.team,
+            mp.position,
+            p.discord_nickname,
+            mpc.champion_name
+        FROM match_players mp
+        LEFT JOIN players p
+            ON p.discord_id = mp.discord_id
+        LEFT JOIN match_player_champions mpc
+            ON mpc.match_id = mp.match_id
+           AND mpc.discord_id = mp.discord_id
+        WHERE mp.match_id = ?
+        ORDER BY
+            CASE LOWER(mp.team) WHEN 'red' THEN 1 ELSE 2 END,
+            CASE UPPER(COALESCE(mp.position, ''))
+                WHEN 'TOP' THEN 1
+                WHEN 'JUNGLE' THEN 2
+                WHEN 'JUN' THEN 2
+                WHEN 'MID' THEN 3
+                WHEN 'ADC' THEN 4
+                WHEN 'SUPPORT' THEN 5
+                WHEN 'SUP' THEN 5
+                ELSE 6
+            END
+        """,
+        (int(match_id),)
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def save_match_player_champion(match_id, discord_id, champion_record):
+    """참가자가 자신의 챔피언 한 개를 등록하거나 수정합니다."""
+    player = get_match_player_for_champion(match_id, discord_id)
+
+    if player is None:
+        raise ValueError("해당 경기의 참가자가 아닙니다.")
+
+    savepoint_name = "save_match_player_champion"
+
+    try:
+        conn.execute(f"SAVEPOINT {savepoint_name}")
+        existed = cursor.execute(
+            """
+            SELECT 1
+            FROM match_player_champions
+            WHERE match_id = ? AND discord_id = ?
+            """,
+            (int(match_id), str(discord_id))
+        ).fetchone() is not None
+        cursor.execute(
+            """
+            INSERT INTO match_player_champions (
+                match_id,
+                discord_id,
+                champion_key,
+                champion_name,
+                champion_image_url,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(match_id, discord_id) DO UPDATE SET
+                champion_key = excluded.champion_key,
+                champion_name = excluded.champion_name,
+                champion_image_url = excluded.champion_image_url,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                int(match_id),
+                str(discord_id),
+                str(champion_record["champion_key"]),
+                str(champion_record["champion_name"]),
+                str(champion_record["champion_image_url"])
+            )
+        )
+        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        conn.commit()
+    except Exception:
+        try:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        except sqlite3.Error:
+            conn.rollback()
+        raise
+
+    progress = get_match_champion_progress(match_id)
+    progress["updated"] = existed
+    progress["player"] = player
+    return progress
