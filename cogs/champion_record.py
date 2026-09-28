@@ -404,8 +404,14 @@ class CombinedChampionRecordModal(discord.ui.Modal):
             blue_champion = resolved[index * 2 + 1]
             red_record = dict(red_champion)
             red_record["discord_id"] = str(red_player["discord_id"])
+            red_record["actual_position"] = str(
+                red_player.get("position") or ""
+            ).upper()
             blue_record = dict(blue_champion)
             blue_record["discord_id"] = str(blue_player["discord_id"])
+            blue_record["actual_position"] = str(
+                blue_player.get("position") or ""
+            ).upper()
             red_records.append(red_record)
             blue_records.append(blue_record)
             result_lines.append(
@@ -635,6 +641,9 @@ class ChampionRecordModal(discord.ui.Modal):
         for player, champion in zip(self.players, resolved):
             record = dict(champion)
             record["discord_id"] = str(player["discord_id"])
+            record["actual_position"] = str(
+                player.get("position") or ""
+            ).upper()
             records.append(record)
             nickname = (
                 player.get("discord_nickname")
