@@ -835,6 +835,11 @@ class JoinView(discord.ui.View):
         weighted_opponent_penalty = balance_result[
             "weighted_opponent_penalty"
         ]
+        lane_gaps = balance_result.get("lane_gaps", {})
+        weighted_lane_gap_penalty = balance_result.get(
+            "weighted_lane_gap_penalty",
+            0
+        )
 
         self.join_cog.last_team_signature = (
             balance_result[
@@ -867,7 +872,7 @@ class JoinView(discord.ui.View):
         logger.info(
             "팀 생성 완료 | 방=%s | MMR차이=%s(가중=%s) | "
             "포지션=%s(가중=%s) | 같은팀=%s(가중=%s) | "
-            "상대=%s(가중=%s) | 최종=%s",
+            "상대=%s(가중=%s) | 라인차=%s(가중=%s) | 최종=%s",
             room.room_id,
             mmr_difference,
             weighted_mmr_penalty,
@@ -877,6 +882,8 @@ class JoinView(discord.ui.View):
             weighted_same_team_penalty,
             opponent_penalty,
             weighted_opponent_penalty,
+            lane_gaps,
+            weighted_lane_gap_penalty,
             selected_total_penalty
         )
 
@@ -917,6 +924,26 @@ class JoinView(discord.ui.View):
             value=blue_list,
             inline=True
         )
+
+        largest_lane = max(
+            lane_gaps,
+            key=lane_gaps.get,
+            default=None
+        )
+        if largest_lane is not None:
+            gap_lines = " · ".join(
+                f"{position} {lane_gaps.get(position, 0)}"
+                for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+            )
+            embed.add_field(
+                name="⚖️ 포지션별 예상 전력 차이",
+                value=(
+                    f"{gap_lines}\n"
+                    f"가장 큰 차이: **{largest_lane} "
+                    f"{lane_gaps[largest_lane]}점**"
+                ),
+                inline=False
+            )
 
         guild = interaction.guild
 
