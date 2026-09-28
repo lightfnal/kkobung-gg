@@ -2362,6 +2362,83 @@ def get_match_champion_status(match_id):
     return [dict(row) for row in cursor.fetchall()]
 
 
+def get_player_champion_suggestions(discord_id, before_match_id, limit=20):
+    """이전 세트, 최근 사용, 모스트 순서를 반영한 빠른 선택 목록입니다."""
+    safe_limit = max(1, min(int(limit), 24))
+    discord_id = str(discord_id)
+    before_match_id = int(before_match_id)
+
+    previous = cursor.execute(
+        """
+        SELECT
+            champion_key,
+            champion_name,
+            champion_image_url,
+            match_id
+        FROM match_player_champions
+        WHERE discord_id = ?
+          AND match_id < ?
+        ORDER BY match_id DESC
+        LIMIT 1
+        """,
+        (discord_id, before_match_id)
+    ).fetchone()
+
+    rows = cursor.execute(
+        """
+        SELECT
+            champion_key,
+            champion_name,
+            MAX(champion_image_url) AS champion_image_url,
+            COUNT(*) AS games,
+            MAX(match_id) AS last_match_id
+        FROM match_player_champions
+        WHERE discord_id = ?
+          AND match_id < ?
+        GROUP BY champion_key, champion_name
+        ORDER BY last_match_id DESC, games DESC, champion_name ASC
+        LIMIT 40
+        """,
+        (discord_id, before_match_id)
+    ).fetchall()
+
+    most_rows = sorted(
+        (dict(row) for row in rows),
+        key=lambda row: (-int(row["games"] or 0), -int(row["last_match_id"] or 0))
+    )
+    recent_rows = [dict(row) for row in rows]
+    suggestions = []
+    used_keys = set()
+
+    if previous is not None:
+        previous_record = dict(previous)
+        previous_record["reason"] = "이전 세트"
+        previous_record["games"] = next(
+            (
+                int(row["games"] or 0)
+                for row in recent_rows
+                if row["champion_key"] == previous_record["champion_key"]
+            ),
+            1
+        )
+        suggestions.append(previous_record)
+        used_keys.add(previous_record["champion_key"])
+
+    for reason, source_rows in (("모스트", most_rows[:8]), ("최근", recent_rows[:12])):
+        for row in source_rows:
+            if row["champion_key"] in used_keys:
+                continue
+            record = dict(row)
+            record["reason"] = reason
+            suggestions.append(record)
+            used_keys.add(record["champion_key"])
+
+            if len(suggestions) >= safe_limit:
+                return suggestions
+
+    return suggestions[:safe_limit]
+
+
 def save_match_player_champion(match_id, discord_id, champion_record):
     """참가자가 자신의 챔피언 한 개를 등록하거나 수정합니다."""
     player = get_match_player_for_champion(match_id, discord_id)
