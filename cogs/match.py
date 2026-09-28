@@ -3,6 +3,7 @@ import logging
 import discord
 
 from views.winner_select_view import WinnerSelectView
+from cogs.champion_record import ChampionRecordView
 from discord.ext import commands
 
 from config import (
@@ -1154,8 +1155,8 @@ class Match(commands.Cog):
             f"{placement_message}"
             f"{series_message}\n\n"
             f"🖼️ **챔피언 기록 (선택)**\n"
-            f"`/챔피언기록 경기번호:{match_id} 팀:레드`\n"
-            f"`/챔피언기록 경기번호:{match_id} 팀:블루`"
+            "아래 버튼을 한 번 눌러 양 팀 챔피언을 기록하세요.\n"
+            f"버튼이 만료되면 `/챔피언기록 경기번호:{match_id}`"
         )
 
         recruitment_channel = self.bot.get_channel(
@@ -1181,7 +1182,8 @@ class Match(commands.Cog):
             await join_cog.send_output_message(
                 room=room,
                 fallback_channel=recruitment_channel,
-                content=result_message
+                content=result_message,
+                view=ChampionRecordView(match_id)
             )
         )
 
