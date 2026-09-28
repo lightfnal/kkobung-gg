@@ -11,6 +11,7 @@ from storage.sqlite_db import (
     get_match_champion_status,
     get_match_player_for_champion,
     get_match_team_players,
+    get_player_champion_suggestions,
     save_match_player_champion,
     save_match_team_champions
 )
@@ -53,12 +54,77 @@ async def resolve_champion_or_reply(interaction, raw_name):
     return champion
 
 
+async def save_self_champion_and_reply(
+    interaction,
+    match_id,
+    champion,
+    source_message=None,
+    source_view=None
+):
+    try:
+        progress = save_match_player_champion(
+            match_id,
+            interaction.user.id,
+            champion
+        )
+    except (TypeError, ValueError) as error:
+        await interaction.followup.send(
+            f"❌ 저장할 수 없습니다: {error}",
+            ephemeral=True
+        )
+        return None
+    except Exception as error:
+        logger.exception(
+            "개인 챔피언 기록 저장 실패 | 경기=%s | 사용자=%s",
+            match_id,
+            interaction.user.id
+        )
+        await interaction.followup.send(
+            "❌ 챔피언 기록 저장 중 오류가 발생했습니다.\n"
+            f"오류 종류: `{type(error).__name__}`\n"
+            f"오류 내용: `{str(error)[:180]}`",
+            ephemeral=True
+        )
+        return None
+
+    action = "수정" if progress["updated"] else "등록"
+    completed = progress["completed_count"]
+    total = progress["total_count"]
+    await interaction.followup.send(
+        f"✅ **{champion['champion_name']}**으로 {action}했습니다.\n"
+        f"현재 입력 현황: **{completed}/{total}명**",
+        ephemeral=True
+    )
+
+    if total > 0 and completed >= total and not progress["updated"]:
+        if source_message is not None and source_view is not None:
+            for item in source_view.children:
+                item.disabled = True
+
+            try:
+                await source_message.edit(view=source_view)
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("챔피언 입력 완료 버튼 비활성화 실패 | 경기=%s", match_id)
+
+        try:
+            await interaction.channel.send(
+                f"✅ **{match_id}번 경기** 참가자 {total}명의 "
+                "챔피언 기록이 모두 완료되었습니다."
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("챔피언 입력 완료 안내 전송 실패 | 경기=%s", match_id)
+
+    return progress
+
+
 class SelfChampionRecordModal(discord.ui.Modal):
 
-    def __init__(self, match_id, player):
+    def __init__(self, match_id, player, source_message=None, source_view=None):
         super().__init__(title=f"{match_id}번 경기 · 내 챔피언")
         self.match_id = int(match_id)
         self.player = player
+        self.source_message = source_message
+        self.source_view = source_view
         self.champion = discord.ui.TextInput(
             label=(
                 f"{str(player.get('team') or '').upper()} · "
@@ -85,52 +151,103 @@ class SelfChampionRecordModal(discord.ui.Modal):
         if champion is None:
             return
 
-        try:
-            progress = save_match_player_champion(
-                self.match_id,
-                interaction.user.id,
-                champion
-            )
-        except (TypeError, ValueError) as error:
-            await interaction.followup.send(
-                f"❌ 저장할 수 없습니다: {error}",
-                ephemeral=True
-            )
-            return
-        except Exception as error:
-            logger.exception(
-                "개인 챔피언 기록 저장 실패 | 경기=%s | 사용자=%s",
-                self.match_id,
-                interaction.user.id
-            )
-            await interaction.followup.send(
-                "❌ 챔피언 기록 저장 중 오류가 발생했습니다.\n"
-                f"오류 종류: `{type(error).__name__}`\n"
-                f"오류 내용: `{str(error)[:180]}`",
-                ephemeral=True
-            )
-            return
-
-        action = "수정" if progress["updated"] else "등록"
-        completed = progress["completed_count"]
-        total = progress["total_count"]
-        await interaction.followup.send(
-            f"✅ **{champion['champion_name']}**으로 {action}했습니다.\n"
-            f"현재 입력 현황: **{completed}/{total}명**",
-            ephemeral=True
+        await save_self_champion_and_reply(
+            interaction,
+            self.match_id,
+            champion,
+            self.source_message,
+            self.source_view
         )
 
-        if total > 0 and completed >= total and not progress["updated"]:
-            try:
-                await interaction.channel.send(
-                    f"✅ **{self.match_id}번 경기** 참가자 {total}명의 "
-                    "챔피언 기록이 모두 완료되었습니다."
+
+class QuickChampionSelect(discord.ui.Select):
+
+    def __init__(self, parent_view, suggestions):
+        self.parent_view = parent_view
+        self.champions = {
+            str(record["champion_key"]): record
+            for record in suggestions
+        }
+        options = []
+
+        for record in suggestions:
+            reason = record.get("reason") or "최근"
+            games = int(record.get("games") or 0)
+            options.append(
+                discord.SelectOption(
+                    label=str(record["champion_name"])[:100],
+                    value=str(record["champion_key"]),
+                    description=f"{reason} · {games}회 사용"[:100]
                 )
-            except (discord.Forbidden, discord.HTTPException):
-                logger.warning(
-                    "챔피언 입력 완료 안내 전송 실패 | 경기=%s",
-                    self.match_id
-                )
+            )
+
+        super().__init__(
+            placeholder="최근·모스트 챔피언에서 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0
+        )
+
+    async def callback(self, interaction):
+        if str(interaction.user.id) != str(self.parent_view.player["discord_id"]):
+            await interaction.response.send_message(
+                "❌ 자신의 챔피언만 등록할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        champion = self.champions[self.values[0]]
+        await save_self_champion_and_reply(
+            interaction,
+            self.parent_view.match_id,
+            champion,
+            self.parent_view.source_message,
+            self.parent_view.source_view
+        )
+        self.parent_view.stop()
+
+
+class QuickChampionChoiceView(discord.ui.View):
+
+    def __init__(
+        self,
+        match_id,
+        player,
+        suggestions,
+        source_message=None,
+        source_view=None
+    ):
+        super().__init__(timeout=5 * 60)
+        self.match_id = int(match_id)
+        self.player = player
+        self.source_message = source_message
+        self.source_view = source_view
+        self.add_item(QuickChampionSelect(self, suggestions))
+
+    @discord.ui.button(
+        label="목록에 없음 · 직접 입력",
+        emoji="⌨️",
+        style=discord.ButtonStyle.secondary,
+        row=1
+    )
+    async def open_manual_modal(self, interaction, button):
+        if str(interaction.user.id) != str(self.player["discord_id"]):
+            await interaction.response.send_message(
+                "❌ 자신의 챔피언만 등록할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(
+            SelfChampionRecordModal(
+                self.match_id,
+                self.player,
+                self.source_message,
+                self.source_view
+            )
+        )
 
 
 def get_both_team_players(match_id):
@@ -301,8 +418,33 @@ class ChampionRecordView(discord.ui.View):
             )
             return
 
-        await interaction.response.send_modal(
-            SelfChampionRecordModal(self.match_id, player)
+        suggestions = get_player_champion_suggestions(
+            interaction.user.id,
+            self.match_id
+        )
+
+        if not suggestions:
+            await interaction.response.send_modal(
+                SelfChampionRecordModal(
+                    self.match_id,
+                    player,
+                    interaction.message,
+                    self
+                )
+            )
+            return
+
+        await interaction.response.send_message(
+            "🎭 사용한 챔피언을 선택하세요.\n"
+            "목록에 없다면 `직접 입력`을 눌러주세요.",
+            view=QuickChampionChoiceView(
+                self.match_id,
+                player,
+                suggestions,
+                interaction.message,
+                self
+            ),
+            ephemeral=True
         )
 
     @discord.ui.button(

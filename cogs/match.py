@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import discord
@@ -35,7 +36,8 @@ from storage.sqlite_db import (
     add_match_player,
     begin_transaction,
     commit_transaction,
-    rollback_transaction
+    rollback_transaction,
+    get_match_champion_status
 )
 
 from services.player_service import PlayerService
@@ -51,12 +53,34 @@ from views.mvp_vote_view import MVPVoteView
 
 
 logger = logging.getLogger(__name__)
+CHAMPION_REMINDER_DELAY_SECONDS = 5 * 60
 
 
 class Match(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
+    async def send_champion_reminder(self, match_id, channel):
+        await asyncio.sleep(CHAMPION_REMINDER_DELAY_SECONDS)
+        rows = get_match_champion_status(match_id)
+        missing_ids = [
+            str(row["discord_id"])
+            for row in rows
+            if not row["champion_name"]
+        ]
+
+        if not missing_ids or channel is None:
+            return
+
+        try:
+            await channel.send(
+                f"⏰ **{match_id}번 경기 챔피언 미입력 안내**\n"
+                + " ".join(f"<@{user_id}>" for user_id in missing_ids)
+                + "\n경기 결과 메시지의 `내 챔피언 입력` 버튼을 눌러주세요."
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("챔피언 미입력 안내 전송 실패 | 경기=%s", match_id)
 
     @discord.app_commands.command(
         name="경기결과",
@@ -1194,6 +1218,13 @@ class Match(commands.Cog):
                 "경기 결과 메시지 전송 실패, 상태 처리는 계속함 | 방=%s (%s)",
                 room.room_id,
                 room.room_name
+            )
+        else:
+            asyncio.create_task(
+                self.send_champion_reminder(
+                    match_id,
+                    result_output_message.channel
+                )
             )
 
         # 경기 결과 처리가 끝났으므로 진행 상태를 해제
