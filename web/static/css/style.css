@@ -1789,6 +1789,43 @@ nav a:hover{
     white-space: nowrap;
 }
 
+.champion-position-tabs{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 12px;
+}
+
+.champion-position-tab{
+    padding: 8px 13px;
+    border: 1px solid #3a4452;
+    border-radius: 999px;
+    color: #aeb9c8;
+    background: #171c23;
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+
+.champion-position-tab:hover{
+    border-color: #48b9ff;
+    color: #fff;
+}
+
+.champion-position-tab.active{
+    border-color: #48b9ff;
+    color: #fff;
+    background: rgba(72, 185, 255, .18);
+}
+
+.champion-position-notice{
+    margin: 0 0 16px;
+    color: #7f8ca0;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
 .champion-stats-grid{
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
