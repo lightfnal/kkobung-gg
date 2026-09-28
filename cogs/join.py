@@ -8,6 +8,7 @@ from discord.ext import commands
 from storage.sqlite_db import (
     get_player,
     get_all_players_dict,
+    get_all_player_position_stats,
     get_match_by_result_token
 )
 
@@ -1410,6 +1411,9 @@ class Join(commands.Cog):
             str(player["discord_id"]): player
             for player in get_all_players_dict()
         }
+        position_stats = get_all_player_position_stats()
+        for user_id, profile in self.profiles.items():
+            profile["position_stats"] = position_stats.get(user_id, {})
 
 
     @discord.app_commands.command(

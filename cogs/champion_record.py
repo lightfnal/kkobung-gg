@@ -59,13 +59,15 @@ async def save_self_champion_and_reply(
     match_id,
     champion,
     source_message=None,
-    source_view=None
+    source_view=None,
+    actual_position=None
 ):
     try:
         progress = save_match_player_champion(
             match_id,
             interaction.user.id,
-            champion
+            champion,
+            actual_position=actual_position
         )
     except (TypeError, ValueError) as error:
         await interaction.followup.send(
@@ -135,6 +137,14 @@ class SelfChampionRecordModal(discord.ui.Modal):
             max_length=30
         )
         self.add_item(self.champion)
+        self.actual_position = discord.ui.TextInput(
+            label="실제로 플레이한 포지션",
+            placeholder="TOP / JUNGLE / MID / ADC / SUPPORT",
+            default=str(player.get("position") or "").upper(),
+            required=True,
+            max_length=10
+        )
+        self.add_item(self.actual_position)
 
     async def on_submit(self, interaction):
         if str(interaction.user.id) != str(self.player["discord_id"]):
@@ -156,7 +166,44 @@ class SelfChampionRecordModal(discord.ui.Modal):
             self.match_id,
             champion,
             self.source_message,
-            self.source_view
+            self.source_view,
+            str(self.actual_position.value).strip().upper()
+        )
+
+
+class ActualPositionSelect(discord.ui.Select):
+
+    def __init__(self, parent_view):
+        self.parent_view = parent_view
+        assigned = str(parent_view.player.get("position") or "").upper()
+        options = [
+            discord.SelectOption(
+                label=position,
+                value=position,
+                default=(position == assigned)
+            )
+            for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+        ]
+        super().__init__(
+            placeholder="실제로 플레이한 포지션",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0
+        )
+
+    async def callback(self, interaction):
+        if str(interaction.user.id) != str(self.parent_view.player["discord_id"]):
+            await interaction.response.send_message(
+                "❌ 자신의 실제 포지션만 선택할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+        self.parent_view.actual_position = self.values[0]
+        await interaction.response.send_message(
+            f"🔄 실제 포지션을 **{self.values[0]}**으로 선택했습니다.\n"
+            "이제 아래에서 사용한 챔피언을 선택해주세요.",
+            ephemeral=True
         )
 
 
@@ -186,7 +233,7 @@ class QuickChampionSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=options,
-            row=0
+            row=1
         )
 
     async def callback(self, interaction):
@@ -204,7 +251,8 @@ class QuickChampionSelect(discord.ui.Select):
             self.parent_view.match_id,
             champion,
             self.parent_view.source_message,
-            self.parent_view.source_view
+            self.parent_view.source_view,
+            self.parent_view.actual_position
         )
         self.parent_view.stop()
 
@@ -224,13 +272,15 @@ class QuickChampionChoiceView(discord.ui.View):
         self.player = player
         self.source_message = source_message
         self.source_view = source_view
+        self.actual_position = str(player.get("position") or "").upper()
+        self.add_item(ActualPositionSelect(self))
         self.add_item(QuickChampionSelect(self, suggestions))
 
     @discord.ui.button(
         label="목록에 없음 · 직접 입력",
         emoji="⌨️",
         style=discord.ButtonStyle.secondary,
-        row=1
+        row=2
     )
     async def open_manual_modal(self, interaction, button):
         if str(interaction.user.id) != str(self.player["discord_id"]):
@@ -436,6 +486,7 @@ class ChampionRecordView(discord.ui.View):
 
         await interaction.response.send_message(
             "🎭 사용한 챔피언을 선택하세요.\n"
+            "라인이 바뀌었다면 먼저 실제 포지션을 바꾸고, "
             "목록에 없다면 `직접 입력`을 눌러주세요.",
             view=QuickChampionChoiceView(
                 self.match_id,
@@ -643,7 +694,10 @@ class ChampionRecord(commands.Cog):
         self,
         interaction: discord.Interaction,
         경기번호: int,
-        챔피언: str
+        챔피언: str,
+        실제포지션: Literal[
+            "TOP", "JUNGLE", "MID", "ADC", "SUPPORT"
+        ] | None = None
     ):
         player = get_match_player_for_champion(
             경기번호,
@@ -667,7 +721,8 @@ class ChampionRecord(commands.Cog):
             progress = save_match_player_champion(
                 경기번호,
                 interaction.user.id,
-                resolved
+                resolved,
+                actual_position=실제포지션
             )
         except Exception as error:
             logger.exception(
@@ -684,6 +739,7 @@ class ChampionRecord(commands.Cog):
 
         await interaction.followup.send(
             f"✅ **{resolved['champion_name']}**으로 저장했습니다.\n"
+            f"실제 포지션: **{실제포지션 or player['position']}**\n"
             f"현재 입력 현황: **{progress['completed_count']}/"
             f"{progress['total_count']}명**",
             ephemeral=True
