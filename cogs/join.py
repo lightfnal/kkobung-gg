@@ -1411,7 +1411,13 @@ class Join(commands.Cog):
             str(player["discord_id"]): player
             for player in get_all_players_dict()
         }
-        position_stats = get_all_player_position_stats()
+        try:
+            position_stats = get_all_player_position_stats()
+        except Exception:
+            # 포지션 통계는 팀 밸런스 보조값입니다. 구버전 DB나 일시적인
+            # 조회 오류가 있어도 /내전모집 자체는 정상 동작해야 합니다.
+            logger.exception("포지션별 통계 조회 실패 - 기본값으로 계속 진행")
+            position_stats = {}
         for user_id, profile in self.profiles.items():
             profile["position_stats"] = position_stats.get(user_id, {})
 
