@@ -16,6 +16,53 @@ from config import (
 logger = logging.getLogger(__name__)
 
 
+TIER_ROLE_PRIORITY = (
+    "챌린저",
+    "그랜드마스터",
+    "마스터",
+    "다이아",
+    "에메랄드",
+    "플래티넘",
+    "골드",
+    "실버",
+    "브론즈",
+    "아이언"
+)
+
+TIER_SHORT = {
+    "아이언": "I",
+    "브론즈": "B",
+    "실버": "S",
+    "골드": "G",
+    "플래티넘": "P",
+    "에메랄드": "E",
+    "다이아": "D",
+    "마스터": "M",
+    "그랜드마스터": "GM",
+    "챌린저": "C",
+    "언랭크": "UR"
+}
+
+
+def get_member_role_tier(member):
+    """멤버가 가진 티어 역할 중 가장 높은 티어를 반환합니다."""
+    role_names = {
+        str(role.name).strip()
+        for role in getattr(member, "roles", ())
+    }
+    return next(
+        (tier for tier in TIER_ROLE_PRIORITY if tier in role_names),
+        "언랭크"
+    )
+
+
+def build_profile_nickname(riot_id, tier, main_position, sub_position):
+    return (
+        f"{riot_id} / {TIER_SHORT.get(tier, 'UR')} / "
+        f"{main_position} {str(sub_position)[:3]}"
+    )[:32]
+
+
 class Profile(commands.Cog):
 
     def __init__(self, bot):
@@ -59,12 +106,51 @@ class Profile(commands.Cog):
                     continue
 
                 try:
-                    changed = (
-                        PlayerService.update_discord_nickname(
+                    profile_row = PlayerService.get(str(member.id))
+                    role_tier = get_member_role_tier(member)
+                    stored_profile = (
+                        dict(profile_row)
+                        if profile_row is not None
+                        else None
+                    )
+                    expected_nickname = (
+                        build_profile_nickname(
+                            stored_profile.get("riot_name") or member.display_name,
+                            role_tier,
+                            stored_profile.get("main_position") or "-",
+                            stored_profile.get("sub_position") or "-"
+                        )
+                        if stored_profile is not None
+                        else None
+                    )
+
+                    if (
+                        stored_profile is not None
+                        and (
+                            stored_profile.get("tier") != role_tier
+                            or member.display_name != expected_nickname
+                        )
+                    ):
+                        profile = stored_profile
+                        nickname = expected_nickname
+                        profile["tier"] = role_tier
+                        profile["discord_nickname"] = nickname
+                        PlayerService.update(str(member.id), profile)
+                        changed = True
+
+                        if member.display_name != nickname:
+                            try:
+                                await member.edit(nick=nickname)
+                            except (discord.Forbidden, discord.HTTPException):
+                                logger.warning(
+                                    "시작 시 티어 역할 별명 동기화 실패 | 사용자=%s",
+                                    member.id
+                                )
+                    else:
+                        changed = PlayerService.update_discord_nickname(
                             str(member.id),
                             member.display_name
                         )
-                    )
 
                     if changed:
                         updated_count += 1
@@ -136,21 +222,61 @@ class Profile(commands.Cog):
         before: discord.Member,
         after: discord.Member
     ):
-        """가입자가 서버 별명을 바꾸면 사이트 표시 이름도 갱신합니다."""
+        """서버 별명과 티어 역할 변경을 프로필에 자동 반영합니다."""
 
-        if after.bot or before.display_name == after.display_name:
+        if after.bot:
+            return
+
+        before_roles = {role.id for role in before.roles}
+        after_roles = {role.id for role in after.roles}
+        role_changed = before_roles != after_roles
+        display_name_changed = before.display_name != after.display_name
+
+        if not role_changed and not display_name_changed:
             return
 
         try:
-            changed = PlayerService.update_discord_nickname(
-                str(after.id),
-                after.display_name
-            )
+            changed = False
+            profile_row = PlayerService.get(str(after.id))
+
+            if role_changed and profile_row is not None:
+                profile = dict(profile_row)
+                role_tier = get_member_role_tier(after)
+                nickname = build_profile_nickname(
+                    profile.get("riot_name") or after.display_name,
+                    role_tier,
+                    profile.get("main_position") or "-",
+                    profile.get("sub_position") or "-"
+                )
+                profile["tier"] = role_tier
+                profile["discord_nickname"] = nickname
+                PlayerService.update(str(after.id), profile)
+                changed = True
+
+                if after.display_name != nickname:
+                    try:
+                        await after.edit(nick=nickname)
+                    except discord.Forbidden:
+                        logger.warning(
+                            "티어 역할 변경 후 닉네임 변경 실패 | 사용자=%s",
+                            after.id
+                        )
+                    except discord.HTTPException:
+                        logger.exception(
+                            "티어 역할 변경 후 Discord 오류 | 사용자=%s",
+                            after.id
+                        )
+
+            elif display_name_changed:
+                changed = PlayerService.update_discord_nickname(
+                    str(after.id),
+                    after.display_name
+                )
 
             if changed:
                 self.refresh_join_profiles()
                 logger.info(
-                    "Discord 닉네임 자동 동기화 | 사용자=%s | 닉네임=%s",
+                    "Discord 프로필 자동 동기화 | 사용자=%s | 닉네임=%s",
                     after.id,
                     after.display_name
                 )
@@ -293,21 +419,7 @@ class Profile(commands.Cog):
             "CHALLENGER": "챌린저"
         }
 
-        tier_short = {
-            "아이언": "I",
-            "브론즈": "B",
-            "실버": "S",
-            "골드": "G",
-            "플래티넘": "P",
-            "에메랄드": "E",
-            "다이아": "D",
-            "마스터": "M",
-            "그랜드마스터": "GM",
-            "챌린저": "C",
-            "언랭크": "UR"
-        }
-
-        tier = "언랭크"
+        riot_tier = "언랭크"
 
         for rank in ranks:
             if rank.get("queueType") == "RANKED_SOLO_5x5":
@@ -316,11 +428,19 @@ class Profile(commands.Cog):
                     "UNRANKED"
                 )
 
-                tier = tier_map.get(
+                riot_tier = tier_map.get(
                     riot_tier,
                     riot_tier
                 )
                 break
+
+        # 내전 티어는 라이엇 솔로랭크가 아니라 Discord 티어 역할을
+        # 최종 기준으로 사용합니다. 역할이 없으면 언랭크입니다.
+        tier = (
+            get_member_role_tier(interaction.user)
+            if isinstance(interaction.user, discord.Member)
+            else "언랭크"
+        )
 
         # Riot API가 돌려준 공식 표기가 있으면 그 표기를 사용합니다.
         official_game_name = account.get(
@@ -412,12 +532,12 @@ class Profile(commands.Cog):
 
         join_cog.reload_profiles()
 
-        nickname = (
-            f"{official_riot_id} / "
-            f"{tier_short.get(tier, tier)} / "
-            f"{main_position} "
-            f"{sub_position[:3]}"
-        )[:32]
+        nickname = build_profile_nickname(
+            official_riot_id,
+            tier,
+            main_position,
+            sub_position
+        )
 
         nickname_changed = False
 
@@ -443,71 +563,6 @@ class Profile(commands.Cog):
                 error,
                 exc_info=True
             )
-
-        # ---------- 티어 역할 자동 지급 ----------
-        
-        if (
-            isinstance(interaction.user, discord.Member)
-            and interaction.guild is not None
-        ):
-
-            tier_roles = [
-                "아이언",
-                "브론즈",
-                "실버",
-                "골드",
-                "플래티넘",
-                "에메랄드",
-                "다이아"
-            ]
-
-            # 기존 티어 역할 제거
-            remove_roles = [
-                role
-                for role in interaction.user.roles
-                if role.name in tier_roles
-            ]
-
-            if remove_roles:
-                await interaction.user.remove_roles(
-                    *remove_roles,
-                    reason="티어 갱신"
-                )
-
-            # 새 티어 역할 지급
-            if tier in tier_roles:
-
-
-                new_role = discord.utils.get(
-                    interaction.guild.roles,
-                    name=tier
-                )
-
-                if new_role is None:
-                    logger.warning(
-                        "티어 역할을 찾지 못했습니다: %s",
-                        tier
-                    )
-                else:
-
-                    try:
-                        await interaction.user.add_roles(
-                            new_role,
-                            reason="프로필 등록"
-                        )
-
-                    except discord.Forbidden:
-                        logger.warning(
-                            "티어 역할 지급 실패: 권한 부족"
-                        )
-
-                    except discord.HTTPException as error:
-                        logger.warning(
-                            "티어 역할 지급 중 Discord 오류: %s",
-                            error,
-                            exc_info=True
-                        )
-
 
         # ---------- 포지션 역할 자동 지급 ----------
         if (
@@ -566,7 +621,8 @@ class Profile(commands.Cog):
         result_message = (
             "✅ **프로필이 등록되었습니다.**\n\n"
             f"🎮 라이엇 계정: `{official_riot_id}`\n"
-            f"🏆 티어: **{tier}**\n"
+            f"🏆 내전 티어(Discord 역할): **{tier}**\n"
+            f"🔎 라이엇 솔로랭크: **{riot_tier}**\n"
             f"🎯 주 포지션: **{main_position}**\n"
             f"🔄 부 포지션: **{sub_position}**\n"
             f"⭐ 현재 레이팅: "
