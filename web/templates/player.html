@@ -103,7 +103,14 @@
     <div class="champion-stats-header">
         <div>
             <h2>🎭 모스트 챔피언</h2>
-            <p>내전에서 기록된 챔피언별 사용 횟수와 승률입니다.</p>
+            <p>
+                {% if selected_champion_position == "ALL" %}
+                    전체 내전에서 기록된 챔피언별 사용 횟수와 승률입니다.
+                {% else %}
+                    경기 #445부터 실제 {{ selected_champion_position }}로
+                    플레이한 챔피언 기록입니다.
+                {% endif %}
+            </p>
         </div>
 
         {% if most_champion %}
@@ -112,6 +119,24 @@
         </div>
         {% endif %}
     </div>
+
+    <nav class="champion-position-tabs" aria-label="챔피언 포지션 필터">
+        <a
+            href="/player/{{ player.id }}?position=ALL"
+            class="champion-position-tab{% if selected_champion_position == 'ALL' %} active{% endif %}"
+        >전체</a>
+        {% for position in champion_positions %}
+        <a
+            href="/player/{{ player.id }}?position={{ position }}"
+            class="champion-position-tab{% if selected_champion_position == position %} active{% endif %}"
+        >{{ position }}</a>
+        {% endfor %}
+    </nav>
+
+    <p class="champion-position-notice">
+        라인별 통계는 실제 포지션 입력을 시작한 경기 #445부터 집계됩니다.
+        경기 #444까지의 챔피언 기록은 전체 통계에만 포함됩니다.
+    </p>
 
     {% if champion_stats %}
     <div class="champion-stats-grid">
@@ -142,7 +167,12 @@
     </div>
     {% else %}
     <div class="empty-match-card">
-        아직 등록된 챔피언 기록이 없습니다.
+        {% if selected_champion_position == "ALL" %}
+            아직 등록된 챔피언 기록이 없습니다.
+        {% else %}
+            경기 #445 이후 {{ selected_champion_position }} 포지션에
+            등록된 챔피언 기록이 없습니다.
+        {% endif %}
     </div>
     {% endif %}
 
