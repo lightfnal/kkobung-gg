@@ -360,12 +360,20 @@ for column_name, column_type in new_columns.items():
 
 conn.commit()
 
-from storage.schema_migrations import apply_schema_migrations
+from storage.schema_migrations import (
+    apply_schema_migrations,
+    add_actual_position_to_champion_records
+)
 
 apply_schema_migrations(
     conn,
     backup_dir=BACKUP_DIR
 )
+
+# 일부 배포에서 코드 파일만 먼저 교체되거나 스키마 버전 정보와 실제
+# 열 상태가 어긋난 경우에도 모집 명령이 중단되지 않도록 자체 복구합니다.
+add_actual_position_to_champion_records(conn)
+conn.commit()
 
 
 def get_database_schema_version():
@@ -2524,21 +2532,32 @@ def save_match_player_champion(
 
 def get_all_player_position_stats():
     """실제로 플레이한 포지션별 경기 수와 승패를 일괄 반환합니다."""
+    champion_columns = {
+        row[1]
+        for row in cursor.execute(
+            "PRAGMA table_info(match_player_champions)"
+        ).fetchall()
+    }
+    position_expression = (
+        "UPPER(COALESCE(mpc.actual_position, mp.position))"
+        if "actual_position" in champion_columns
+        else "UPPER(mp.position)"
+    )
     rows = cursor.execute(
-        """
+        f"""
         SELECT
             mp.discord_id,
-            UPPER(COALESCE(mpc.actual_position, mp.position)) AS position,
+            {position_expression} AS position,
             COUNT(*) AS games,
             SUM(CASE WHEN mp.won = 1 THEN 1 ELSE 0 END) AS wins
         FROM match_players mp
         LEFT JOIN match_player_champions mpc
             ON mpc.match_id = mp.match_id
            AND mpc.discord_id = mp.discord_id
-        WHERE UPPER(COALESCE(mpc.actual_position, mp.position))
+        WHERE {position_expression}
             IN ('TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT')
         GROUP BY mp.discord_id,
-                 UPPER(COALESCE(mpc.actual_position, mp.position))
+                 {position_expression}
         """
     ).fetchall()
     result = {}
