@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 REQUIRED_SCHEMA = {
     "players": {"discord_id", "rating", "hidden_mmr", "placement_games"},
@@ -121,6 +121,30 @@ def create_match_player_champions_table(connection):
         )
         """
     )
+
+
+def add_actual_position_to_champion_records(connection):
+    columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(match_player_champions)"
+        ).fetchall()
+    }
+
+    if "actual_position" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE match_player_champions
+            ADD COLUMN actual_position TEXT
+            """
+        )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_match_champions_actual_position
+        ON match_player_champions(discord_id, actual_position)
+        """
+    )
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_match_player_champions_discord_id
@@ -133,7 +157,8 @@ MIGRATIONS = {
     1: validate_current_schema,
     2: create_operations_events_table,
     3: add_player_guild_membership_column,
-    4: create_match_player_champions_table
+    4: create_match_player_champions_table,
+    5: add_actual_position_to_champion_records
 }
 
 

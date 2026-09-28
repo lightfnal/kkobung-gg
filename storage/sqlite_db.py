@@ -2249,13 +2249,15 @@ def save_match_team_champions(match_id, team, champion_records):
                     champion_key,
                     champion_name,
                     champion_image_url,
+                    actual_position,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(match_id, discord_id) DO UPDATE SET
                     champion_key = excluded.champion_key,
                     champion_name = excluded.champion_name,
                     champion_image_url = excluded.champion_image_url,
+                    actual_position = excluded.actual_position,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -2263,7 +2265,8 @@ def save_match_team_champions(match_id, team, champion_records):
                     str(record["discord_id"]),
                     str(record["champion_key"]),
                     str(record["champion_name"]),
-                    str(record["champion_image_url"])
+                    str(record["champion_image_url"]),
+                    str(record.get("actual_position") or "").upper() or None
                 )
             )
 
@@ -2334,7 +2337,7 @@ def get_match_champion_status(match_id):
         SELECT
             mp.discord_id,
             mp.team,
-            mp.position,
+            COALESCE(mpc.actual_position, mp.position) AS position,
             p.discord_nickname,
             mpc.champion_name
         FROM match_players mp
@@ -2439,7 +2442,12 @@ def get_player_champion_suggestions(discord_id, before_match_id, limit=20):
     return suggestions[:safe_limit]
 
 
-def save_match_player_champion(match_id, discord_id, champion_record):
+def save_match_player_champion(
+    match_id,
+    discord_id,
+    champion_record,
+    actual_position=None
+):
     """참가자가 자신의 챔피언 한 개를 등록하거나 수정합니다."""
     player = get_match_player_for_champion(match_id, discord_id)
 
@@ -2458,6 +2466,18 @@ def save_match_player_champion(match_id, discord_id, champion_record):
             """,
             (int(match_id), str(discord_id))
         ).fetchone() is not None
+        normalized_position = str(
+            actual_position or player.get("position") or ""
+        ).strip().upper()
+        if normalized_position == "JUN":
+            normalized_position = "JUNGLE"
+        elif normalized_position == "SUP":
+            normalized_position = "SUPPORT"
+        if normalized_position not in {
+            "TOP", "JUNGLE", "MID", "ADC", "SUPPORT"
+        }:
+            raise ValueError("실제 포지션을 확인해주세요.")
+
         cursor.execute(
             """
             INSERT INTO match_player_champions (
@@ -2466,13 +2486,15 @@ def save_match_player_champion(match_id, discord_id, champion_record):
                 champion_key,
                 champion_name,
                 champion_image_url,
+                actual_position,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(match_id, discord_id) DO UPDATE SET
                 champion_key = excluded.champion_key,
                 champion_name = excluded.champion_name,
                 champion_image_url = excluded.champion_image_url,
+                actual_position = excluded.actual_position,
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -2480,7 +2502,8 @@ def save_match_player_champion(match_id, discord_id, champion_record):
                 str(discord_id),
                 str(champion_record["champion_key"]),
                 str(champion_record["champion_name"]),
-                str(champion_record["champion_image_url"])
+                str(champion_record["champion_image_url"]),
+                normalized_position
             )
         )
         conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
@@ -2497,3 +2520,35 @@ def save_match_player_champion(match_id, discord_id, champion_record):
     progress["updated"] = existed
     progress["player"] = player
     return progress
+
+
+def get_all_player_position_stats():
+    """실제로 플레이한 포지션별 경기 수와 승패를 일괄 반환합니다."""
+    rows = cursor.execute(
+        """
+        SELECT
+            mp.discord_id,
+            UPPER(COALESCE(mpc.actual_position, mp.position)) AS position,
+            COUNT(*) AS games,
+            SUM(CASE WHEN mp.won = 1 THEN 1 ELSE 0 END) AS wins
+        FROM match_players mp
+        LEFT JOIN match_player_champions mpc
+            ON mpc.match_id = mp.match_id
+           AND mpc.discord_id = mp.discord_id
+        WHERE UPPER(COALESCE(mpc.actual_position, mp.position))
+            IN ('TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT')
+        GROUP BY mp.discord_id,
+                 UPPER(COALESCE(mpc.actual_position, mp.position))
+        """
+    ).fetchall()
+    result = {}
+    for row in rows:
+        user_stats = result.setdefault(str(row["discord_id"]), {})
+        games = int(row["games"] or 0)
+        wins = int(row["wins"] or 0)
+        user_stats[str(row["position"])] = {
+            "games": games,
+            "wins": wins,
+            "losses": max(0, games - wins)
+        }
+    return result
