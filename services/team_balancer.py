@@ -9,7 +9,12 @@ from config import (
     TEAM_MMR_DIFFERENCE_WEIGHT,
     TEAM_POSITION_PENALTY_WEIGHT,
     TEAM_SAME_TEAM_PENALTY_WEIGHT,
-    TEAM_OPPONENT_PENALTY_WEIGHT
+    TEAM_OPPONENT_PENALTY_WEIGHT,
+    TEAM_LANE_GAP_FREE_MARGIN,
+    TEAM_LANE_GAP_WEIGHT,
+    POSITION_MAIN_FACTOR,
+    POSITION_SUB_FACTOR,
+    POSITION_OTHER_FACTOR
 )
 
 from storage.team_history import (
@@ -81,6 +86,52 @@ def get_balance_mmr(
 
     return 1000
 
+
+def get_position_factor(profile, position):
+    """선호 포지션과 실제 경기 기록을 섞어 포지션 숙련도를 계산합니다."""
+    main_position = str(profile.get("main_position") or "").upper()
+    sub_position = str(profile.get("sub_position") or "").upper()
+    if position == main_position:
+        initial_factor = POSITION_MAIN_FACTOR
+    elif position == sub_position:
+        initial_factor = POSITION_SUB_FACTOR
+    else:
+        initial_factor = POSITION_OTHER_FACTOR
+
+    stats = (profile.get("position_stats") or {}).get(position, {})
+    games = max(0, int(stats.get("games") or 0))
+    wins = max(0, int(stats.get("wins") or 0))
+    if games == 0:
+        return initial_factor
+
+    # 소수 경기의 우연한 연승/연패가 실력을 과도하게 바꾸지 않도록
+    # 50% 승률의 가상 8경기와 섞습니다.
+    smoothed_winrate = (wins + 4) / (games + 8)
+    observed_factor = max(0.78, min(1.15, 0.80 + smoothed_winrate * 0.40))
+    confidence = min(0.80, games / 20)
+    return initial_factor * (1 - confidence) + observed_factor * confidence
+
+
+def get_position_mmr(profile, position):
+    return int(round(get_balance_mmr(profile) * get_position_factor(profile, position)))
+
+
+def get_position_preference_penalty(profile, position):
+    if position == profile.get("main_position"):
+        return 0
+    if position == profile.get("sub_position"):
+        return 1
+    games = int(
+        ((profile.get("position_stats") or {}).get(position, {})).get("games")
+        or 0
+    )
+    # 실제로 자주 플레이한 제3 포지션은 완전 비선호로 취급하지 않습니다.
+    if games >= 8:
+        return 1.25
+    if games >= 3:
+        return 2
+    return 3
+
 def validate_team_profiles(
     players,
     profiles
@@ -131,7 +182,8 @@ def validate_team_profiles(
 
 def assign_positions(
     team,
-    profiles
+    profiles,
+    return_all=False
 ):
     """
     한 팀의 선수들을 5개 포지션에 배정합니다.
@@ -173,14 +225,10 @@ def assign_positions(
                 ""
             )
 
-            if position == main_position:
-                position_penalty = 0
-
-            elif position == sub_position:
-                position_penalty = 1
-
-            else:
-                position_penalty = 3
+            position_penalty = get_position_preference_penalty(
+                profile,
+                position
+            )
 
             assignment[position] = user_id
             penalty += position_penalty
@@ -200,12 +248,14 @@ def assign_positions(
     if not best_assignments:
         return None, float("inf")
 
-    return (
-        random.choice(
-            best_assignments
-        ),
-        lowest_penalty
-    )
+    if return_all:
+        # 모든 참가자가 같은 포지션을 선호하는 극단적인 경우에도
+        # 팀 생성 시간이 길어지지 않도록 동률 후보를 제한합니다.
+        if len(best_assignments) > 30:
+            best_assignments = random.sample(best_assignments, 30)
+        return best_assignments, lowest_penalty
+
+    return random.choice(best_assignments), lowest_penalty
 
 
 def create_team_signature(
@@ -306,40 +356,71 @@ def generate_balanced_teams(
             continue
 
         (
-            red_assignment,
+            red_assignments,
             red_position_penalty
         ) = assign_positions(
             team=red_team,
-            profiles=profiles
+            profiles=profiles,
+            return_all=True
         )
 
         (
-            blue_assignment,
+            blue_assignments,
             blue_position_penalty
         ) = assign_positions(
             team=blue_team,
-            profiles=profiles
+            profiles=profiles,
+            return_all=True
         )
 
-        red_mmr = sum(
-            get_balance_mmr(
-                profiles.get(
-                    user_id,
-                    {}
+        # 선호도 페널티가 같은 배정 중에서는 양 팀의 총 전력과
+        # 라인별 맞대결 차이가 가장 작은 포지션 조합을 고릅니다.
+        best_assignment_pair = None
+        best_assignment_score = float("inf")
+        for possible_red in red_assignments:
+            for possible_blue in blue_assignments:
+                possible_red_mmrs = {
+                    position: get_position_mmr(
+                        profiles.get(user_id, {}), position
+                    )
+                    for position, user_id in possible_red.items()
+                }
+                possible_blue_mmrs = {
+                    position: get_position_mmr(
+                        profiles.get(user_id, {}), position
+                    )
+                    for position, user_id in possible_blue.items()
+                }
+                possible_lane_gaps = {
+                    position: abs(
+                        possible_red_mmrs[position]
+                        - possible_blue_mmrs[position]
+                    )
+                    for position in POSITIONS
+                }
+                possible_score = abs(
+                    sum(possible_red_mmrs.values())
+                    - sum(possible_blue_mmrs.values())
+                ) + TEAM_LANE_GAP_WEIGHT * sum(
+                    max(0, gap - TEAM_LANE_GAP_FREE_MARGIN)
+                    for gap in possible_lane_gaps.values()
                 )
-            )
-            for user_id in red_team
-        )
+                if possible_score < best_assignment_score:
+                    best_assignment_score = possible_score
+                    best_assignment_pair = (possible_red, possible_blue)
 
-        blue_mmr = sum(
-            get_balance_mmr(
-                profiles.get(
-                    user_id,
-                    {}
-                )
-            )
-            for user_id in blue_team
-        )
+        red_assignment, blue_assignment = best_assignment_pair
+
+        red_position_mmrs = {
+            position: get_position_mmr(profiles.get(user_id, {}), position)
+            for position, user_id in red_assignment.items()
+        }
+        blue_position_mmrs = {
+            position: get_position_mmr(profiles.get(user_id, {}), position)
+            for position, user_id in blue_assignment.items()
+        }
+        red_mmr = sum(red_position_mmrs.values())
+        blue_mmr = sum(blue_position_mmrs.values())
 
         mmr_difference = abs(
             red_mmr
@@ -391,11 +472,24 @@ def generate_balanced_teams(
             * TEAM_OPPONENT_PENALTY_WEIGHT
         )
 
+        lane_gaps = {
+            position: abs(
+                red_position_mmrs[position] - blue_position_mmrs[position]
+            )
+            for position in POSITIONS
+        }
+        lane_gap_penalty = sum(
+            max(0, gap - TEAM_LANE_GAP_FREE_MARGIN)
+            for gap in lane_gaps.values()
+        )
+        weighted_lane_gap_penalty = lane_gap_penalty * TEAM_LANE_GAP_WEIGHT
+
         total_penalty = (
             weighted_mmr_penalty
             + weighted_position_penalty
             + weighted_same_team_penalty
             + weighted_opponent_penalty
+            + weighted_lane_gap_penalty
         )
 
         candidate = {
@@ -419,6 +513,9 @@ def generate_balanced_teams(
             "weighted_opponent_penalty": (
                 weighted_opponent_penalty
             ),
+            "lane_gaps": lane_gaps,
+            "lane_gap_penalty": lane_gap_penalty,
+            "weighted_lane_gap_penalty": weighted_lane_gap_penalty,
             "total_penalty": total_penalty,
             "signature": current_signature
         }
