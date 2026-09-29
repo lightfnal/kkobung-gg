@@ -18,6 +18,16 @@ TEAM_HARD_LANE_GAP_PENALTY = getattr(
     "TEAM_HARD_LANE_GAP_PENALTY",
     100000
 )
+TEAM_HARD_LANE_EXCESS_WEIGHT = getattr(
+    config,
+    "TEAM_HARD_LANE_EXCESS_WEIGHT",
+    10
+)
+TEAM_EXACT_REPEAT_PENALTY = getattr(
+    config,
+    "TEAM_EXACT_REPEAT_PENALTY",
+    500
+)
 POSITION_MAIN_FACTOR = getattr(config, "POSITION_MAIN_FACTOR", 1.00)
 POSITION_SUB_FACTOR = getattr(config, "POSITION_SUB_FACTOR", 0.93)
 POSITION_OTHER_FACTOR = getattr(config, "POSITION_OTHER_FACTOR", 0.80)
@@ -339,6 +349,18 @@ def create_team_signature(
     })
 
 
+def calculate_expected_winrates(red_mmr, blue_mmr, prediction_calibration=1.0):
+    """최종 팀 점수와 항상 같은 방향의 예상 승률을 반환합니다."""
+    red_average_mmr = red_mmr / len(POSITIONS)
+    blue_average_mmr = blue_mmr / len(POSITIONS)
+    raw_red_winrate = 100 / (
+        1 + 10 ** ((blue_average_mmr - red_average_mmr) / 400)
+    )
+    calibration = max(0.70, min(1.30, float(prediction_calibration)))
+    red_winrate = 50 + (raw_red_winrate - 50) * calibration
+    return red_winrate, 100 - red_winrate
+
+
 def generate_balanced_teams(
     players,
     profiles,
@@ -415,12 +437,10 @@ def generate_balanced_teams(
             )
         )
 
-        if (
+        is_exact_repeat = (
             last_team_signature is not None
-            and current_signature
-            == last_team_signature
-        ):
-            continue
+            and current_signature == last_team_signature
+        )
 
         (
             red_assignments,
@@ -472,15 +492,19 @@ def generate_balanced_teams(
                     max(0, gap - TEAM_LANE_GAP_FREE_MARGIN)
                     for gap in possible_lane_gaps.values()
                 )
+                # 200점을 조금 넘긴 라인과 400~500점 벌어진 라인을
+                # 같은 위험도로 취급하지 않습니다. 초과분을 제곱해
+                # 한 라인이 무너지는 조합을 강하게 밀어냅니다.
+                possible_score += TEAM_HARD_LANE_EXCESS_WEIGHT * sum(
+                    max(0, gap - TEAM_HARD_LANE_GAP) ** 2
+                    for gap in possible_lane_gaps.values()
+                )
                 # 같은 선호도 배정이라도 포지션을 서로 바꿔 보면서
                 # 예상 승률·비주력 배치·라인 MMR 신뢰도가 더 고른 쪽을 택합니다.
-                possible_red_average = sum(possible_red_mmrs.values()) / len(POSITIONS)
-                possible_blue_average = sum(possible_blue_mmrs.values()) / len(POSITIONS)
-                possible_raw_winrate = 100 / (
-                    1 + 10 ** ((possible_blue_average - possible_red_average) / 400)
-                )
-                possible_winrate = 50 + (possible_raw_winrate - 50) * max(
-                    0.70, min(1.30, float(prediction_calibration))
+                possible_winrate, _ = calculate_expected_winrates(
+                    sum(possible_red_mmrs.values()),
+                    sum(possible_blue_mmrs.values()),
+                    prediction_calibration
                 )
                 possible_score += max(
                     0, max(possible_winrate, 100 - possible_winrate)
@@ -598,15 +622,19 @@ def generate_balanced_teams(
         weighted_hard_lane_penalty = (
             hard_lane_violation_count * TEAM_HARD_LANE_GAP_PENALTY
         )
-
-        red_average_mmr = red_mmr / len(POSITIONS)
-        blue_average_mmr = blue_mmr / len(POSITIONS)
-        raw_red_expected_winrate = 100 / (
-            1 + 10 ** ((blue_average_mmr - red_average_mmr) / 400)
+        hard_lane_excess_penalty = sum(
+            max(0, gap - TEAM_HARD_LANE_GAP) ** 2
+            for gap in lane_gaps.values()
         )
-        prediction_calibration = max(0.70, min(1.30, float(prediction_calibration)))
-        red_expected_winrate = 50 + (raw_red_expected_winrate - 50) * prediction_calibration
-        blue_expected_winrate = 100 - red_expected_winrate
+        weighted_hard_lane_excess_penalty = (
+            hard_lane_excess_penalty * TEAM_HARD_LANE_EXCESS_WEIGHT
+        )
+
+        red_expected_winrate, blue_expected_winrate = calculate_expected_winrates(
+            red_mmr,
+            blue_mmr,
+            prediction_calibration
+        )
         favored_winrate = max(red_expected_winrate, blue_expected_winrate)
         expected_winrate_penalty = max(
             0.0,
@@ -651,6 +679,9 @@ def generate_balanced_teams(
         weighted_uncertainty_penalty = (
             uncertainty_imbalance * TEAM_UNCERTAINTY_IMBALANCE_WEIGHT
         )
+        weighted_exact_repeat_penalty = (
+            TEAM_EXACT_REPEAT_PENALTY if is_exact_repeat else 0
+        )
 
         total_penalty = (
             weighted_mmr_penalty
@@ -659,10 +690,12 @@ def generate_balanced_teams(
             + weighted_opponent_penalty
             + weighted_lane_gap_penalty
             + weighted_hard_lane_penalty
+            + weighted_hard_lane_excess_penalty
             + weighted_expected_winrate_penalty
             + weighted_top_two_penalty
             + weighted_autofill_penalty
             + weighted_uncertainty_penalty
+            + weighted_exact_repeat_penalty
         )
 
         balance_grade, balance_summary = get_balance_grade(
@@ -697,6 +730,8 @@ def generate_balanced_teams(
             "weighted_lane_gap_penalty": weighted_lane_gap_penalty,
             "hard_lane_violation_count": hard_lane_violation_count,
             "weighted_hard_lane_penalty": weighted_hard_lane_penalty,
+            "hard_lane_excess_penalty": hard_lane_excess_penalty,
+            "weighted_hard_lane_excess_penalty": weighted_hard_lane_excess_penalty,
             "balance_grade": balance_grade,
             "balance_summary": balance_summary,
             "red_expected_winrate": round(red_expected_winrate, 1),
@@ -712,6 +747,8 @@ def generate_balanced_teams(
             "red_uncertainty": round(red_uncertainty, 2),
             "blue_uncertainty": round(blue_uncertainty, 2),
             "weighted_uncertainty_penalty": weighted_uncertainty_penalty,
+            "is_exact_repeat": is_exact_repeat,
+            "weighted_exact_repeat_penalty": weighted_exact_repeat_penalty,
             "total_penalty": total_penalty,
             "signature": current_signature
         }
@@ -785,7 +822,6 @@ def generate_balanced_teams(
         )
 
         for red_key, blue_key in (
-            ("red_expected_winrate", "blue_expected_winrate"),
             ("red_autofill_count", "blue_autofill_count"),
             ("red_uncertainty", "blue_uncertainty")
         ):
@@ -796,5 +832,15 @@ def generate_balanced_teams(
                 selected_candidate[blue_key],
                 selected_candidate[red_key]
             )
+
+    # 색상 교환 여부와 상관없이 최종 점수로 다시 계산합니다.
+    # 이 값이 최종 레드/블루 팀 점수와 반대로 표시되는 일을 막습니다.
+    final_red_winrate, final_blue_winrate = calculate_expected_winrates(
+        selected_candidate["red_mmr"],
+        selected_candidate["blue_mmr"],
+        prediction_calibration
+    )
+    selected_candidate["red_expected_winrate"] = round(final_red_winrate, 1)
+    selected_candidate["blue_expected_winrate"] = round(final_blue_winrate, 1)
 
     return selected_candidate
