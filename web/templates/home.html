@@ -93,7 +93,7 @@
         </div>
         <div id="homeWeeklyAwards" class="weekly-award-grid">
             {% for award in weekly_awards %}
-            <a href="/player/{{ award.player_id }}" class="weekly-award-card">
+            <a href="/player/{{ award.player_id }}" class="weekly-award-card" title="{{ award.full_name }}">
                 <span class="weekly-award-icon">{{ award.icon }}</span>
                 <span class="weekly-award-title">{{ award.title }}</span>
                 <strong>{{ award.name }}</strong>
