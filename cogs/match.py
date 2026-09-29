@@ -37,7 +37,8 @@ from storage.sqlite_db import (
     begin_transaction,
     commit_transaction,
     rollback_transaction,
-    get_match_champion_status
+    get_match_champion_status,
+    add_match_balance_prediction
 )
 
 from services.player_service import PlayerService
@@ -806,6 +807,15 @@ class Match(commands.Cog):
             room_id=room.room_id,
             result_token=result_token
         )
+
+        prediction = room.current_balance_prediction or {}
+        if prediction:
+            add_match_balance_prediction(
+                match_id,
+                prediction.get("red_expected_winrate", 50.0),
+                prediction.get("calibration_factor", 1.0),
+                auto_commit=False
+            )
 
         for user_id in winner_players:
             profile = join_cog.profiles.get(user_id)
