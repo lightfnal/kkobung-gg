@@ -6822,6 +6822,16 @@ nav a:hover{
 .home-match-team.red span{justify-content:flex-end}
 .home-match-team b{color:var(--muted);font-size:9px;min-width:38px}
 .match-center-empty{color:var(--muted)!important}
+.home-spectate-button{
+    width:100%;margin-top:12px;padding:9px 10px;border:1px solid var(--border);
+    border-radius:9px;background:var(--surface-2);color:var(--muted);font-size:11px;
+    font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:not-allowed;
+}
+.home-spectate-button.available{
+    border-color:#26c281;background:rgba(38,194,129,.12);color:#62e6ad;
+    cursor:pointer;box-shadow:0 0 16px rgba(38,194,129,.08);
+}
+.home-spectate-button.available:hover{background:rgba(38,194,129,.2)}
 
 @media(max-width:850px){
     .home-engagement-grid{grid-template-columns:1fr}
