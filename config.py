@@ -183,6 +183,10 @@ TEAM_LANE_GAP_FREE_MARGIN = 100
 TEAM_LANE_GAP_WEIGHT = 2
 TEAM_HARD_LANE_GAP = 200
 TEAM_HARD_LANE_GAP_PENALTY = 100000
+# 200점 초과분은 제곱 벌점을 적용해 특정 라인이 크게 무너지는 조합을 방지합니다.
+TEAM_HARD_LANE_EXCESS_WEIGHT = 10
+# 직전 팀 반복은 피하되, 더 공정한 조합을 버릴 정도로 강제하지 않습니다.
+TEAM_EXACT_REPEAT_PENALTY = 500
 
 # 예상 승률이 55:45를 넘어가는 조합과 고점자·비주력 배정이 한 팀에
 # 몰리는 조합을 피하기 위한 정밀 밸런스 가중치입니다.
