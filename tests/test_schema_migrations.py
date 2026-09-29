@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from storage.schema_migrations import (
+    add_actual_position_to_champion_records,
     apply_schema_migrations,
     get_schema_version,
     set_schema_version
@@ -12,6 +13,32 @@ from storage.schema_migrations import (
 
 
 class TestSchemaMigrations(unittest.TestCase):
+
+    def test_actual_position_migration_is_idempotent(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            """
+            CREATE TABLE match_player_champions (
+                match_id INTEGER NOT NULL,
+                discord_id TEXT NOT NULL,
+                champion_key TEXT NOT NULL,
+                champion_name TEXT NOT NULL,
+                champion_image_url TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (match_id, discord_id)
+            )
+            """
+        )
+        add_actual_position_to_champion_records(connection)
+        add_actual_position_to_champion_records(connection)
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(match_player_champions)"
+            ).fetchall()
+        }
+        self.assertIn("actual_position", columns)
+        connection.close()
 
     def test_migrations_run_once_in_version_order(self):
         connection = sqlite3.connect(":memory:")

@@ -5,9 +5,16 @@ from unittest.mock import patch
 from services.team_balancer import (
     POSITIONS,
     assign_positions,
+    calculate_expected_winrates,
     create_team_signature,
     generate_balanced_teams,
     get_balance_mmr,
+    get_position_factor,
+    get_position_mmr,
+    get_position_mmr_confidence,
+    is_autofilled,
+    get_position_preference_penalty,
+    get_balance_grade,
     validate_team_profiles
 )
 
@@ -97,6 +104,84 @@ class TestTeamBalancer(
             ),
             1000
         )
+
+    def test_actual_third_position_history_reduces_penalty(self):
+        profile = {
+            "main_position": "SUPPORT",
+            "sub_position": "ADC",
+            "position_stats": {
+                "MID": {"games": 10, "wins": 6}
+            }
+        }
+        self.assertEqual(
+            get_position_preference_penalty(profile, "MID"),
+            1.25
+        )
+        self.assertGreater(
+            get_position_factor(profile, "MID"),
+            0.80
+        )
+
+    def test_balance_grade_warns_for_hard_lane_gap(self):
+        grade, summary = get_balance_grade(
+            100,
+            {"TOP": 201, "JUNGLE": 0, "MID": 0, "ADC": 0, "SUPPORT": 0},
+            0
+        )
+        self.assertEqual(grade, "D")
+        self.assertIn("어려움", summary)
+
+    def test_expected_winrate_follows_final_team_scores(self):
+        red_winrate, blue_winrate = calculate_expected_winrates(5255, 5530)
+        self.assertLess(red_winrate, 50)
+        self.assertGreater(blue_winrate, 50)
+        self.assertAlmostEqual(red_winrate + blue_winrate, 100)
+
+    def test_independent_position_mmr_weight_grows_with_games(self):
+        profile = {
+            "hidden_mmr": 1000,
+            "main_position": "MID",
+            "sub_position": "ADC",
+            "position_ratings": {
+                "MID": {"rating": 1200, "games": 3}
+            }
+        }
+        self.assertEqual(get_position_mmr(profile, "MID"), 1060)
+        profile["position_ratings"]["MID"]["games"] = 10
+        self.assertEqual(get_position_mmr(profile, "MID"), 1120)
+        profile["position_ratings"]["MID"]["games"] = 20
+        self.assertEqual(get_position_mmr(profile, "MID"), 1160)
+
+    def test_recent_position_form_has_limited_effect(self):
+        profile = {
+            "hidden_mmr": 1000,
+            "main_position": "MID",
+            "sub_position": "ADC",
+            "position_ratings": {"MID": {"rating": 1000, "games": 15}},
+            "recent_position_form": {
+                "MID": {"games": 10, "weighted_games": 6.5, "weighted_wins": 6.5}
+            }
+        }
+        self.assertEqual(get_position_mmr(profile, "MID"), 1060)
+        profile["recent_position_form"]["MID"]["weighted_wins"] = 0
+        self.assertEqual(get_position_mmr(profile, "MID"), 940)
+
+    def test_position_mmr_confidence_reaches_full_at_fifteen_games(self):
+        profile = {"position_ratings": {"MID": {"games": 3}}}
+        self.assertAlmostEqual(get_position_mmr_confidence(profile, "MID"), 0.2)
+        profile["position_ratings"]["MID"]["games"] = 15
+        self.assertEqual(get_position_mmr_confidence(profile, "MID"), 1.0)
+
+    def test_autofill_uses_preferences_and_actual_history(self):
+        profile = {
+            "main_position": "MID",
+            "sub_position": "ADC",
+            "position_stats": {"TOP": {"games": 3}}
+        }
+        self.assertFalse(is_autofilled(profile, "MID"))
+        self.assertFalse(is_autofilled(profile, "ADC"))
+        self.assertFalse(is_autofilled(profile, "TOP"))
+        self.assertTrue(is_autofilled(profile, "JUNGLE"))
 
     def test_assign_positions_uses_main_positions(
         self

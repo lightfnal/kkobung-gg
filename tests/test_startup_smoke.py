@@ -719,8 +719,10 @@ class TestStartupSmoke(
                     "AdminMatch",
                     "AdminPlayer",
                     "AdminGame",
+                    "OperationsMonitor",
                     "Riot",
-                    "Register"
+                    "Register",
+                    "ChampionRecord"
                 }
 
                 self.assertEqual(

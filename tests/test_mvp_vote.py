@@ -7,6 +7,25 @@ from views.mvp_vote_view import MVPVoteView
 
 class DummyBot:
 
+    def __init__(self, guild=None):
+        self.guild = guild
+        self.guilds = (
+            [guild]
+            if guild is not None
+            else []
+        )
+
+    def get_guild(
+        self,
+        guild_id
+    ):
+        if (
+            self.guild is not None
+            and self.guild.id == guild_id
+        ):
+            return self.guild
+        return None
+
     def get_user(
         self,
         user_id
@@ -19,6 +38,7 @@ class DummyJoinCog:
     def __init__(self):
         # 실제 Join Cog처럼 현재 활성 방을 가리킵니다.
         self.active_room = self
+        self.guild_id = 777
 
         self.current_teams = {
             "red": {
@@ -71,6 +91,45 @@ class TestMVPVote(
         self.assertEqual(
             view.timeout,
             MVP_VOTE_TIMEOUT_SECONDS
+        )
+
+    async def test_buttons_use_current_guild_display_name(
+        self
+    ):
+        class DummyGuild:
+            id = 777
+
+            def get_member(
+                self,
+                user_id
+            ):
+                if user_id == 1001:
+                    return type(
+                        "Member",
+                        (),
+                        {
+                            "display_name": (
+                                "1티어케이틀린#ADC / E / SUPPORT ADC"
+                            )
+                        }
+                    )()
+                return None
+
+        async def result_callback(
+            votes
+        ):
+            return None
+
+        view = MVPVoteView(
+            bot=DummyBot(DummyGuild()),
+            join_cog=DummyJoinCog(),
+            winner="red",
+            callback=result_callback
+        )
+
+        self.assertEqual(
+            view.children[0].label,
+            "TOP - 1티어케이틀린#ADC / E / SUPPORT ADC"
         )
 
     async def test_simultaneous_finish_runs_once(
