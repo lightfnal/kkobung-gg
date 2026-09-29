@@ -40,6 +40,9 @@
             플레이어 1
         </label>
 
+        <input type="search" class="player-select-search" data-target="player1_id"
+            placeholder="닉네임 또는 티어 검색" autocomplete="off" aria-label="플레이어 1 검색">
+
         <select
             id="player1_id"
             name="player1_id"
@@ -84,6 +87,9 @@
             플레이어 2
         </label>
 
+        <input type="search" class="player-select-search" data-target="player2_id"
+            placeholder="닉네임 또는 티어 검색" autocomplete="off" aria-label="플레이어 2 검색">
+
         <select
             id="player2_id"
             name="player2_id"
@@ -125,6 +131,26 @@
     </button>
 
 </form>
+
+<script>
+document.querySelectorAll(".player-select-search").forEach((input) => {
+    const select = document.getElementById(input.dataset.target);
+    if (!select) return;
+    const options = Array.from(select.options).map((option) => ({
+        value: option.value, text: option.textContent.trim()
+    }));
+    input.addEventListener("input", () => {
+        const query = input.value.trim().toLocaleLowerCase("ko");
+        const selectedValue = select.value;
+        select.replaceChildren();
+        options.forEach((item, index) => {
+            if (index !== 0 && query && !item.text.toLocaleLowerCase("ko").includes(query)) return;
+            select.add(new Option(item.text, item.value, false, item.value === selectedValue));
+        });
+        if (select.options.length === 2 && query) select.selectedIndex = 1;
+    });
+});
+</script>
 
 
 {% if (
