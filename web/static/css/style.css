@@ -6842,6 +6842,84 @@ nav a:hover{
     .activity-item time{display:none}
 }
 
+/* 홈 어워드/활동 피드 가독성 개선 */
+.home-engagement-grid{
+    grid-template-columns:1fr;
+    gap:22px;
+    margin:38px 0 44px;
+}
+.home-engagement-panel{
+    padding:22px;
+    border:1px solid var(--border);
+    border-radius:var(--radius-lg);
+    background:linear-gradient(145deg,rgba(31,38,47,.9),rgba(20,25,32,.92));
+    box-shadow:var(--shadow);
+}
+.home-engagement-panel .home-section-header{margin-bottom:17px}
+.home-engagement-panel .home-section-header h2{font-size:21px;line-height:1.35}
+.home-engagement-panel .home-section-header p{margin-top:5px;font-size:13px;line-height:1.55}
+.weekly-award-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
+.weekly-award-card{
+    min-height:118px;
+    grid-template-columns:52px minmax(0,1fr);
+    column-gap:13px;
+    padding:18px 16px;
+    border-color:rgba(255,208,0,.22);
+}
+.weekly-award-icon{font-size:34px}
+.weekly-award-title{font-size:12px;line-height:1.4}
+.weekly-award-card strong{
+    overflow:visible;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    font-size:16px;
+    line-height:1.35;
+}
+.weekly-award-card small{font-size:12px;line-height:1.45}
+.activity-feed{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:11px;
+    max-height:none;
+    overflow:visible;
+}
+.activity-item{
+    min-height:72px;
+    grid-template-columns:12px minmax(0,1fr) auto;
+    gap:12px;
+    padding:15px 16px;
+    border-color:var(--border);
+    background:rgba(14,19,25,.68);
+    transition:transform .18s ease,border-color .18s ease,background .18s ease;
+}
+.activity-item:hover{transform:translateY(-1px);border-color:#3f566e;background:var(--surface-2)}
+.activity-item strong{white-space:normal;font-size:14px;line-height:1.4}
+.activity-item small{font-size:12px;line-height:1.45}
+.activity-item time{font-size:11px;line-height:1.4}
+.activity-dot{width:10px;height:10px}
+.activity-event-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.05);font-size:18px}
+.activity-item{grid-template-columns:30px minmax(0,1fr) auto}
+.activity-item.activity-upset{border-left:3px solid #ff8a3d}
+.activity-item.activity-streak{border-left:3px solid #ffd000}
+.activity-item.activity-mvp{border-left:3px solid #d99cff}
+.activity-item.activity-games{border-left:3px solid #4aa8ff}
+.activity-item.activity-record{border-left:3px solid #42d69a}
+.activity-item.activity-promotion{border-left:3px solid #ffda57}
+
+@media(max-width:1050px){
+    .weekly-award-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+    .home-engagement-panel{padding:17px}
+    .activity-feed{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+    .weekly-award-grid{grid-template-columns:1fr}
+    .weekly-award-card{min-height:100px}
+    .activity-item{grid-template-columns:12px minmax(0,1fr)}
+    .activity-item{grid-template-columns:30px minmax(0,1fr)}
+    .activity-item time{display:none}
+}
+
 
 /* =========================================================
    650px
