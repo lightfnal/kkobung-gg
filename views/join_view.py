@@ -846,6 +846,13 @@ class JoinView(discord.ui.View):
         )
         balance_grade = balance_result.get("balance_grade", "-")
         balance_summary = balance_result.get("balance_summary", "계산 완료")
+        red_expected_winrate = balance_result.get("red_expected_winrate", 50.0)
+        blue_expected_winrate = balance_result.get("blue_expected_winrate", 50.0)
+        top_two_gap = balance_result.get("top_two_gap", 0)
+        red_autofill_count = balance_result.get("red_autofill_count", 0)
+        blue_autofill_count = balance_result.get("blue_autofill_count", 0)
+        red_uncertainty = balance_result.get("red_uncertainty", 0)
+        blue_uncertainty = balance_result.get("blue_uncertainty", 0)
 
         self.join_cog.last_team_signature = (
             balance_result[
@@ -878,7 +885,8 @@ class JoinView(discord.ui.View):
         logger.info(
             "팀 생성 완료 | 방=%s | MMR차이=%s(가중=%s) | "
             "포지션=%s(가중=%s) | 같은팀=%s(가중=%s) | "
-            "상대=%s(가중=%s) | 라인차=%s(가중=%s) | 최종=%s",
+            "상대=%s(가중=%s) | 라인차=%s(가중=%s) | "
+            "예상승률=%.1f:%.1f | 상위2명차=%s | 자동배정=%s:%s | 최종=%s",
             room.room_id,
             mmr_difference,
             weighted_mmr_penalty,
@@ -890,6 +898,11 @@ class JoinView(discord.ui.View):
             weighted_opponent_penalty,
             lane_gaps,
             weighted_lane_gap_penalty,
+            red_expected_winrate,
+            blue_expected_winrate,
+            top_two_gap,
+            red_autofill_count,
+            blue_autofill_count,
             selected_total_penalty
         )
 
@@ -918,6 +931,20 @@ class JoinView(discord.ui.View):
                 f"**{abs(red_rating - blue_rating)}점**\n"
                 f"균형 등급: **{balance_grade}** · {balance_summary}"
             )
+        )
+
+        embed.add_field(
+            name="🎯 예상 승률 · 정밀 보정",
+            value=(
+                f"🔴 **{red_expected_winrate:.1f}%** · "
+                f"🔵 **{blue_expected_winrate:.1f}%**\n"
+                f"상위 2명 전력 차이: **{top_two_gap}점**\n"
+                f"비주력 라인 배치: 🔴 {red_autofill_count}명 · "
+                f"🔵 {blue_autofill_count}명\n"
+                f"라인 MMR 미확정치: 🔴 {red_uncertainty:.1f} · "
+                f"🔵 {blue_uncertainty:.1f}"
+            ),
+            inline=False
         )
 
         embed.add_field(
@@ -959,6 +986,16 @@ class JoinView(discord.ui.View):
                     f"200점을 초과한 라인이 **{hard_lane_violation_count}개** 있습니다.\n"
                     "가능하면 `다시뽑기`를 권장합니다. 모든 조합이 비슷하다면 "
                     "현재 참가자 구성으로는 완전한 균형이 어렵습니다."
+                ),
+                inline=False
+            )
+        elif max(red_expected_winrate, blue_expected_winrate) > 55.0:
+            embed.add_field(
+                name="⚠️ 예상 승률 경고",
+                value=(
+                    "가능한 모든 팀 조합을 비교했지만 45~55% 범위에 "
+                    "들어오지 못했습니다. 참가자 실력·포지션 구성상 "
+                    "완전한 균형이 어려울 수 있습니다."
                 ),
                 inline=False
             )
