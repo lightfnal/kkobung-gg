@@ -1457,7 +1457,13 @@ def rooms_api():
                 "current_game_number":
                     room_data[
                         "current_game_number"
-                    ]
+                    ],
+
+                "blue_team": room_data["blue_team"],
+                "red_team": room_data["red_team"],
+                "blue_win_rate": room_data["blue_win_rate"],
+                "red_win_rate": room_data["red_win_rate"],
+                "balance_text": room_data["balance_text"]
             }
         )
 

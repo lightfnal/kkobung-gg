@@ -5,6 +5,7 @@ from fastapi import (
 from web.database import (
     get_db_connection
 )
+from web.home_engagement import build_home_engagement
 
 
 router = APIRouter(
@@ -215,6 +216,7 @@ def home_api():
 
         season_match_count = 0
         season_player_count = 0
+        weekly_awards, activity_feed = build_home_engagement(cursor)
 
 
         # ==============================
@@ -284,6 +286,10 @@ def home_api():
 
         "recent_matches":
             recent_matches,
+
+        "weekly_awards": weekly_awards,
+
+        "activity_feed": activity_feed,
 
         "active_season":
             active_season,
