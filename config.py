@@ -178,6 +178,18 @@ TEAM_SAME_TEAM_PENALTY_WEIGHT = 3
 # 과거 상대 반복 페널티 가중치
 TEAM_OPPONENT_PENALTY_WEIGHT = 1
 
+# 같은 라인끼리의 실력 차이가 이 범위를 넘으면 강하게 반영합니다.
+TEAM_LANE_GAP_FREE_MARGIN = 100
+TEAM_LANE_GAP_WEIGHT = 2
+TEAM_HARD_LANE_GAP = 200
+TEAM_HARD_LANE_GAP_PENALTY = 100000
+
+# 주/부/기타 포지션의 초기 실력 보정값입니다. 실제 포지션 기록이
+# 쌓일수록 승률 기반 값과 섞여 개인별 값으로 자동 보정됩니다.
+POSITION_MAIN_FACTOR = 1.00
+POSITION_SUB_FACTOR = 0.93
+POSITION_OTHER_FACTOR = 0.80
+
 BOT_NAME = "꼬붕봇"
 
 VERSION = "0.3.0"
