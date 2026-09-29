@@ -6920,6 +6920,85 @@ nav a:hover{
     .activity-item time{display:none}
 }
 
+/* 홈 기록 카드 2차 가독성 재설계 */
+.weekly-award-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:15px;
+}
+.weekly-award-card{
+    min-height:132px;
+    grid-template-columns:64px minmax(0,1fr);
+    column-gap:16px;
+    padding:20px;
+}
+.weekly-award-icon{
+    width:56px;
+    height:56px;
+    display:grid;
+    place-items:center;
+    border-radius:16px;
+    background:rgba(255,208,0,.08);
+    font-size:36px;
+}
+.weekly-award-title{
+    font-size:13px;
+    letter-spacing:.02em;
+}
+.weekly-award-card strong{
+    font-size:19px;
+    line-height:1.4;
+}
+.weekly-award-card small{
+    margin-top:2px;
+    color:var(--text-soft);
+    font-size:13px;
+    font-weight:700;
+}
+.activity-feed{
+    grid-template-columns:1fr;
+    gap:12px;
+}
+.activity-item{
+    min-height:92px;
+    grid-template-columns:52px minmax(0,1fr) auto;
+    gap:16px;
+    padding:17px 19px;
+}
+.activity-event-icon{
+    width:48px;
+    height:48px;
+    border-radius:14px;
+    font-size:25px;
+}
+.activity-item>span:nth-child(2){gap:7px}
+.activity-item strong{
+    font-size:17px;
+    line-height:1.35;
+}
+.activity-item small{
+    color:var(--text-soft);
+    font-size:14px;
+    line-height:1.55;
+}
+.activity-item time{
+    align-self:start;
+    padding:5px 8px;
+    border:1px solid var(--border-soft);
+    border-radius:7px;
+    background:rgba(255,255,255,.035);
+    color:var(--muted);
+    font-size:11px;
+    text-decoration:none;
+}
+
+@media(max-width:680px){
+    .weekly-award-grid{grid-template-columns:1fr}
+    .weekly-award-card{min-height:112px;padding:17px}
+    .activity-item{grid-template-columns:44px minmax(0,1fr);padding:15px}
+    .activity-event-icon{width:40px;height:40px;font-size:21px}
+    .activity-item time{display:none}
+}
+
 
 /* =========================================================
    650px
