@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Literal, Optional
 
@@ -100,6 +101,11 @@ class Join(commands.Cog):
         # 경기 결과 저장 도중 종료됐지만,
         # SQLite 커밋이 확인되어 정상 복구된 방 ID를 저장합니다.
         self._recovered_result_room_ids = set()
+
+        # SQLite 연결은 모든 내전 방이 하나를 공유합니다. 방별 잠금만으로는
+        # 서로 다른 방의 경기 결과가 동시에 트랜잭션을 시작하는 일을
+        # 막지 못하므로, 결과 저장 구간은 서버 전체에서 직렬화합니다.
+        self.match_result_lock = asyncio.Lock()
 
         # 동시에 여러 채널에서 명령어가 실행되어도
         # 각 작업이 선택한 내전 방을 독립적으로 유지합니다.

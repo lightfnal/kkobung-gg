@@ -608,6 +608,27 @@ class Match(commands.Cog):
             )
             return
 
+        # 모든 방이 하나의 SQLite 연결을 사용하므로 결과 저장 트랜잭션도
+        # 한 번에 하나만 실행해야 합니다. 다른 방의 결과 처리와 겹치면
+        # 먼저 시작한 저장이 끝날 때까지 짧게 기다립니다.
+        async with join_cog.match_result_lock:
+            return await self._process_match_result_locked(
+                interaction,
+                winner,
+                mvp_id,
+                room,
+                join_cog
+            )
+
+    async def _process_match_result_locked(
+        self,
+        interaction: discord.Interaction,
+        winner: str,
+        mvp_id: str,
+        room,
+        join_cog
+    ):
+
         if not join_cog.activate_room(
             room
         ):
