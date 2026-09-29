@@ -36,6 +36,7 @@ from web.routes.room import router as room_router
 from web.routes.api_room import router as api_room_router
 from web.routes.stats import router as stats_router
 from web.routes.api_home import router as api_home_router
+from web.routes.api_spectator import router as api_spectator_router
 
 app = FastAPI(
     title="꼬붕.gg",
@@ -104,6 +105,7 @@ app.include_router(
 app.include_router(
     api_home_router
 )
+app.include_router(api_spectator_router)
 
 app.include_router(
     stats_router
