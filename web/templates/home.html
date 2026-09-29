@@ -80,6 +80,60 @@
 
 
 <!-- ==============================
+     주간 어워드 · 활동 피드
+============================== -->
+
+<div class="home-engagement-grid">
+    <section class="home-section home-engagement-panel">
+        <div class="home-section-header">
+            <div>
+                <h2>🏅 이번 주의 주인공</h2>
+                <p>최근 7일 경기 기준 · 매 경기 후 자동 갱신</p>
+            </div>
+        </div>
+        <div id="homeWeeklyAwards" class="weekly-award-grid">
+            {% for award in weekly_awards %}
+            <a href="/player/{{ award.player_id }}" class="weekly-award-card">
+                <span class="weekly-award-icon">{{ award.icon }}</span>
+                <span class="weekly-award-title">{{ award.title }}</span>
+                <strong>{{ award.name }}</strong>
+                <small>{{ award.value }}</small>
+            </a>
+            {% else %}
+            <div class="engagement-empty">이번 주 경기가 시작되면 주간 어워드가 공개됩니다.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="home-section home-engagement-panel">
+        <div class="home-section-header">
+            <div>
+                <h2>⚡ 최근 활동</h2>
+                <p>서버에서 방금 일어난 기록</p>
+            </div>
+        </div>
+        <div id="homeActivityFeed" class="activity-feed">
+            {% for activity in activity_feed %}
+            <a href="/match/{{ activity.id }}" class="activity-item">
+                <span class="activity-dot {% if activity.winner == 'red' %}red{% else %}blue{% endif %}"></span>
+                <span>
+                    <strong>경기 #{{ activity.id }} · {{ activity.winner_label }} 승리</strong>
+                    <small>
+                        {% if activity.is_upset %}🔥 {{ activity.winner_expected }}% 업셋 · {% endif %}
+                        {% if activity.mvp_name %}MVP {{ activity.mvp_name }}{% else %}MVP 집계 중{% endif %}
+                    </small>
+                </span>
+                <time>{{ activity.match_date }}</time>
+            </a>
+            {% else %}
+            <div class="engagement-empty">경기가 완료되면 새로운 소식이 표시됩니다.</div>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+
+
+<!-- ==============================
      실시간 내전 현황
 ============================== -->
 
@@ -926,6 +980,9 @@ document.addEventListener(
                 "homeRecentMatches"
             );
 
+        const weeklyAwardsArea = document.getElementById("homeWeeklyAwards");
+        const activityFeedArea = document.getElementById("homeActivityFeed");
+
 
         /* =====================================================
            상태
@@ -1215,6 +1272,26 @@ document.addEventListener(
                 ? ""
                 : 'style="display:none;"';
 
+            function teamLineup(team){
+                if(!Array.isArray(team) || team.length === 0){
+                    return '<span class="match-center-empty">팀 편성 대기</span>';
+                }
+                return team.map(function(player){
+                    const position = escapeHtml(player.position || "-");
+                    const name = escapeHtml(
+                        player.discord_nickname || player.nickname || "알 수 없음"
+                    );
+                    return `<span><b>${position}</b>${name}</span>`;
+                }).join("");
+            }
+
+            const matchCenterStyle = showSeries ? "" : 'style="display:none;"';
+            const blueWinRate = room.blue_win_rate == null ? "-" : safeNumber(room.blue_win_rate).toFixed(1) + "%";
+            const redWinRate = room.red_win_rate == null ? "-" : safeNumber(room.red_win_rate).toFixed(1) + "%";
+            const balanceText = escapeHtml(room.balance_text || "분석 중");
+            const blueLineup = teamLineup(room.blue_team);
+            const redLineup = teamLineup(room.red_team);
+
 
             return `
                 <a
@@ -1294,6 +1371,22 @@ document.addEventListener(
                                 "
                             ></div>
 
+                        </div>
+
+                        <div class="home-match-center" ${matchCenterStyle}>
+                            <div class="home-match-center-head">
+                                <strong>LIVE MATCH CENTER</strong>
+                                <span>${balanceText}</span>
+                            </div>
+                            <div class="home-match-winrate">
+                                <span class="live-blue">🔵 ${blueWinRate}</span>
+                                <div><i style="width:${room.blue_win_rate == null ? 50 : safeNumber(room.blue_win_rate)}%"></i></div>
+                                <span class="live-red">${redWinRate} 🔴</span>
+                            </div>
+                            <div class="home-match-lineups">
+                                <div class="home-match-team blue">${blueLineup}</div>
+                                <div class="home-match-team red">${redLineup}</div>
+                            </div>
                         </div>
 
 
@@ -2026,6 +2119,42 @@ document.addEventListener(
 
         }
 
+        function renderWeeklyAwards(awards){
+            if(!weeklyAwardsArea){ return; }
+            if(!Array.isArray(awards) || awards.length === 0){
+                weeklyAwardsArea.innerHTML = '<div class="engagement-empty">이번 주 경기가 시작되면 주간 어워드가 공개됩니다.</div>';
+                return;
+            }
+            weeklyAwardsArea.innerHTML = awards.map(function(award){
+                return `<a href="/player/${safeNumber(award.player_id)}" class="weekly-award-card">
+                    <span class="weekly-award-icon">${escapeHtml(award.icon || "🏅")}</span>
+                    <span class="weekly-award-title">${escapeHtml(award.title || "주간 기록")}</span>
+                    <strong>${escapeHtml(award.name || "-")}</strong>
+                    <small>${escapeHtml(award.value || "-")}</small>
+                </a>`;
+            }).join("");
+        }
+
+        function renderActivityFeed(activities){
+            if(!activityFeedArea){ return; }
+            if(!Array.isArray(activities) || activities.length === 0){
+                activityFeedArea.innerHTML = '<div class="engagement-empty">경기가 완료되면 새로운 소식이 표시됩니다.</div>';
+                return;
+            }
+            activityFeedArea.innerHTML = activities.map(function(item){
+                const winner = String(item.winner || "").toLowerCase();
+                const upset = item.is_upset
+                    ? `🔥 ${safeNumber(item.winner_expected).toFixed(1)}% 업셋 · ` : "";
+                const mvp = item.mvp_name ? `MVP ${escapeHtml(item.mvp_name)}` : "MVP 집계 중";
+                return `<a href="/match/${safeNumber(item.id)}" class="activity-item">
+                    <span class="activity-dot ${winner === "red" ? "red" : "blue"}"></span>
+                    <span><strong>경기 #${safeNumber(item.id)} · ${escapeHtml(item.winner_label || "경기 종료")} 승리</strong>
+                    <small>${upset}${mvp}</small></span>
+                    <time>${escapeHtml(item.match_date || "-")}</time>
+                </a>`;
+            }).join("");
+        }
+
 
         /* =====================================================
            /api/rooms
@@ -2187,6 +2316,9 @@ document.addEventListener(
                 data.recent_matches
                 || []
             );
+
+            renderWeeklyAwards(data.weekly_awards || []);
+            renderActivityFeed(data.activity_feed || []);
 
         }
 
