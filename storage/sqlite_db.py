@@ -2628,6 +2628,81 @@ def get_all_player_position_ratings():
     return result
 
 
+def get_all_player_recent_position_form(limit_per_position=20):
+    """최근 실제 라인 성적을 시간 감쇠 가중치로 계산합니다."""
+    rows = cursor.execute(
+        """
+        SELECT mp.discord_id, UPPER(mpc.actual_position) AS position,
+               mp.won, mp.match_id
+        FROM match_players mp
+        JOIN match_player_champions mpc
+          ON mpc.match_id = mp.match_id AND mpc.discord_id = mp.discord_id
+        WHERE mp.match_id >= 445 AND mpc.actual_position IS NOT NULL
+        ORDER BY mp.match_id DESC
+        """
+    ).fetchall()
+    result = {}
+    counts = {}
+    limit_per_position = max(1, int(limit_per_position))
+    for row in rows:
+        user_id = str(row["discord_id"])
+        position = str(row["position"] or "").upper()
+        key = (user_id, position)
+        index = counts.get(key, 0)
+        if index >= limit_per_position:
+            continue
+        weight = 0.90 ** index
+        entry = result.setdefault(user_id, {}).setdefault(
+            position, {"games": 0, "weighted_games": 0.0, "weighted_wins": 0.0}
+        )
+        entry["games"] += 1
+        entry["weighted_games"] += weight
+        entry["weighted_wins"] += weight * (1 if row["won"] else 0)
+        counts[key] = index + 1
+    return result
+
+
+def add_match_balance_prediction(match_id, red_expected_winrate, calibration_factor=1.0, auto_commit=True):
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO match_balance_predictions
+            (match_id, red_expected_winrate, calibration_factor)
+        VALUES (?, ?, ?)
+        """,
+        (int(match_id), float(red_expected_winrate), float(calibration_factor))
+    )
+    if auto_commit:
+        conn.commit()
+
+
+def get_balance_prediction_calibration(limit=50):
+    """최근 예측과 실제 결과의 Brier 오차가 가장 작은 보정 강도를 반환합니다."""
+    rows = cursor.execute(
+        """
+        SELECT mbp.red_expected_winrate, m.winner
+        FROM match_balance_predictions mbp
+        JOIN matches m ON m.id = mbp.match_id
+        ORDER BY mbp.match_id DESC LIMIT ?
+        """,
+        (max(10, int(limit)),)
+    ).fetchall()
+    if len(rows) < 10:
+        return 1.0
+    best_factor, best_error = 1.0, float("inf")
+    for step in range(13):
+        factor = 0.70 + step * 0.05
+        error = 0.0
+        for row in rows:
+            base = float(row["red_expected_winrate"]) / 100
+            predicted = max(0.05, min(0.95, 0.5 + (base - 0.5) * factor))
+            actual = 1.0 if str(row["winner"]).lower() == "red" else 0.0
+            error += (predicted - actual) ** 2
+        if error < best_error:
+            best_factor, best_error = factor, error
+    confidence = min(1.0, len(rows) / 30)
+    return round(1.0 + (best_factor - 1.0) * confidence, 3)
+
+
 def _initial_position_rating(player_row, position):
     base_rating = int(
         player_row["hidden_mmr_before"]
