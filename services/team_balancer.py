@@ -21,6 +21,12 @@ TEAM_HARD_LANE_GAP_PENALTY = getattr(
 POSITION_MAIN_FACTOR = getattr(config, "POSITION_MAIN_FACTOR", 1.00)
 POSITION_SUB_FACTOR = getattr(config, "POSITION_SUB_FACTOR", 0.93)
 POSITION_OTHER_FACTOR = getattr(config, "POSITION_OTHER_FACTOR", 0.80)
+TEAM_EXPECTED_WINRATE_LIMIT = getattr(config, "TEAM_EXPECTED_WINRATE_LIMIT", 55.0)
+TEAM_EXPECTED_WINRATE_WEIGHT = getattr(config, "TEAM_EXPECTED_WINRATE_WEIGHT", 120)
+TEAM_TOP_TWO_GAP_FREE_MARGIN = getattr(config, "TEAM_TOP_TWO_GAP_FREE_MARGIN", 150)
+TEAM_TOP_TWO_GAP_WEIGHT = getattr(config, "TEAM_TOP_TWO_GAP_WEIGHT", 2)
+TEAM_AUTOFILL_IMBALANCE_WEIGHT = getattr(config, "TEAM_AUTOFILL_IMBALANCE_WEIGHT", 120)
+TEAM_UNCERTAINTY_IMBALANCE_WEIGHT = getattr(config, "TEAM_UNCERTAINTY_IMBALANCE_WEIGHT", 80)
 
 from storage.team_history import (
     load_history,
@@ -133,6 +139,26 @@ def get_position_mmr(profile, position):
     else:
         weight = 0.80
     return int(round(fallback_mmr * (1 - weight) + independent_mmr * weight))
+
+
+def get_position_mmr_confidence(profile, position):
+    """15경기에서 최대가 되는 라인 MMR 신뢰도를 반환합니다."""
+    independent = (profile.get("position_ratings") or {}).get(position)
+    games = max(0, int((independent or {}).get("games") or 0))
+    return min(1.0, games / 15)
+
+
+def is_autofilled(profile, position):
+    if position in {
+        str(profile.get("main_position") or "").upper(),
+        str(profile.get("sub_position") or "").upper()
+    }:
+        return False
+    games = int(
+        ((profile.get("position_stats") or {}).get(position, {})).get("games")
+        or 0
+    )
+    return games < 3
 
 
 def get_position_preference_penalty(profile, position):
@@ -525,6 +551,57 @@ def generate_balanced_teams(
             hard_lane_violation_count * TEAM_HARD_LANE_GAP_PENALTY
         )
 
+        red_average_mmr = red_mmr / len(POSITIONS)
+        blue_average_mmr = blue_mmr / len(POSITIONS)
+        red_expected_winrate = 100 / (
+            1 + 10 ** ((blue_average_mmr - red_average_mmr) / 400)
+        )
+        blue_expected_winrate = 100 - red_expected_winrate
+        favored_winrate = max(red_expected_winrate, blue_expected_winrate)
+        expected_winrate_penalty = max(
+            0.0,
+            favored_winrate - TEAM_EXPECTED_WINRATE_LIMIT
+        )
+        weighted_expected_winrate_penalty = (
+            expected_winrate_penalty * TEAM_EXPECTED_WINRATE_WEIGHT
+        )
+
+        red_top_two = sum(sorted(red_position_mmrs.values(), reverse=True)[:2])
+        blue_top_two = sum(sorted(blue_position_mmrs.values(), reverse=True)[:2])
+        top_two_gap = abs(red_top_two - blue_top_two)
+        top_two_penalty = max(0, top_two_gap - TEAM_TOP_TWO_GAP_FREE_MARGIN)
+        weighted_top_two_penalty = top_two_penalty * TEAM_TOP_TWO_GAP_WEIGHT
+
+        red_autofill_count = sum(
+            is_autofilled(profiles.get(user_id, {}), position)
+            for position, user_id in red_assignment.items()
+        )
+        blue_autofill_count = sum(
+            is_autofilled(profiles.get(user_id, {}), position)
+            for position, user_id in blue_assignment.items()
+        )
+        autofill_imbalance = abs(red_autofill_count - blue_autofill_count)
+        weighted_autofill_penalty = (
+            autofill_imbalance * TEAM_AUTOFILL_IMBALANCE_WEIGHT
+        )
+
+        red_uncertainty = sum(
+            1 - get_position_mmr_confidence(
+                profiles.get(user_id, {}), position
+            )
+            for position, user_id in red_assignment.items()
+        )
+        blue_uncertainty = sum(
+            1 - get_position_mmr_confidence(
+                profiles.get(user_id, {}), position
+            )
+            for position, user_id in blue_assignment.items()
+        )
+        uncertainty_imbalance = abs(red_uncertainty - blue_uncertainty)
+        weighted_uncertainty_penalty = (
+            uncertainty_imbalance * TEAM_UNCERTAINTY_IMBALANCE_WEIGHT
+        )
+
         total_penalty = (
             weighted_mmr_penalty
             + weighted_position_penalty
@@ -532,6 +609,10 @@ def generate_balanced_teams(
             + weighted_opponent_penalty
             + weighted_lane_gap_penalty
             + weighted_hard_lane_penalty
+            + weighted_expected_winrate_penalty
+            + weighted_top_two_penalty
+            + weighted_autofill_penalty
+            + weighted_uncertainty_penalty
         )
 
         balance_grade, balance_summary = get_balance_grade(
@@ -568,6 +649,19 @@ def generate_balanced_teams(
             "weighted_hard_lane_penalty": weighted_hard_lane_penalty,
             "balance_grade": balance_grade,
             "balance_summary": balance_summary,
+            "red_expected_winrate": round(red_expected_winrate, 1),
+            "blue_expected_winrate": round(blue_expected_winrate, 1),
+            "expected_winrate_penalty": expected_winrate_penalty,
+            "weighted_expected_winrate_penalty": weighted_expected_winrate_penalty,
+            "top_two_gap": top_two_gap,
+            "weighted_top_two_penalty": weighted_top_two_penalty,
+            "red_autofill_count": red_autofill_count,
+            "blue_autofill_count": blue_autofill_count,
+            "autofill_imbalance": autofill_imbalance,
+            "weighted_autofill_penalty": weighted_autofill_penalty,
+            "red_uncertainty": round(red_uncertainty, 2),
+            "blue_uncertainty": round(blue_uncertainty, 2),
+            "weighted_uncertainty_penalty": weighted_uncertainty_penalty,
             "total_penalty": total_penalty,
             "signature": current_signature
         }
@@ -639,5 +733,18 @@ def generate_balanced_teams(
             selected_candidate["blue_mmr"],
             selected_candidate["red_mmr"]
         )
+
+        for red_key, blue_key in (
+            ("red_expected_winrate", "blue_expected_winrate"),
+            ("red_autofill_count", "blue_autofill_count"),
+            ("red_uncertainty", "blue_uncertainty")
+        ):
+            (
+                selected_candidate[red_key],
+                selected_candidate[blue_key]
+            ) = (
+                selected_candidate[blue_key],
+                selected_candidate[red_key]
+            )
 
     return selected_candidate
