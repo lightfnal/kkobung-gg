@@ -46,6 +46,82 @@
         .15s ease;
 }
 
+/* =========================================================
+   Readability refresh: season / compare / analysis
+========================================================= */
+
+.container:has(#seasonPageArea){width:1480px}
+.container:has(.compare-select-form),
+.container:has(.analysis-select-form){width:1280px}
+
+#seasonPageArea,
+.compare-select-form,
+.analysis-select-form{font-size:16px}
+
+.season-summary-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.season-summary-card{
+    min-height:190px;display:flex;flex-direction:column;justify-content:center
+}
+.season-ranking-table{
+    overflow-x:auto;padding-bottom:8px;scrollbar-color:var(--border) transparent
+}
+.season-ranking-row{
+    min-width:1240px;
+    grid-template-columns:64px minmax(280px,2fr) 120px 130px 145px 165px 105px 80px;
+    gap:16px
+}
+.season-player-info{min-width:0}
+.season-player-name,
+.season-player-riot,
+.season-player-positions{
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    overflow-wrap:normal;word-break:keep-all
+}
+.season-player-name{font-size:18px}
+.season-player-riot,.season-player-tier,.season-record,
+.season-current-streak,.season-no-streak,.season-mvp-count{font-size:14px}
+
+.player-select-search{
+    width:100%;min-height:44px;padding:0 14px 0 40px;
+    border:1px solid #3a4654;border-radius:10px;outline:none;
+    background:var(--surface-2);color:var(--text);font-size:15px
+}
+.player-select-search::placeholder{color:var(--muted)}
+.player-select-search:focus{
+    border-color:var(--blue);box-shadow:0 0 0 3px rgba(76,194,255,.13)
+}
+.compare-select-player,.analysis-select-box{position:relative}
+.compare-select-player::before,.analysis-select-box:first-child::before{
+    content:"🔎";position:absolute;left:13px;top:39px;z-index:1;
+    pointer-events:none;font-size:15px
+}
+.compare-select-player select,.analysis-select-box select{
+    min-height:48px;font-size:15px
+}
+.analysis-select-form{
+    grid-template-columns:minmax(380px,1fr) 220px 150px;align-items:end
+}
+.compare-select-form{
+    grid-template-columns:minmax(300px,1fr) 54px minmax(300px,1fr) 140px;
+    align-items:end
+}
+.analysis-header{padding:28px 30px}
+.analysis-header h1,.compare-header h1{font-size:28px}
+
+@media(max-width:900px){
+    .analysis-select-form,.compare-select-form{grid-template-columns:1fr}
+    .compare-vs-select{min-height:24px}
+    .season-header{align-items:flex-start}
+}
+
+@media(max-width:620px){
+    .container{max-width:calc(100% - 24px);margin:24px auto}
+    .season-header{padding:20px}
+    .season-trophy{width:54px;height:54px;font-size:28px}
+    .season-summary-grid{grid-template-columns:1fr 1fr;gap:12px}
+    .season-summary-card{min-height:160px;padding:16px}
+}
+
 
 /* =========================================================
    기본
@@ -9074,4 +9150,46 @@ nav a:hover{
         width:48px;
         height:48px;
     }
+}
+
+/* Final page-specific overrides: keep these after legacy rules. */
+.container:has(#seasonPageArea){width:1480px}
+.container:has(.compare-select-form),.container:has(.analysis-select-form){width:1280px}
+.season-summary-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.season-summary-card{min-height:190px;display:flex;flex-direction:column;justify-content:center}
+.season-ranking-table{overflow-x:auto;padding-bottom:8px}
+.season-ranking-row{
+    min-width:1240px;
+    grid-template-columns:64px minmax(280px,2fr) 120px 130px 145px 165px 105px 80px;
+    gap:16px
+}
+.season-player-info{min-width:0}
+.season-player-name,.season-player-riot,.season-player-positions{
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    overflow-wrap:normal;word-break:keep-all
+}
+.season-player-name{font-size:18px}
+.player-select-search{
+    width:100%;min-height:44px;padding:0 14px 0 40px;
+    border:1px solid #3a4654;border-radius:10px;outline:none;
+    background:var(--surface-2);color:var(--text);font-size:15px
+}
+.player-select-search::placeholder{color:var(--muted)}
+.player-select-search:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(76,194,255,.13)}
+.compare-select-player,.analysis-select-box{position:relative}
+.compare-select-player::before,.analysis-select-box:first-child::before{
+    content:"🔎";position:absolute;left:13px;top:39px;z-index:1;pointer-events:none
+}
+.analysis-select-form{grid-template-columns:minmax(380px,1fr) 220px 150px;align-items:end}
+.compare-select-form{
+    grid-template-columns:minmax(300px,1fr) 54px minmax(300px,1fr) 140px;
+    align-items:end
+}
+@media(max-width:900px){
+    .analysis-select-form,.compare-select-form{grid-template-columns:1fr}
+    .compare-vs-select{min-height:24px}
+}
+@media(max-width:620px){
+    .season-summary-grid{grid-template-columns:1fr 1fr;gap:12px}
+    .season-summary-card{min-height:160px;padding:16px}
 }
