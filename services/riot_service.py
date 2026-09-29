@@ -166,3 +166,36 @@ class RiotService:
             url,
             "랭크 조회"
         )
+
+    @staticmethod
+    def get_active_game_status(puuid: str):
+        """Spectator-v5 조회 결과를 (상태, 데이터)로 반환합니다."""
+        if not RIOT_API_KEY:
+            return "api_key_missing", None
+        encoded_puuid = quote(str(puuid), safe="")
+        url = (
+            f"https://{RIOT_PLATFORM}.api.riotgames.com"
+            f"/lol/spectator/v5/active-games/by-summoner/{encoded_puuid}"
+        )
+        try:
+            response = requests.get(
+                url,
+                headers={"X-Riot-Token": RIOT_API_KEY},
+                timeout=8
+            )
+        except requests.RequestException as error:
+            logger.warning("관전 API 네트워크 오류: %s", error)
+            return "network_error", None
+        if response.status_code == 200:
+            try:
+                return "available", response.json()
+            except ValueError:
+                return "invalid_response", None
+        if response.status_code == 404:
+            return "not_found", None
+        if response.status_code == 403:
+            return "api_key_invalid", None
+        if response.status_code == 429:
+            return "rate_limited", None
+        logger.warning("관전 API 오류 | 상태=%s", response.status_code)
+        return "api_error", None
