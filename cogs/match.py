@@ -808,14 +808,20 @@ class Match(commands.Cog):
             result_token=result_token
         )
 
-        prediction = room.current_balance_prediction or {}
+        prediction = getattr(room, "current_balance_prediction", None) or {}
         if prediction:
-            add_match_balance_prediction(
+            prediction_saved = add_match_balance_prediction(
                 match_id,
                 prediction.get("red_expected_winrate", 50.0),
                 prediction.get("calibration_factor", 1.0),
                 auto_commit=False
             )
+            if not prediction_saved:
+                logger.warning(
+                    "예상 승률 부가 기록 저장 생략 | 방=%s | 경기=%s",
+                    room.room_id,
+                    match_id
+                )
 
         for user_id in winner_players:
             profile = join_cog.profiles.get(user_id)
