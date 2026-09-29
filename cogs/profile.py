@@ -63,6 +63,22 @@ def build_profile_nickname(riot_id, tier, main_position, sub_position):
     )[:32]
 
 
+def get_role_adjusted_hidden_mmr(current_mmr, previous_tier, new_tier):
+    """티어 역할이 실제로 바뀐 순간에만 MMR을 70:30으로 보정합니다."""
+    try:
+        current_mmr = int(current_mmr)
+    except (TypeError, ValueError):
+        current_mmr = 1000
+    if previous_tier == new_tier:
+        return current_mmr
+    # 역할 교체 과정에서 기존 역할이 먼저 빠지고 새 역할이 잠시 뒤에
+    # 들어오는 중간 상태로 MMR이 두 번 움직이지 않게 합니다.
+    if new_tier == "언랭크":
+        return current_mmr
+    role_mmr = get_initial_hidden_mmr(new_tier)
+    return round(current_mmr * 0.70 + role_mmr * 0.30)
+
+
 class Profile(commands.Cog):
 
     def __init__(self, bot):
@@ -133,6 +149,11 @@ class Profile(commands.Cog):
                     ):
                         profile = stored_profile
                         nickname = expected_nickname
+                        profile["hidden_mmr"] = get_role_adjusted_hidden_mmr(
+                            profile.get("hidden_mmr"),
+                            profile.get("tier"),
+                            role_tier
+                        )
                         profile["tier"] = role_tier
                         profile["discord_nickname"] = nickname
                         PlayerService.update(str(member.id), profile)
@@ -247,6 +268,11 @@ class Profile(commands.Cog):
                     role_tier,
                     profile.get("main_position") or "-",
                     profile.get("sub_position") or "-"
+                )
+                profile["hidden_mmr"] = get_role_adjusted_hidden_mmr(
+                    profile.get("hidden_mmr"),
+                    profile.get("tier"),
+                    role_tier
                 )
                 profile["tier"] = role_tier
                 profile["discord_nickname"] = nickname
@@ -471,6 +497,17 @@ class Profile(commands.Cog):
             tier
         )
 
+        existing_hidden_mmr = old_profile.get(
+            "hidden_mmr",
+            tier_initial_mmr
+        )
+        if old_profile and old_profile.get("tier") != tier:
+            existing_hidden_mmr = get_role_adjusted_hidden_mmr(
+                existing_hidden_mmr,
+                old_profile.get("tier"),
+                tier
+            )
+
         profile = {
             "discord_nickname": interaction.user.display_name,
             "riot_name": official_riot_id,
@@ -481,10 +518,7 @@ class Profile(commands.Cog):
                 "rating",
                 1000
             ),
-            "hidden_mmr": old_profile.get(
-                "hidden_mmr",
-                tier_initial_mmr
-            ),
+            "hidden_mmr": existing_hidden_mmr,
             "placement_games": old_profile.get(
                 "placement_games",
                 0
