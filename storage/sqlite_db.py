@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 
 from datetime import datetime
@@ -7,6 +8,9 @@ from storage.paths import (
     DB_PATH,
     BACKUP_DIR
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # DB 연결
@@ -529,9 +533,16 @@ def begin_transaction():
     여러 DB 변경 작업을 하나의 작업으로 시작합니다.
     """
 
-    conn.execute(
-        "BEGIN"
-    )
+    # 이전 작업이 예외로 끝나면서 SQLite 내부 트랜잭션만 남고
+    # 방 상태의 active 표시는 이미 해제될 수 있습니다. 그 상태에서
+    # 다시 BEGIN을 실행하면 이후 모든 경기 저장이 연속 실패합니다.
+    if conn.in_transaction:
+        logger.warning(
+            "새 트랜잭션 시작 전 잔여 SQLite 트랜잭션을 롤백합니다."
+        )
+        conn.rollback()
+
+    conn.execute("BEGIN IMMEDIATE")
 
 
 def commit_transaction():
