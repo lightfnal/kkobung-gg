@@ -840,6 +840,12 @@ class JoinView(discord.ui.View):
             "weighted_lane_gap_penalty",
             0
         )
+        hard_lane_violation_count = balance_result.get(
+            "hard_lane_violation_count",
+            0
+        )
+        balance_grade = balance_result.get("balance_grade", "-")
+        balance_summary = balance_result.get("balance_summary", "계산 완료")
 
         self.join_cog.last_team_signature = (
             balance_result[
@@ -909,7 +915,8 @@ class JoinView(discord.ui.View):
             description=(
                 f"{format_room_status(room)}\n\n"
                 f"레이팅 차이: "
-                f"**{abs(red_rating - blue_rating)}점**"
+                f"**{abs(red_rating - blue_rating)}점**\n"
+                f"균형 등급: **{balance_grade}** · {balance_summary}"
             )
         )
 
@@ -941,6 +948,17 @@ class JoinView(discord.ui.View):
                     f"{gap_lines}\n"
                     f"가장 큰 차이: **{largest_lane} "
                     f"{lane_gaps[largest_lane]}점**"
+                ),
+                inline=False
+            )
+
+        if hard_lane_violation_count:
+            embed.add_field(
+                name="⚠️ 밸런스 경고",
+                value=(
+                    f"200점을 초과한 라인이 **{hard_lane_violation_count}개** 있습니다.\n"
+                    "가능하면 `다시뽑기`를 권장합니다. 모든 조합이 비슷하다면 "
+                    "현재 참가자 구성으로는 완전한 균형이 어렵습니다."
                 ),
                 inline=False
             )
