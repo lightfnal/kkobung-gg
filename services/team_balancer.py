@@ -12,6 +12,12 @@ TEAM_SAME_TEAM_PENALTY_WEIGHT = getattr(config, "TEAM_SAME_TEAM_PENALTY_WEIGHT",
 TEAM_OPPONENT_PENALTY_WEIGHT = getattr(config, "TEAM_OPPONENT_PENALTY_WEIGHT", 1)
 TEAM_LANE_GAP_FREE_MARGIN = getattr(config, "TEAM_LANE_GAP_FREE_MARGIN", 100)
 TEAM_LANE_GAP_WEIGHT = getattr(config, "TEAM_LANE_GAP_WEIGHT", 2)
+TEAM_HARD_LANE_GAP = getattr(config, "TEAM_HARD_LANE_GAP", 200)
+TEAM_HARD_LANE_GAP_PENALTY = getattr(
+    config,
+    "TEAM_HARD_LANE_GAP_PENALTY",
+    100000
+)
 POSITION_MAIN_FACTOR = getattr(config, "POSITION_MAIN_FACTOR", 1.00)
 POSITION_SUB_FACTOR = getattr(config, "POSITION_SUB_FACTOR", 0.93)
 POSITION_OTHER_FACTOR = getattr(config, "POSITION_OTHER_FACTOR", 0.80)
@@ -130,6 +136,20 @@ def get_position_preference_penalty(profile, position):
     if games >= 3:
         return 2
     return 3
+
+
+def get_balance_grade(mmr_difference, lane_gaps, position_penalty):
+    """관리자가 즉시 판단할 수 있는 S~D 균형 등급을 반환합니다."""
+    max_lane_gap = max(lane_gaps.values(), default=0)
+    if mmr_difference <= 100 and max_lane_gap <= 75 and position_penalty <= 2:
+        return "S", "매우 균형적"
+    if mmr_difference <= 200 and max_lane_gap <= 120 and position_penalty <= 4:
+        return "A", "정상 진행 권장"
+    if mmr_difference <= 300 and max_lane_gap <= 160:
+        return "B", "일부 라인 차이 존재"
+    if max_lane_gap <= TEAM_HARD_LANE_GAP:
+        return "C", "큰 라인 차이 · 다시뽑기 권장"
+    return "D", "현재 인원으로 균형 맞추기 어려움"
 
 def validate_team_profiles(
     players,
@@ -482,6 +502,14 @@ def generate_balanced_teams(
             for gap in lane_gaps.values()
         )
         weighted_lane_gap_penalty = lane_gap_penalty * TEAM_LANE_GAP_WEIGHT
+        hard_lane_violation_count = sum(
+            1
+            for gap in lane_gaps.values()
+            if gap > TEAM_HARD_LANE_GAP
+        )
+        weighted_hard_lane_penalty = (
+            hard_lane_violation_count * TEAM_HARD_LANE_GAP_PENALTY
+        )
 
         total_penalty = (
             weighted_mmr_penalty
@@ -489,6 +517,13 @@ def generate_balanced_teams(
             + weighted_same_team_penalty
             + weighted_opponent_penalty
             + weighted_lane_gap_penalty
+            + weighted_hard_lane_penalty
+        )
+
+        balance_grade, balance_summary = get_balance_grade(
+            mmr_difference,
+            lane_gaps,
+            position_penalty
         )
 
         candidate = {
@@ -515,6 +550,10 @@ def generate_balanced_teams(
             "lane_gaps": lane_gaps,
             "lane_gap_penalty": lane_gap_penalty,
             "weighted_lane_gap_penalty": weighted_lane_gap_penalty,
+            "hard_lane_violation_count": hard_lane_violation_count,
+            "weighted_hard_lane_penalty": weighted_hard_lane_penalty,
+            "balance_grade": balance_grade,
+            "balance_summary": balance_summary,
             "total_penalty": total_penalty,
             "signature": current_signature
         }
