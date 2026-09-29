@@ -362,7 +362,8 @@ conn.commit()
 
 from storage.schema_migrations import (
     apply_schema_migrations,
-    add_actual_position_to_champion_records
+    add_actual_position_to_champion_records,
+    create_player_position_ratings_tables
 )
 
 apply_schema_migrations(
@@ -373,6 +374,7 @@ apply_schema_migrations(
 # 일부 배포에서 코드 파일만 먼저 교체되거나 스키마 버전 정보와 실제
 # 열 상태가 어긋난 경우에도 모집 명령이 중단되지 않도록 자체 복구합니다.
 add_actual_position_to_champion_records(conn)
+create_player_position_ratings_tables(conn)
 conn.commit()
 
 
@@ -2290,6 +2292,8 @@ def save_match_team_champions(match_id, team, champion_records):
             conn.rollback()
         raise
 
+    finalize_match_position_ratings_if_ready(match_id)
+
 
 def get_match_player_for_champion(match_id, discord_id):
     """해당 경기 참가자 1명의 팀·포지션·표시 이름을 반환합니다."""
@@ -2486,6 +2490,34 @@ def save_match_player_champion(
         }:
             raise ValueError("실제 포지션을 확인해주세요.")
 
+        previous_record = cursor.execute(
+            """
+            SELECT actual_position
+            FROM match_player_champions
+            WHERE match_id = ? AND discord_id = ?
+            """,
+            (int(match_id), str(discord_id))
+        ).fetchone()
+        position_rating_finalized = cursor.execute(
+            """
+            SELECT 1
+            FROM match_position_rating_updates
+            WHERE match_id = ?
+              AND (red_discord_id = ? OR blue_discord_id = ?)
+            LIMIT 1
+            """,
+            (int(match_id), str(discord_id), str(discord_id))
+        ).fetchone() is not None
+        if (
+            position_rating_finalized
+            and previous_record is not None
+            and str(previous_record["actual_position"] or "").upper()
+                != normalized_position
+        ):
+            raise ValueError(
+                "라인별 MMR이 이미 확정되어 실제 포지션은 변경할 수 없습니다."
+            )
+
         cursor.execute(
             """
             INSERT INTO match_player_champions (
@@ -2523,6 +2555,8 @@ def save_match_player_champion(
         except sqlite3.Error:
             conn.rollback()
         raise
+
+    finalize_match_position_ratings_if_ready(match_id)
 
     progress = get_match_champion_progress(match_id)
     progress["updated"] = existed
@@ -2571,3 +2605,202 @@ def get_all_player_position_stats():
             "losses": max(0, games - wins)
         }
     return result
+
+
+def get_all_player_position_ratings():
+    """팀 생성용 라인별 독립 MMR을 사용자별 사전으로 반환합니다."""
+    rows = cursor.execute(
+        """
+        SELECT discord_id, position, rating, games, wins, losses
+        FROM player_position_ratings
+        """
+    ).fetchall()
+    result = {}
+    for row in rows:
+        result.setdefault(str(row["discord_id"]), {})[
+            str(row["position"]).upper()
+        ] = {
+            "rating": int(row["rating"]),
+            "games": int(row["games"]),
+            "wins": int(row["wins"]),
+            "losses": int(row["losses"])
+        }
+    return result
+
+
+def _initial_position_rating(player_row, position):
+    base_rating = int(
+        player_row["hidden_mmr_before"]
+        or player_row["rating_before"]
+        or 1000
+    )
+    main_position = str(player_row["main_position"] or "").upper()
+    sub_position = str(player_row["sub_position"] or "").upper()
+    factor = 1.00 if position == main_position else 0.93 if position == sub_position else 0.80
+    return max(100, round(base_rating * factor))
+
+
+def _position_rating_k(games):
+    if games < 5:
+        return 40
+    if games < 15:
+        return 28
+    return 18
+
+
+def finalize_match_position_ratings_if_ready(match_id):
+    """#445 이후 10명 입력 완료 시 맞라인 독립 MMR을 한 번만 반영합니다."""
+    match_id = int(match_id)
+    if match_id < 445:
+        return False
+
+    progress = get_match_champion_progress(match_id)
+    if progress["total_count"] != 10 or progress["completed_count"] != 10:
+        return False
+
+    rows = cursor.execute(
+        """
+        SELECT
+            mp.discord_id,
+            LOWER(mp.team) AS team,
+            mp.won,
+            mp.hidden_mmr_before,
+            mp.rating_before,
+            UPPER(mpc.actual_position) AS actual_position,
+            p.main_position,
+            p.sub_position
+        FROM match_players mp
+        JOIN match_player_champions mpc
+            ON mpc.match_id = mp.match_id
+           AND mpc.discord_id = mp.discord_id
+        LEFT JOIN players p ON p.discord_id = mp.discord_id
+        WHERE mp.match_id = ?
+        """,
+        (match_id,)
+    ).fetchall()
+    by_position = {}
+    for row in rows:
+        position = str(row["actual_position"] or "").upper()
+        if position not in {"TOP", "JUNGLE", "MID", "ADC", "SUPPORT"}:
+            return False
+        by_position.setdefault(position, {})[str(row["team"])] = row
+
+    if any(
+        set(by_position.get(position, {})) != {"red", "blue"}
+        for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+    ):
+        return False
+
+    savepoint_name = "finalize_position_ratings"
+    changed = False
+    try:
+        conn.execute(f"SAVEPOINT {savepoint_name}")
+        for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT"):
+            if cursor.execute(
+                "SELECT 1 FROM match_position_rating_updates WHERE match_id = ? AND position = ?",
+                (match_id, position)
+            ).fetchone() is not None:
+                continue
+
+            red = by_position[position]["red"]
+            blue = by_position[position]["blue"]
+            records = {}
+            for team, player_row in (("red", red), ("blue", blue)):
+                user_id = str(player_row["discord_id"])
+                stored = cursor.execute(
+                    """
+                    SELECT rating, games, wins, losses
+                    FROM player_position_ratings
+                    WHERE discord_id = ? AND position = ?
+                    """,
+                    (user_id, position)
+                ).fetchone()
+                records[team] = {
+                    "discord_id": user_id,
+                    "rating": int(stored["rating"]) if stored else _initial_position_rating(player_row, position),
+                    "games": int(stored["games"]) if stored else 0,
+                    "wins": int(stored["wins"]) if stored else 0,
+                    "losses": int(stored["losses"]) if stored else 0,
+                    "won": bool(player_row["won"])
+                }
+
+            red_expected = 1 / (1 + 10 ** ((records["blue"]["rating"] - records["red"]["rating"]) / 400))
+            blue_expected = 1 - red_expected
+            red_score = 1 if records["red"]["won"] else 0
+            blue_score = 1 - red_score
+            red_after = max(100, round(records["red"]["rating"] + _position_rating_k(records["red"]["games"]) * (red_score - red_expected)))
+            blue_after = max(100, round(records["blue"]["rating"] + _position_rating_k(records["blue"]["games"]) * (blue_score - blue_expected)))
+
+            for team, after_rating in (("red", red_after), ("blue", blue_after)):
+                record = records[team]
+                cursor.execute(
+                    """
+                    INSERT INTO player_position_ratings (
+                        discord_id, position, rating, games, wins, losses, updated_at
+                    ) VALUES (?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(discord_id, position) DO UPDATE SET
+                        rating = excluded.rating,
+                        games = player_position_ratings.games + 1,
+                        wins = player_position_ratings.wins + excluded.wins,
+                        losses = player_position_ratings.losses + excluded.losses,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        record["discord_id"], position, after_rating,
+                        1 if record["won"] else 0,
+                        0 if record["won"] else 1
+                    )
+                )
+
+            cursor.execute(
+                """
+                INSERT INTO match_position_rating_updates (
+                    match_id, position, red_discord_id, blue_discord_id,
+                    red_rating_before, red_rating_after,
+                    blue_rating_before, blue_rating_after
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    match_id, position,
+                    records["red"]["discord_id"], records["blue"]["discord_id"],
+                    records["red"]["rating"], red_after,
+                    records["blue"]["rating"], blue_after
+                )
+            )
+            changed = True
+
+        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        conn.commit()
+    except Exception:
+        try:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        except sqlite3.Error:
+            conn.rollback()
+        raise
+    return changed
+
+
+def finalize_pending_position_ratings(limit=100):
+    """재시작 전에 입력 완료됐지만 미반영된 경기를 복구합니다."""
+    rows = cursor.execute(
+        """
+        SELECT mp.match_id
+        FROM match_players mp
+        JOIN match_player_champions mpc
+            ON mpc.match_id = mp.match_id
+           AND mpc.discord_id = mp.discord_id
+        WHERE mp.match_id >= 445
+        GROUP BY mp.match_id
+        HAVING COUNT(DISTINCT mp.discord_id) = 10
+           AND COUNT(DISTINCT mpc.discord_id) = 10
+        ORDER BY mp.match_id ASC
+        LIMIT ?
+        """,
+        (max(1, int(limit)),)
+    ).fetchall()
+    finalized_count = 0
+    for row in rows:
+        if finalize_match_position_ratings_if_ready(row["match_id"]):
+            finalized_count += 1
+    return finalized_count

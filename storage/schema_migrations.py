@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 REQUIRED_SCHEMA = {
     "players": {"discord_id", "rating", "hidden_mmr", "placement_games"},
@@ -145,6 +145,46 @@ def add_actual_position_to_champion_records(connection):
         ON match_player_champions(discord_id, actual_position)
         """
     )
+
+
+def create_player_position_ratings_tables(connection):
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS player_position_ratings (
+            discord_id TEXT NOT NULL,
+            position TEXT NOT NULL,
+            rating INTEGER NOT NULL,
+            games INTEGER NOT NULL DEFAULT 0,
+            wins INTEGER NOT NULL DEFAULT 0,
+            losses INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (discord_id, position)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS match_position_rating_updates (
+            match_id INTEGER NOT NULL,
+            position TEXT NOT NULL,
+            red_discord_id TEXT NOT NULL,
+            blue_discord_id TEXT NOT NULL,
+            red_rating_before INTEGER NOT NULL,
+            red_rating_after INTEGER NOT NULL,
+            blue_rating_before INTEGER NOT NULL,
+            blue_rating_after INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (match_id, position),
+            FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_position_ratings_discord_id
+        ON player_position_ratings(discord_id)
+        """
+    )
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_match_player_champions_discord_id
@@ -158,7 +198,8 @@ MIGRATIONS = {
     2: create_operations_events_table,
     3: add_player_guild_membership_column,
     4: create_match_player_champions_table,
-    5: add_actual_position_to_champion_records
+    5: add_actual_position_to_champion_records,
+    6: create_player_position_ratings_tables
 }
 
 
