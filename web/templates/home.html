@@ -1387,6 +1387,9 @@ document.addEventListener(
                                 <div class="home-match-team blue">${blueLineup}</div>
                                 <div class="home-match-team red">${redLineup}</div>
                             </div>
+                            <button type="button" class="home-spectate-button" data-spectate-room="${roomId}" disabled>
+                                👁 관전 가능 여부 확인 중
+                            </button>
                         </div>
 
 
@@ -1559,7 +1562,55 @@ document.addEventListener(
                         ""
                     );
 
+            refreshSpectatorButtons();
+
         }
+
+        async function refreshSpectatorButtons(){
+            const buttons = document.querySelectorAll("[data-spectate-room]");
+            buttons.forEach(async function(button){
+                const roomId = button.dataset.spectateRoom;
+                try{
+                    const response = await fetch(
+                        `/api/spectator/room/${encodeURIComponent(roomId)}`,
+                        {cache:"no-store", headers:{"Accept":"application/json"}}
+                    );
+                    if(!response.ok){ throw new Error("spectator api"); }
+                    const data = await response.json();
+                    button.dataset.message = data.message || "관전 정보를 확인할 수 없습니다.";
+                    button.dataset.participant = data.participant_riot_id || "";
+                    if(data.available){
+                        button.disabled = false;
+                        button.classList.add("available");
+                        button.textContent = "👁 LoL 클라이언트에서 관전";
+                    }else{
+                        button.disabled = true;
+                        button.classList.remove("available");
+                        button.textContent = data.status === "not_started"
+                            ? "👁 경기 시작 후 관전 확인"
+                            : "👁 " + (data.message || "관전 확인 불가");
+                    }
+                }catch(error){
+                    button.disabled = true;
+                    button.textContent = "👁 관전 확인 일시 중단";
+                }
+            });
+        }
+
+        document.addEventListener("click", function(event){
+            const button = event.target.closest(".home-spectate-button.available");
+            if(!button){ return; }
+            event.preventDefault();
+            event.stopPropagation();
+            const participant = button.dataset.participant || "참가자";
+            alert(
+                "LoL 클라이언트에서 관전하는 방법\n\n" +
+                "1. LoL 클라이언트를 실행합니다.\n" +
+                `2. ${participant} 님을 친구 목록 또는 프로필에서 찾습니다.\n` +
+                "3. 프로필을 우클릭하고 ‘게임 관전’을 선택합니다.\n\n" +
+                (button.dataset.message || "관전은 일정 시간 지연될 수 있습니다.")
+            );
+        });
 
 
         /* =====================================================
