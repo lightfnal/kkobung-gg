@@ -2663,29 +2663,53 @@ def get_all_player_recent_position_form(limit_per_position=20):
 
 
 def add_match_balance_prediction(match_id, red_expected_winrate, calibration_factor=1.0, auto_commit=True):
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO match_balance_predictions
-            (match_id, red_expected_winrate, calibration_factor)
-        VALUES (?, ?, ?)
-        """,
-        (int(match_id), float(red_expected_winrate), float(calibration_factor))
-    )
-    if auto_commit:
-        conn.commit()
+    """예상 승률을 저장합니다. 부가 기록 실패가 경기 저장을 막지 않습니다."""
+    try:
+        # 스키마 버전 표시는 올라갔지만 테이블 생성이 누락된 배포도
+        # 경기 도중 자동 복구할 수 있도록 방어적으로 보장합니다.
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS match_balance_predictions (
+                match_id INTEGER PRIMARY KEY,
+                red_expected_winrate REAL NOT NULL,
+                calibration_factor REAL NOT NULL DEFAULT 1.0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO match_balance_predictions
+                (match_id, red_expected_winrate, calibration_factor)
+            VALUES (?, ?, ?)
+            """,
+            (int(match_id), float(red_expected_winrate), float(calibration_factor))
+        )
+        if auto_commit:
+            conn.commit()
+        return True
+    except (sqlite3.Error, TypeError, ValueError):
+        # auto_commit=False이면 상위 경기 트랜잭션은 그대로 계속 진행합니다.
+        if auto_commit:
+            conn.rollback()
+        return False
 
 
 def get_balance_prediction_calibration(limit=50):
     """최근 예측과 실제 결과의 Brier 오차가 가장 작은 보정 강도를 반환합니다."""
-    rows = cursor.execute(
-        """
-        SELECT mbp.red_expected_winrate, m.winner
-        FROM match_balance_predictions mbp
-        JOIN matches m ON m.id = mbp.match_id
-        ORDER BY mbp.match_id DESC LIMIT ?
-        """,
-        (max(10, int(limit)),)
-    ).fetchall()
+    try:
+        rows = cursor.execute(
+            """
+            SELECT mbp.red_expected_winrate, m.winner
+            FROM match_balance_predictions mbp
+            JOIN matches m ON m.id = mbp.match_id
+            ORDER BY mbp.match_id DESC LIMIT ?
+            """,
+            (max(10, int(limit)),)
+        ).fetchall()
+    except sqlite3.Error:
+        return 1.0
     if len(rows) < 10:
         return 1.0
     best_factor, best_error = 1.0, float("inf")
