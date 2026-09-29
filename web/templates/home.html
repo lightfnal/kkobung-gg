@@ -109,19 +109,16 @@
         <div class="home-section-header">
             <div>
                 <h2>⚡ 최근 활동</h2>
-                <p>서버에서 방금 일어난 기록</p>
+                <p>업셋·연승·승급·개인 기록 등 특별한 사건만 표시합니다.</p>
             </div>
         </div>
         <div id="homeActivityFeed" class="activity-feed">
             {% for activity in activity_feed %}
-            <a href="/match/{{ activity.id }}" class="activity-item">
-                <span class="activity-dot {% if activity.winner == 'red' %}red{% else %}blue{% endif %}"></span>
+            <a href="/match/{{ activity.id }}" class="activity-item activity-{{ activity.accent }}">
+                <span class="activity-event-icon">{{ activity.icon }}</span>
                 <span>
-                    <strong>경기 #{{ activity.id }} · {{ activity.winner_label }} 승리</strong>
-                    <small>
-                        {% if activity.is_upset %}🔥 {{ activity.winner_expected }}% 업셋 · {% endif %}
-                        {% if activity.mvp_name %}MVP {{ activity.mvp_name }}{% else %}MVP 집계 중{% endif %}
-                    </small>
+                    <strong>{{ activity.title }}</strong>
+                    <small>{{ activity.detail }}</small>
                 </span>
                 <time>{{ activity.match_date }}</time>
             </a>
@@ -2193,14 +2190,11 @@ document.addEventListener(
                 return;
             }
             activityFeedArea.innerHTML = activities.map(function(item){
-                const winner = String(item.winner || "").toLowerCase();
-                const upset = item.is_upset
-                    ? `🔥 ${safeNumber(item.winner_expected).toFixed(1)}% 업셋 · ` : "";
-                const mvp = item.mvp_name ? `MVP ${escapeHtml(item.mvp_name)}` : "MVP 집계 중";
-                return `<a href="/match/${safeNumber(item.id)}" class="activity-item">
-                    <span class="activity-dot ${winner === "red" ? "red" : "blue"}"></span>
-                    <span><strong>경기 #${safeNumber(item.id)} · ${escapeHtml(item.winner_label || "경기 종료")} 승리</strong>
-                    <small>${upset}${mvp}</small></span>
+                const accent = String(item.accent || "record").replace(/[^a-z]/g, "");
+                return `<a href="/match/${safeNumber(item.id)}" class="activity-item activity-${accent}">
+                    <span class="activity-event-icon">${escapeHtml(item.icon || "✨")}</span>
+                    <span><strong>${escapeHtml(item.title || "새로운 기록")}</strong>
+                    <small>${escapeHtml(item.detail || "특별한 기록이 달성됐습니다.")}</small></span>
                     <time>${escapeHtml(item.match_date || "-")}</time>
                 </a>`;
             }).join("");
