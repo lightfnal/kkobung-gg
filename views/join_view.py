@@ -1112,13 +1112,16 @@ class JoinView(discord.ui.View):
                     item.disabled = True
 
 
-        try:
-            await interaction.message.edit(
-                embed=self.create_embed(),
-                view=self
-            )
-        except discord.HTTPException:
-            pass
+        # 모집창 버튼에서 실행된 경우에만 원본 모집 메시지를 잠급니다.
+        # /관리자팀생성 같은 슬래시 명령은 interaction.message가 None입니다.
+        if interaction.message is not None:
+            try:
+                await interaction.message.edit(
+                    embed=self.create_embed(),
+                    view=self
+                )
+            except discord.HTTPException:
+                pass
 
 
         output_message, used_fallback = (
