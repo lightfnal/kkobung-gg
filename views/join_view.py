@@ -752,6 +752,9 @@ class JoinView(discord.ui.View):
             profiles=profiles,
             last_team_signature=(
                 self.join_cog.last_team_signature
+            ),
+            prediction_calibration=getattr(
+                self.join_cog, "balance_prediction_calibration", 1.0
             )
         )
 
@@ -863,6 +866,12 @@ class JoinView(discord.ui.View):
         self.join_cog.current_teams = {
             "red": best_red_assignment,
             "blue": best_blue_assignment
+        }
+        room.current_balance_prediction = {
+            "red_expected_winrate": red_expected_winrate,
+            "calibration_factor": getattr(
+                self.join_cog, "balance_prediction_calibration", 1.0
+            )
         }
 
         # 화면에는 Hidden MMR 대신 공개 레이팅만 표시합니다.
