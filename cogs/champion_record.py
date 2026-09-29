@@ -12,6 +12,7 @@ from storage.sqlite_db import (
     get_match_player_for_champion,
     get_match_team_players,
     get_player_champion_suggestions,
+    finalize_pending_position_ratings,
     save_match_player_champion,
     save_match_team_champions
 )
@@ -694,6 +695,19 @@ class ChampionRecord(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self._position_mmr_recovery_done = False
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self._position_mmr_recovery_done:
+            return
+        self._position_mmr_recovery_done = True
+        try:
+            recovered = finalize_pending_position_ratings()
+            if recovered:
+                logger.info("미반영 라인별 MMR 복구 완료 | 경기=%s", recovered)
+        except Exception:
+            logger.exception("미반영 라인별 MMR 복구 실패")
 
     @discord.app_commands.command(
         name="내챔피언",

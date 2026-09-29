@@ -9,6 +9,7 @@ from storage.sqlite_db import (
     get_player,
     get_all_players_dict,
     get_all_player_position_stats,
+    get_all_player_position_ratings,
     get_match_by_result_token
 )
 
@@ -1413,13 +1414,16 @@ class Join(commands.Cog):
         }
         try:
             position_stats = get_all_player_position_stats()
+            position_ratings = get_all_player_position_ratings()
         except Exception:
             # 포지션 통계는 팀 밸런스 보조값입니다. 구버전 DB나 일시적인
             # 조회 오류가 있어도 /내전모집 자체는 정상 동작해야 합니다.
             logger.exception("포지션별 통계 조회 실패 - 기본값으로 계속 진행")
             position_stats = {}
+            position_ratings = {}
         for user_id, profile in self.profiles.items():
             profile["position_stats"] = position_stats.get(user_id, {})
+            profile["position_ratings"] = position_ratings.get(user_id, {})
 
 
     @discord.app_commands.command(
