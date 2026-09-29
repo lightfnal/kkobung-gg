@@ -118,7 +118,21 @@ def get_position_factor(profile, position):
 
 
 def get_position_mmr(profile, position):
-    return int(round(get_balance_mmr(profile) * get_position_factor(profile, position)))
+    fallback_mmr = int(round(
+        get_balance_mmr(profile) * get_position_factor(profile, position)
+    ))
+    independent = (profile.get("position_ratings") or {}).get(position)
+    if not independent:
+        return fallback_mmr
+    games = max(0, int(independent.get("games") or 0))
+    independent_mmr = int(independent.get("rating") or fallback_mmr)
+    if games < 5:
+        weight = 0.30
+    elif games < 15:
+        weight = 0.60
+    else:
+        weight = 0.80
+    return int(round(fallback_mmr * (1 - weight) + independent_mmr * weight))
 
 
 def get_position_preference_penalty(profile, position):
