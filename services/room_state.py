@@ -51,6 +51,7 @@ class InhouseRoom:
     recruit_start_time: str | None = None
 
     current_teams: dict | None = None
+    current_balance_prediction: dict | None = None
 
     match_in_progress: bool = False
 
@@ -129,6 +130,7 @@ class InhouseRoom:
         self.recruit_start_mode = "undecided"
         self.recruit_start_time = None
         self.current_teams = None
+        self.current_balance_prediction = None
         self.match_in_progress = False
 
         self.series_score = {
@@ -181,6 +183,7 @@ class InhouseRoom:
             "recruit_start_mode": self.recruit_start_mode,
             "recruit_start_time": self.recruit_start_time,
             "current_teams": self.current_teams,
+            "current_balance_prediction": self.current_balance_prediction,
             "match_in_progress": (
                 self.match_in_progress
             ),
@@ -279,6 +282,8 @@ class InhouseRoom:
         room.current_teams = data.get(
             "current_teams"
         )
+        prediction = data.get("current_balance_prediction")
+        room.current_balance_prediction = prediction if isinstance(prediction, dict) else None
 
         room.match_in_progress = bool(
             data.get(

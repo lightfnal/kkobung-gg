@@ -138,7 +138,14 @@ def get_position_mmr(profile, position):
         weight = 0.60
     else:
         weight = 0.80
-    return int(round(fallback_mmr * (1 - weight) + independent_mmr * weight))
+    blended = fallback_mmr * (1 - weight) + independent_mmr * weight
+    form = (profile.get("recent_position_form") or {}).get(position, {})
+    weighted_games = float(form.get("weighted_games") or 0)
+    if weighted_games:
+        recent_winrate = float(form.get("weighted_wins") or 0) / weighted_games
+        sample_confidence = min(1.0, int(form.get("games") or 0) / 10)
+        blended += max(-60, min(60, (recent_winrate - 0.5) * 120)) * sample_confidence
+    return int(round(blended))
 
 
 def get_position_mmr_confidence(profile, position):
@@ -335,7 +342,8 @@ def create_team_signature(
 def generate_balanced_teams(
     players,
     profiles,
-    last_team_signature=None
+    last_team_signature=None,
+    prediction_calibration=1.0
 ):
     """
     참가자 목록과 프로필을 사용해
@@ -464,6 +472,46 @@ def generate_balanced_teams(
                     max(0, gap - TEAM_LANE_GAP_FREE_MARGIN)
                     for gap in possible_lane_gaps.values()
                 )
+                # 같은 선호도 배정이라도 포지션을 서로 바꿔 보면서
+                # 예상 승률·비주력 배치·라인 MMR 신뢰도가 더 고른 쪽을 택합니다.
+                possible_red_average = sum(possible_red_mmrs.values()) / len(POSITIONS)
+                possible_blue_average = sum(possible_blue_mmrs.values()) / len(POSITIONS)
+                possible_raw_winrate = 100 / (
+                    1 + 10 ** ((possible_blue_average - possible_red_average) / 400)
+                )
+                possible_winrate = 50 + (possible_raw_winrate - 50) * max(
+                    0.70, min(1.30, float(prediction_calibration))
+                )
+                possible_score += max(
+                    0, max(possible_winrate, 100 - possible_winrate)
+                    - TEAM_EXPECTED_WINRATE_LIMIT
+                ) * TEAM_EXPECTED_WINRATE_WEIGHT
+                possible_red_autofill = sum(
+                    is_autofilled(profiles.get(user_id, {}), position)
+                    for position, user_id in possible_red.items()
+                )
+                possible_blue_autofill = sum(
+                    is_autofilled(profiles.get(user_id, {}), position)
+                    for position, user_id in possible_blue.items()
+                )
+                possible_score += abs(
+                    possible_red_autofill - possible_blue_autofill
+                ) * TEAM_AUTOFILL_IMBALANCE_WEIGHT
+                possible_red_uncertainty = sum(
+                    1 - get_position_mmr_confidence(
+                        profiles.get(user_id, {}), position
+                    )
+                    for position, user_id in possible_red.items()
+                )
+                possible_blue_uncertainty = sum(
+                    1 - get_position_mmr_confidence(
+                        profiles.get(user_id, {}), position
+                    )
+                    for position, user_id in possible_blue.items()
+                )
+                possible_score += abs(
+                    possible_red_uncertainty - possible_blue_uncertainty
+                ) * TEAM_UNCERTAINTY_IMBALANCE_WEIGHT
                 if possible_score < best_assignment_score:
                     best_assignment_score = possible_score
                     best_assignment_pair = (possible_red, possible_blue)
@@ -553,9 +601,11 @@ def generate_balanced_teams(
 
         red_average_mmr = red_mmr / len(POSITIONS)
         blue_average_mmr = blue_mmr / len(POSITIONS)
-        red_expected_winrate = 100 / (
+        raw_red_expected_winrate = 100 / (
             1 + 10 ** ((blue_average_mmr - red_average_mmr) / 400)
         )
+        prediction_calibration = max(0.70, min(1.30, float(prediction_calibration)))
+        red_expected_winrate = 50 + (raw_red_expected_winrate - 50) * prediction_calibration
         blue_expected_winrate = 100 - red_expected_winrate
         favored_winrate = max(red_expected_winrate, blue_expected_winrate)
         expected_winrate_penalty = max(
