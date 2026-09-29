@@ -1,6 +1,15 @@
 from utils.rating import get_rating_tier
 
 
+def _compact_player_name(value, limit=24):
+    """역할 표기가 붙은 Discord 닉네임에서 화면용 핵심 이름만 반환합니다."""
+    text = str(value or "알 수 없는 플레이어").strip()
+    compact = text.split(" / ", 1)[0].strip()
+    if len(compact) > limit:
+        compact = compact[:limit - 1].rstrip() + "…"
+    return compact
+
+
 def build_home_engagement(cursor):
     """홈 화면의 주간 어워드와 최근 활동 피드를 구성합니다."""
     cursor.execute(
@@ -24,7 +33,9 @@ def build_home_engagement(cursor):
     def add_award(icon, title, row, value):
         if row:
             awards.append({
-                "icon": icon, "title": title, "name": row["name"],
+                "icon": icon, "title": title,
+                "name": _compact_player_name(row["name"]),
+                "full_name": row["name"],
                 "value": value(row), "player_id": row["player_id"]
             })
 
@@ -78,7 +89,7 @@ def build_home_engagement(cursor):
     seen_upset_matches = set()
 
     def add_activity(row, icon, title, detail, accent):
-        if len(activities) >= 8:
+        if len(activities) >= 6:
             return
         activities.append({
             "id": int(row["match_id"]),
@@ -112,7 +123,7 @@ def build_home_engagement(cursor):
         if streak in {3, 5, 10} or (streak >= 15 and streak % 5 == 0):
             add_activity(
                 item, "⚡", f"{streak}연승 달성",
-                f'{item["player_name"]} 님이 {streak}연승을 기록했습니다.', "streak"
+                f'{_compact_player_name(item["player_name"])} 님이 {streak}연승을 기록했습니다.', "streak"
             )
 
         mvp_number = int(item.get("mvp_number") or 0)
@@ -121,14 +132,14 @@ def build_home_engagement(cursor):
         ):
             add_activity(
                 item, "👑", "MVP 기록 달성",
-                f'{item["player_name"]} 님이 통산 MVP {mvp_number}회를 달성했습니다.', "mvp"
+                f'{_compact_player_name(item["player_name"])} 님이 통산 MVP {mvp_number}회를 달성했습니다.', "mvp"
             )
 
         game_number = int(item.get("game_number") or 0)
         if game_number in {50, 100} or (game_number >= 200 and game_number % 100 == 0):
             add_activity(
                 item, "🎮", "누적 경기 달성",
-                f'{item["player_name"]} 님이 통산 {game_number}경기를 달성했습니다.', "games"
+                f'{_compact_player_name(item["player_name"])} 님이 통산 {game_number}경기를 달성했습니다.', "games"
             )
 
         rating_before = int(item.get("rating_before") or 0)
@@ -140,7 +151,7 @@ def build_home_engagement(cursor):
         ):
             add_activity(
                 item, "📈", "개인 최고 레이팅",
-                f'{item["player_name"]} 님이 최고 기록 {rating_after}점을 달성했습니다.', "record"
+                f'{_compact_player_name(item["player_name"])} 님이 최고 기록 {rating_after}점을 달성했습니다.', "record"
             )
 
         tier_before = get_rating_tier(rating_before)
@@ -148,9 +159,9 @@ def build_home_engagement(cursor):
         if tier_before != tier_after and rating_after > rating_before:
             add_activity(
                 item, "🎉", "티어 승급",
-                f'{item["player_name"]} 님이 {tier_after}(으)로 승급했습니다.', "promotion"
+                f'{_compact_player_name(item["player_name"])} 님이 {tier_after}(으)로 승급했습니다.', "promotion"
             )
 
-        if len(activities) >= 8:
+        if len(activities) >= 6:
             break
     return awards, activities
