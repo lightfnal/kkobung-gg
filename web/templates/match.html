@@ -603,7 +603,29 @@
                 </div>
 
 
-                <div class="match-player-name">
+                <div class="match-player-identity">
+
+                    {% if player.champion_image_url %}
+
+                        <img
+                            class="match-champion-portrait"
+                            src="{{ player.champion_image_url }}"
+                            alt="{{ player.champion_name or '사용 챔피언' }}"
+                            title="{{ player.champion_name or '사용 챔피언' }}"
+                            loading="lazy"
+                        >
+
+                    {% else %}
+
+                        <span
+                            class="match-champion-placeholder"
+                            title="챔피언 미기록"
+                            aria-label="챔피언 미기록"
+                        >🎮</span>
+
+                    {% endif %}
+
+                    <div class="match-player-name">
 
                     {% if player.player_id %}
 
@@ -638,6 +660,7 @@
 
                         {% endif %}
 
+                    </div>
                     </div>
 
                 </div>
@@ -786,7 +809,29 @@
                 </div>
 
 
-                <div class="match-player-name">
+                <div class="match-player-identity">
+
+                    {% if player.champion_image_url %}
+
+                        <img
+                            class="match-champion-portrait"
+                            src="{{ player.champion_image_url }}"
+                            alt="{{ player.champion_name or '사용 챔피언' }}"
+                            title="{{ player.champion_name or '사용 챔피언' }}"
+                            loading="lazy"
+                        >
+
+                    {% else %}
+
+                        <span
+                            class="match-champion-placeholder"
+                            title="챔피언 미기록"
+                            aria-label="챔피언 미기록"
+                        >🎮</span>
+
+                    {% endif %}
+
+                    <div class="match-player-name">
 
                     {% if player.player_id %}
 
@@ -821,6 +866,7 @@
 
                         {% endif %}
 
+                    </div>
                     </div>
 
                 </div>
