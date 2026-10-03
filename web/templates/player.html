@@ -586,6 +586,65 @@
 
 </div>
 
+    {% if recent_matches %}
+    <section class="recent-champion-section">
+        <div class="recent-champion-header">
+            <div>
+                <h3>🎮 최근 5경기 챔피언</h3>
+                <p>이번 시즌 최근 경기에서 사용한 챔피언입니다.</p>
+            </div>
+        </div>
+
+        <div class="recent-champion-list">
+            {% for match in recent_matches %}
+            <a
+                href="/match/{{ match.match_id }}"
+                class="recent-champion-card{% if match.won %} recent-champion-win{% else %} recent-champion-loss{% endif %}"
+            >
+                <div class="recent-champion-image-wrap">
+                    {% if match.champion_image_url %}
+                    <img
+                        class="recent-champion-image"
+                        src="{{ match.champion_image_url }}"
+                        alt="{{ match.champion_name or '챔피언 미기록' }}"
+                        loading="lazy"
+                    >
+                    {% else %}
+                    <span class="recent-champion-placeholder" aria-label="챔피언 미기록">🎮</span>
+                    {% endif %}
+                </div>
+
+                <div class="recent-champion-info">
+                    <span class="recent-champion-match">
+                        경기 #{{ match.match_id }} · {{ match.match_date }}
+                    </span>
+                    <strong>{{ match.champion_name or "챔피언 미기록" }}</strong>
+                    <span class="recent-champion-position">
+                        {{ match.position or "포지션 미기록" }}
+                    </span>
+                </div>
+
+                <div class="recent-champion-result">
+                    {% if match.won %}
+                    <strong class="recent-champion-result-win">승리</strong>
+                    {% else %}
+                    <strong class="recent-champion-result-loss">패배</strong>
+                    {% endif %}
+
+                    {% if match.rating_change > 0 %}
+                    <span class="recent-champion-lp recent-champion-lp-up">+{{ match.rating_change }} LP</span>
+                    {% elif match.rating_change < 0 %}
+                    <span class="recent-champion-lp recent-champion-lp-down">{{ match.rating_change }} LP</span>
+                    {% else %}
+                    <span class="recent-champion-lp">0 LP</span>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
 
 <hr style="margin:45px 0;border:1px solid #2d323c;">
 
@@ -1864,3 +1923,4 @@ new Chart(
 {% endif %}
 
 {% endblock %}
+
