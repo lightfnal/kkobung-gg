@@ -102,6 +102,9 @@ def match_detail(
                 mp.rating_after,
                 mp.rating_change,
 
+                mpc.champion_name,
+                mpc.champion_image_url,
+
                 p.id
                     AS player_id,
 
@@ -110,6 +113,10 @@ def match_detail(
                 p.tier
 
             FROM match_players mp
+
+            LEFT JOIN match_player_champions mpc
+                ON mpc.match_id = mp.match_id
+                AND mpc.discord_id = mp.discord_id
 
             LEFT JOIN players p
                 ON p.discord_id
