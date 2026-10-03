@@ -703,10 +703,10 @@ class ChampionRecord(commands.Cog):
         )
 
         try:
-            # sqlite_db uses a module-level sqlite3 connection created on this
-            # event-loop thread. Keep this lookup on the same thread; moving it
-            # to asyncio.to_thread raises sqlite3.ProgrammingError.
-            teams = get_both_team_players(경기번호)
+            teams = await asyncio.to_thread(
+                get_both_team_players,
+                경기번호
+            )
         except Exception as error:
             logger.exception(
                 "양 팀 챔피언 입력 준비 실패 | 경기=%s",
