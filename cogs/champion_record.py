@@ -155,7 +155,7 @@ class SelfChampionRecordModal(discord.ui.Modal):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         raw_name = str(self.champion.value).strip()
         champion = await resolve_champion_or_reply(interaction, raw_name)
 
@@ -245,7 +245,7 @@ class QuickChampionSelect(discord.ui.Select):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         champion = self.champions[self.values[0]]
         await save_self_champion_and_reply(
             interaction,
@@ -275,7 +275,8 @@ class QuickChampionChoiceView(discord.ui.View):
         self.source_view = source_view
         self.actual_position = str(player.get("position") or "").upper()
         self.add_item(ActualPositionSelect(self))
-        self.add_item(QuickChampionSelect(self, suggestions))
+        if suggestions:
+            self.add_item(QuickChampionSelect(self, suggestions))
 
     @discord.ui.button(
         label="목록에 없음 · 직접 입력",
@@ -346,7 +347,7 @@ class CombinedChampionRecordModal(discord.ui.Modal):
             await send_match_operator_only_message(interaction)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         parsed_pairs = []
 
         for field in self.champion_inputs:
@@ -451,6 +452,33 @@ class CombinedChampionRecordModal(discord.ui.Modal):
         )
 
 
+class CombinedChampionModalLauncherView(discord.ui.View):
+
+    def __init__(self, match_id, red_players, blue_players):
+        super().__init__(timeout=3 * 60)
+        self.match_id = int(match_id)
+        self.red_players = red_players
+        self.blue_players = blue_players
+
+    @discord.ui.button(
+        label="양 팀 챔피언 입력창 열기",
+        emoji="🎭",
+        style=discord.ButtonStyle.primary
+    )
+    async def open_modal(self, interaction, button):
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        await interaction.response.send_modal(
+            CombinedChampionRecordModal(
+                self.match_id,
+                self.red_players,
+                self.blue_players
+            )
+        )
+
+
 class ChampionRecordView(discord.ui.View):
 
     def __init__(self, match_id):
@@ -463,13 +491,18 @@ class ChampionRecordView(discord.ui.View):
         style=discord.ButtonStyle.success
     )
     async def open_self_record_modal(self, interaction, button):
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
+        )
+
         player = get_match_player_for_champion(
             self.match_id,
             interaction.user.id
         )
 
         if player is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 이 경기의 참가자만 자신의 챔피언을 입력할 수 있습니다.",
                 ephemeral=True
             )
@@ -480,21 +513,20 @@ class ChampionRecordView(discord.ui.View):
             self.match_id
         )
 
-        if not suggestions:
-            await interaction.response.send_modal(
-                SelfChampionRecordModal(
-                    self.match_id,
-                    player,
-                    interaction.message,
-                    self
-                )
+        if suggestions:
+            prompt = (
+                "🎭 사용한 챔피언을 선택하세요.\n"
+                "라인이 바뀌었다면 먼저 실제 포지션을 바꾸고, "
+                "목록에 없다면 `직접 입력`을 눌러주세요."
             )
-            return
+        else:
+            prompt = (
+                "🎭 저장된 추천 챔피언이 없습니다.\n"
+                "실제 포지션을 확인한 뒤 `직접 입력`을 눌러주세요."
+            )
 
-        await interaction.response.send_message(
-            "🎭 사용한 챔피언을 선택하세요.\n"
-            "라인이 바뀌었다면 먼저 실제 포지션을 바꾸고, "
-            "목록에 없다면 `직접 입력`을 눌러주세요.",
+        await interaction.followup.send(
+            prompt,
             view=QuickChampionChoiceView(
                 self.match_id,
                 player,
@@ -515,21 +547,27 @@ class ChampionRecordView(discord.ui.View):
             await send_match_operator_only_message(interaction)
             return
 
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
+        )
         teams = get_both_team_players(self.match_id)
 
         if teams is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 해당 경기에서 양 팀 선수 10명을 찾지 못했습니다.",
                 ephemeral=True
             )
             return
 
-        await interaction.response.send_modal(
-            CombinedChampionRecordModal(
+        await interaction.followup.send(
+            "관리자 일괄 입력을 준비했습니다. 아래 버튼을 눌러 입력창을 여세요.",
+            view=CombinedChampionModalLauncherView(
                 self.match_id,
                 teams[0],
                 teams[1]
-            )
+            ),
+            ephemeral=True
         )
 
     @discord.ui.button(
@@ -542,10 +580,14 @@ class ChampionRecordView(discord.ui.View):
             await send_match_operator_only_message(interaction)
             return
 
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
+        )
         rows = get_match_champion_status(self.match_id)
 
         if not rows:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 해당 경기 참가자 정보를 찾지 못했습니다.",
                 ephemeral=True
             )
@@ -563,7 +605,7 @@ class ChampionRecordView(discord.ui.View):
             )
 
         completed = sum(1 for row in rows if row["champion_name"])
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"📋 **{self.match_id}번 경기 입력 현황 "
             f"({completed}/{len(rows)}명)**\n" + "\n".join(lines),
             ephemeral=True
@@ -603,7 +645,7 @@ class ChampionRecordModal(discord.ui.Modal):
             await send_match_operator_only_message(interaction)
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         raw_names = [str(field.value) for field in self.champion_inputs]
 
         try:
@@ -734,7 +776,7 @@ class ChampionRecord(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         resolved = await resolve_champion_or_reply(interaction, 챔피언)
 
         if resolved is None:
