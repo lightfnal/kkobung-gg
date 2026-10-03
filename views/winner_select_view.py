@@ -100,24 +100,31 @@ class WinnerSelectView(discord.ui.View):
         interaction: discord.Interaction,
         winner: str
     ):
+        # Acknowledge before acquiring a lock that may be held by another click.
+        await interaction.response.defer()
+
         self.join_cog.activate_room(
             self.room
         )
 
+        error_message = None
         async with self.selection_lock:
             if self.finished:
-                await interaction.response.send_message(
-                    "❌ 이미 승리팀 선택이 완료되었습니다.",
-                    ephemeral=True
+                error_message = (
+                    "❌ 이미 승리팀 선택이 완료되었습니다."
                 )
-                return
+            else:
+                self.finished = True
 
-            self.finished = True
+                if self.room.current_winner_select_view is self:
+                    self.room.current_winner_select_view = None
 
-            if self.room.current_winner_select_view is self:
-                self.room.current_winner_select_view = None
-
-        await interaction.response.defer()
+        if error_message is not None:
+            await interaction.followup.send(
+                error_message,
+                ephemeral=True
+            )
+            return
 
         for item in self.children:
             item.disabled = True

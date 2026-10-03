@@ -174,6 +174,14 @@ class MVPVoteView(discord.ui.View):
     def make_callback(self, target_id):
 
         async def callback(interaction: discord.Interaction):
+            # Acknowledge immediately; concurrent votes may wait on both locks.
+            await interaction.response.defer()
+
+            error_message = None
+            vote_count = 0
+            player_count = 0
+            should_finish = False
+
             async with self.vote_lock:
                 self.join_cog.activate_room(
                     self.room
@@ -181,89 +189,91 @@ class MVPVoteView(discord.ui.View):
 
                 async with self.room.operation_lock:
                     if self.finished:
-                        await interaction.response.send_message(
-                            "❌ 이미 MVP 투표가 종료되었습니다.",
-                            ephemeral=True
+                        error_message = (
+                            "❌ 이미 MVP 투표가 종료되었습니다."
                         )
-                        return
 
-                    if self.room.current_mvp_vote_view is not self:
-                        await interaction.response.send_message(
+                    elif self.room.current_mvp_vote_view is not self:
+                        error_message = (
                             "❌ 더 최근에 생성된 MVP 투표창이 있습니다.\n"
-                            "가장 최근 메시지의 버튼을 사용해주세요.",
-                            ephemeral=True
+                            "가장 최근 메시지의 버튼을 사용해주세요."
                         )
-                        return
 
-                    if (
+                    elif (
                         not self.room.match_in_progress
                         or not self.room.mvp_vote_in_progress
                         or self.room.current_teams is None
                     ):
-                        await interaction.response.send_message(
-                            "❌ 현재 경기 정보가 더 이상 존재하지 않습니다.",
-                            ephemeral=True
+                        error_message = (
+                            "❌ 현재 경기 정보가 더 이상 존재하지 않습니다."
                         )
-                        return
 
-                    all_players = {
-                        str(user_id)
-                        for team in self.room.current_teams.values()
-                        for user_id in team.values()
-                    }
-                    voter_id = str(interaction.user.id)
+                    else:
+                        all_players = {
+                            str(user_id)
+                            for team in self.room.current_teams.values()
+                            for user_id in team.values()
+                        }
+                        voter_id = str(interaction.user.id)
 
-                    if voter_id not in all_players:
-                        await interaction.response.send_message(
-                            "❌ 현재 경기 참가자만 투표할 수 있습니다.",
-                            ephemeral=True
-                        )
-                        return
+                        if voter_id not in all_players:
+                            error_message = (
+                                "❌ 현재 경기 참가자만 투표할 수 있습니다."
+                            )
 
-                    if voter_id in self.votes:
-                        await interaction.response.send_message(
-                            "❌ 이미 MVP 투표를 완료했습니다.",
-                            ephemeral=True
-                        )
-                        return
+                        elif voter_id in self.votes:
+                            error_message = (
+                                "❌ 이미 MVP 투표를 완료했습니다."
+                            )
 
-                    if voter_id == str(target_id):
-                        await interaction.response.send_message(
-                            "❌ 자신에게는 투표할 수 없습니다.",
-                            ephemeral=True
-                        )
-                        return
+                        elif voter_id == str(target_id):
+                            error_message = (
+                                "❌ 자신에게는 투표할 수 없습니다."
+                            )
 
-                    self.votes[voter_id] = str(target_id)
-                    vote_count = len(self.votes)
-                    player_count = len(all_players)
-                    should_finish = vote_count >= player_count
+                        else:
+                            self.votes[voter_id] = str(target_id)
+                            vote_count = len(self.votes)
+                            player_count = len(all_players)
+                            should_finish = (
+                                player_count > 0
+                                and vote_count >= player_count
+                            )
 
-            # 상태 기록이 끝나면 두 잠금을 모두 해제한 뒤
-            # Discord 네트워크 응답을 처리합니다.
+            if error_message is not None:
+                await interaction.followup.send(
+                    error_message,
+                    ephemeral=True
+                )
+                return
+
             progress_embed = None
             if self.message is not None and self.message.embeds:
-                progress_embed = self.message.embeds[0]
+                progress_embed = self.message.embeds[0].copy()
+                description = progress_embed.description or ""
                 progress_embed.description = (
-                    progress_embed.description.split("📊")[0]
+                    description.split("📊", 1)[0].rstrip()
                     + "\n📊 **현재 투표 현황**\n"
-                    + f"🗳️ {len(self.votes)}/{player_count}명 완료"
+                    + f"🗳️ {vote_count}/{player_count}명 완료"
                 )
 
             if should_finish:
                 for item in self.children:
                     item.disabled = True
 
-                await interaction.response.edit_message(
-                    embed=progress_embed,
-                    view=self
-                )
+                try:
+                    await interaction.edit_original_response(
+                        embed=progress_embed,
+                        view=self
+                    )
+                except discord.HTTPException:
+                    pass
 
-                # 종료 콜백은 room.operation_lock을 다시 사용합니다.
+                # finish_vote_once protects the callback from duplicate runs.
                 await self.finish_vote_once()
                 return
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "✅ MVP 투표가 완료되었습니다.\n"
                 f"현재 투표: {vote_count}/{player_count}명",
                 ephemeral=True
