@@ -180,6 +180,64 @@ class TestMVPVote(
             view.finished
         )
 
+    async def test_vote_acknowledges_before_waiting_for_room_lock(
+        self
+    ):
+        class DummyResponse:
+
+            def __init__(self):
+                self.deferred = False
+
+            async def defer(self):
+                self.deferred = True
+
+        class DummyFollowup:
+
+            async def send(self, *args, **kwargs):
+                return None
+
+        join_cog = DummyJoinCog()
+        join_cog.operation_lock = asyncio.Lock()
+        join_cog.match_in_progress = True
+        join_cog.mvp_vote_in_progress = True
+
+        async def result_callback(votes):
+            return None
+
+        view = MVPVoteView(
+            bot=DummyBot(),
+            join_cog=join_cog,
+            winner="red",
+            callback=result_callback
+        )
+
+        interaction = type(
+            "Interaction",
+            (),
+            {
+                "user": type("User", (), {"id": 2001})(),
+                "response": DummyResponse(),
+                "followup": DummyFollowup(),
+                "message": None
+            }
+        )()
+
+        await join_cog.operation_lock.acquire()
+        task = asyncio.create_task(
+            view.children[0].callback(interaction)
+        )
+
+        try:
+            await asyncio.sleep(0)
+            self.assertTrue(
+                interaction.response.deferred,
+                "the interaction must be acknowledged while the room lock is held"
+            )
+        finally:
+            join_cog.operation_lock.release()
+
+        await task
+
     async def test_timeout_runs_callback_once(
         self
     ):
