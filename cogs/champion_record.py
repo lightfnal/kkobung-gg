@@ -329,10 +329,10 @@ class CombinedChampionRecordModal(discord.ui.Modal):
                 or blue_player["discord_id"]
             )
             field = discord.ui.TextInput(
-                label=f"{position} · {red_name[:12]} ↔ {blue_name[:12]}",
-                placeholder="레드 챔피언 / 블루 챔피언",
+                label=f"배정 {position} · {red_name[:12]} ↔ {blue_name[:12]}",
+                placeholder="레드챔피언@실제포지션 / 블루챔피언",
                 required=True,
-                max_length=65
+                max_length=80
             )
             self.champion_inputs.append(field)
             self.add_item(field)
@@ -351,17 +351,47 @@ class CombinedChampionRecordModal(discord.ui.Modal):
             if not separator or not red_name.strip() or not blue_name.strip():
                 await interaction.followup.send(
                     "❌ 모든 칸을 `레드 챔피언 / 블루 챔피언` "
-                    "형식으로 입력해주세요.\n예: `나서스 / 레넥톤`",
+                    "형식으로 입력해주세요. 실제 포지션을 바꿔 뛴 선수는 "
+                    "`챔피언@포지션`으로 적으세요.\n"
+                    "예: `레넥톤@TOP / 케이틀린@ADC`",
                     ephemeral=True
                 )
                 return
 
-            parsed_pairs.append((red_name.strip(), blue_name.strip()))
+            def parse_champion_and_position(value):
+                value = value.strip()
+                if "@" not in value:
+                    return value, None
+
+                champion_name, actual_position = value.rsplit("@", 1)
+                aliases = {
+                    "탑": "TOP", "정글": "JUNGLE", "미드": "MID",
+                    "원딜": "ADC", "바텀": "ADC", "서폿": "SUPPORT",
+                    "서포터": "SUPPORT"
+                }
+                actual_position = actual_position.strip().upper()
+                actual_position = aliases.get(actual_position.lower(), actual_position)
+                valid_positions = {"TOP", "JUNGLE", "MID", "ADC", "SUPPORT"}
+                if actual_position not in valid_positions or not champion_name.strip():
+                    return None, None
+                return champion_name.strip(), actual_position
+
+            red_entry = parse_champion_and_position(red_name)
+            blue_entry = parse_champion_and_position(blue_name)
+            if red_entry[0] is None or blue_entry[0] is None:
+                await interaction.followup.send(
+                    "❌ 실제 포지션을 확인해주세요. "
+                    "TOP/JUNGLE/MID/ADC/SUPPORT 또는 탑/정글/미드/원딜/서폿을 입력하세요.",
+                    ephemeral=True
+                )
+                return
+
+            parsed_pairs.append((red_entry, blue_entry))
 
         raw_names = [
-            name
+            entry[0]
             for pair in parsed_pairs
-            for name in pair
+            for entry in pair
         ]
 
         try:
@@ -401,20 +431,35 @@ class CombinedChampionRecordModal(discord.ui.Modal):
             blue_champion = resolved[index * 2 + 1]
             red_record = dict(red_champion)
             red_record["discord_id"] = str(red_player["discord_id"])
-            red_record["actual_position"] = str(
+            red_entry, blue_entry = parsed_pairs[index]
+            red_actual_position = red_entry[1] or str(
                 red_player.get("position") or ""
             ).upper()
-            blue_record = dict(blue_champion)
-            blue_record["discord_id"] = str(blue_player["discord_id"])
-            blue_record["actual_position"] = str(
+            blue_actual_position = blue_entry[1] or str(
                 blue_player.get("position") or ""
             ).upper()
+            red_record["actual_position"] = red_actual_position
+            blue_record = dict(blue_champion)
+            blue_record["discord_id"] = str(blue_player["discord_id"])
+            blue_record["actual_position"] = blue_actual_position
             red_records.append(red_record)
             blue_records.append(blue_record)
+            red_label_position = str(red_player.get("position") or "미정").upper()
+            red_display_name = (
+                red_player.get("discord_nickname")
+                or red_player.get("riot_name")
+                or red_player["discord_id"]
+            )
+            blue_display_name = (
+                blue_player.get("discord_nickname")
+                or blue_player.get("riot_name")
+                or blue_player["discord_id"]
+            )
             result_lines.append(
-                f"• **{red_player.get('position') or '미정'}** "
-                f"{red_champion['champion_name']} / "
-                f"{blue_champion['champion_name']}"
+                f"• 배정 {red_label_position}: "
+                f"{red_display_name} — {red_champion['champion_name']} "
+                f"({red_actual_position}) / {blue_display_name} — "
+                f"{blue_champion['champion_name']} ({blue_actual_position})"
             )
 
         try:
@@ -703,10 +748,9 @@ class ChampionRecord(commands.Cog):
         )
 
         try:
-            teams = await asyncio.to_thread(
-                get_both_team_players,
-                경기번호
-            )
+            # sqlite_db uses a module-level sqlite connection created on this
+            # thread. Do not pass its cursor to asyncio.to_thread.
+            teams = get_both_team_players(경기번호)
         except Exception as error:
             logger.exception(
                 "양 팀 챔피언 입력 준비 실패 | 경기=%s",
@@ -714,7 +758,8 @@ class ChampionRecord(commands.Cog):
             )
             await interaction.followup.send(
                 "❌ 참가자 정보를 불러오지 못했습니다.\n"
-                f"오류 종류: `{type(error).__name__}`",
+                f"오류 종류: `{type(error).__name__}`\n"
+                f"내용: `{str(error)[:180]}`",
                 ephemeral=True
             )
             return
@@ -741,4 +786,5 @@ class ChampionRecord(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ChampionRecord(bot))
+
 
