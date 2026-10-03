@@ -9271,3 +9271,35 @@ nav a:hover{
     }
 }
 
+
+
+/* Recent champion cards on player profiles */
+.recent-champion-section{margin-top:24px}
+.recent-champion-header{margin-bottom:12px}
+.recent-champion-header h3{margin:0;color:var(--text);font-size:19px}
+.recent-champion-header p{margin:5px 0 0;color:var(--muted);font-size:13px}
+.recent-champion-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.recent-champion-card{display:grid;grid-template-columns:54px minmax(0,1fr) auto;align-items:center;gap:11px;min-width:0;padding:12px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--muted);border-radius:11px;text-decoration:none;transition:background var(--transition),border-color var(--transition),transform var(--transition)}
+.recent-champion-card:hover{color:var(--text);background:var(--surface-3);transform:translateY(-1px)}
+.recent-champion-win{border-left-color:var(--green)}
+.recent-champion-loss{border-left-color:var(--red)}
+.recent-champion-image-wrap{width:54px;height:54px;overflow:hidden;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)}
+.recent-champion-image{display:block;width:100%;height:100%;object-fit:cover}
+.recent-champion-placeholder{display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:var(--muted);font-size:21px}
+.recent-champion-info{display:grid;gap:3px;min-width:0}
+.recent-champion-info strong,.recent-champion-match,.recent-champion-position{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-champion-info strong{color:var(--text);font-size:15px}
+.recent-champion-match,.recent-champion-position{color:var(--muted);font-size:11px}
+.recent-champion-result{display:grid;justify-items:end;gap:4px;white-space:nowrap}
+.recent-champion-result-win{color:var(--green)}
+.recent-champion-result-loss{color:var(--red)}
+.recent-champion-lp{color:var(--muted);font-size:11px}
+.recent-champion-lp-up{color:var(--green)}
+.recent-champion-lp-down{color:var(--red)}
+@media(max-width:620px){
+    .recent-champion-list{grid-template-columns:1fr}
+    .recent-champion-card{grid-template-columns:48px minmax(0,1fr) auto;gap:9px;padding:10px}
+    .recent-champion-image-wrap{width:48px;height:48px}
+    .recent-champion-info strong{font-size:14px}
+}
+
