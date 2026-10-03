@@ -486,12 +486,18 @@ def player_detail(
                     mp.position,
                     mp.rating_before,
                     mp.rating_after,
-                    mp.rating_change
+                    mp.rating_change,
+                    mpc.champion_name,
+                    mpc.champion_image_url
 
                 FROM match_players mp
 
                 JOIN matches m
                     ON m.id = mp.match_id
+
+                LEFT JOIN match_player_champions mpc
+                    ON mpc.match_id = mp.match_id
+                   AND mpc.discord_id = mp.discord_id
 
                 WHERE mp.discord_id = ?
                   AND m.season_id = ?
@@ -1078,3 +1084,4 @@ def player_detail(
                 positions
         }
     )
+
