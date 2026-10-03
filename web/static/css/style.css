@@ -9193,3 +9193,81 @@ nav a:hover{
     .season-summary-grid{grid-template-columns:1fr 1fr;gap:12px}
     .season-summary-card{min-height:160px;padding:16px}
 }
+
+
+/* Champion portraits in the match detail participant rows */
+.match-player-identity{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-width:0;
+}
+
+.match-champion-portrait,
+.match-champion-placeholder{
+    display:flex;
+    flex:0 0 48px;
+    align-items:center;
+    justify-content:center;
+    width:48px;
+    height:48px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:var(--surface-3);
+}
+
+.match-champion-portrait{
+    object-fit:cover;
+}
+
+.match-champion-placeholder{
+    color:var(--muted);
+    font-size:20px;
+}
+
+.match-player-name{
+    min-width:0;
+}
+
+.match-player-name a{
+    overflow-wrap:anywhere;
+}
+
+@media(max-width:620px){
+    .match-player-row{
+        grid-template-columns:74px minmax(0,1fr) 88px;
+        gap:8px;
+        padding:14px 4px;
+    }
+
+    .match-champion-portrait,
+    .match-champion-placeholder{
+        flex-basis:40px;
+        width:40px;
+        height:40px;
+        border-radius:8px;
+    }
+
+    .match-player-identity{
+        gap:8px;
+    }
+
+    .match-player-name{
+        font-size:14px;
+    }
+
+    .match-player-sub{
+        font-size:11px;
+        overflow-wrap:anywhere;
+    }
+
+    .match-player-rating{
+        font-size:11px;
+    }
+
+    .match-player-rating .lp-plus,
+    .match-player-rating .lp-minus{
+        font-size:15px;
+    }
+}
+
