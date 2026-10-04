@@ -68,12 +68,6 @@ def print_result(
         result["best_win_streak_after"]
     )
 
-    print(
-        "MVP:",
-        result["mvp_before"],
-        "→",
-        result["mvp_after"]
-    )
 
     print(
         "티어:",
@@ -108,7 +102,6 @@ base_profile = {
     "lose_streak": 0,
     "best_win_streak": 0,
 
-    "mvp": 0
 }
 
 
@@ -122,8 +115,7 @@ result1 = RatingService.process_match_result(
     won=True,
     team_avg_rating=1000,
     enemy_avg_rating=1000,
-    enemy_avg_mmr=1000,
-    is_mvp=False
+    enemy_avg_mmr=1000
 )
 
 print_result(
@@ -142,8 +134,7 @@ result2 = RatingService.process_match_result(
     won=False,
     team_avg_rating=1000,
     enemy_avg_rating=1000,
-    enemy_avg_mmr=1000,
-    is_mvp=False
+    enemy_avg_mmr=1000
 )
 
 print_result(
@@ -154,7 +145,7 @@ print_result(
 
 # ============================================================
 # 테스트 3
-# MVP 승리
+# 기본 승리
 # ============================================================
 
 result3 = RatingService.process_match_result(
@@ -162,12 +153,11 @@ result3 = RatingService.process_match_result(
     won=True,
     team_avg_rating=1000,
     enemy_avg_rating=1000,
-    enemy_avg_mmr=1000,
-    is_mvp=True
+    enemy_avg_mmr=1000
 )
 
 print_result(
-    "테스트 3 - MVP 승리",
+    "테스트 3 - 기본 승리",
     result3
 )
 
@@ -196,8 +186,7 @@ result4 = RatingService.process_match_result(
     won=True,
     team_avg_rating=1100,
     enemy_avg_rating=1100,
-    enemy_avg_mmr=1100,
-    is_mvp=False
+    enemy_avg_mmr=1100
 )
 
 print_result(
@@ -230,8 +219,7 @@ result5 = RatingService.process_match_result(
     won=True,
     team_avg_rating=1200,
     enemy_avg_rating=1200,
-    enemy_avg_mmr=1200,
-    is_mvp=False
+    enemy_avg_mmr=1200
 )
 
 print_result(
@@ -264,8 +252,7 @@ result6 = RatingService.process_match_result(
     won=False,
     team_avg_rating=1050,
     enemy_avg_rating=1050,
-    enemy_avg_mmr=1050,
-    is_mvp=False
+    enemy_avg_mmr=1050
 )
 
 print_result(
@@ -293,8 +280,7 @@ result7 = RatingService.process_match_result(
     won=True,
     team_avg_rating=1000,
     enemy_avg_rating=1000,
-    enemy_avg_mmr=1100,
-    is_mvp=False
+    enemy_avg_mmr=1100
 )
 
 print_result(
@@ -321,8 +307,7 @@ RatingService.process_match_result(
     won=True,
     team_avg_rating=1000,
     enemy_avg_rating=1000,
-    enemy_avg_mmr=1000,
-    is_mvp=True
+    enemy_avg_mmr=1000
 )
 
 print()
@@ -358,7 +343,6 @@ assert result2["losses_after"] == 1
 assert result2["win_streak_after"] == 0
 assert result2["lose_streak_after"] == 1
 
-assert result3["mvp_after"] == 1
 
 assert result4["win_streak_after"] == 3
 

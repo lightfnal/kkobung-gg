@@ -10,7 +10,6 @@ def make_player(
     win_streak=0,
     lose_streak=0,
     best_win_streak=0,
-    mvp=0,
     placement_games=0
 ):
     return {
@@ -25,7 +24,6 @@ def make_player(
         "win_streak": win_streak,
         "lose_streak": lose_streak,
         "best_win_streak": best_win_streak,
-        "mvp": mvp
     }
 
 
@@ -107,7 +105,6 @@ loser_players = [
     "10"
 ]
 
-mvp_id = "2"
 
 
 # ============================================================
@@ -177,8 +174,7 @@ for user_id in winner_players:
         won=True,
         team_avg_rating=winner_avg,
         enemy_avg_rating=loser_avg,
-        enemy_avg_mmr=loser_mmr_avg,
-        is_mvp=(user_id == mvp_id)
+        enemy_avg_mmr=loser_mmr_avg
     )
 
     results[user_id] = result
@@ -195,8 +191,7 @@ for user_id in loser_players:
         won=False,
         team_avg_rating=loser_avg,
         enemy_avg_rating=winner_avg,
-        enemy_avg_mmr=winner_mmr_avg,
-        is_mvp=False
+        enemy_avg_mmr=winner_mmr_avg
     )
 
     results[user_id] = result
@@ -222,16 +217,11 @@ for user_id in winner_players + loser_players:
         else "패배"
     )
 
-    mvp_text = (
-        " / MVP"
-        if result["is_mvp"]
-        else ""
-    )
 
     print()
     print(
         f"[{user_id}] "
-        f"{status}{mvp_text}"
+        f"{status}"
     )
 
     print(
@@ -273,12 +263,6 @@ for user_id in winner_players + loser_players:
         result["lose_streak_after"]
     )
 
-    print(
-        "MVP:",
-        result["mvp_before"],
-        "→",
-        result["mvp_after"]
-    )
 
 
 # ============================================================
@@ -341,41 +325,7 @@ for user_id in loser_players:
     )
 
 
-# MVP는 딱 1명만 증가
-mvp_increase_count = sum(
-    1
-    for result in results.values()
-    if (
-        result["mvp_after"]
-        ==
-        result["mvp_before"] + 1
-    )
-)
-
-assert mvp_increase_count == 1
-
-assert (
-    results[mvp_id]["mvp_after"]
-    ==
-    results[mvp_id]["mvp_before"] + 1
-)
-
-
-# MVP가 아닌 선수는 MVP 유지
-for user_id, result in results.items():
-
-    if user_id == mvp_id:
-        continue
-
-    assert (
-        result["mvp_after"]
-        ==
-        result["mvp_before"]
-    )
-
-
 # 원본 프로필이 변경되지 않았는지 확인
-assert profiles["2"]["mvp"] == 0
 assert profiles["2"]["wins"] == 0
 assert profiles["2"]["win_streak"] == 2
 
