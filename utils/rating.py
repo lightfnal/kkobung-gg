@@ -1,7 +1,6 @@
 from config import (
     RATING_WIN_BASE,
     RATING_LOSS_BASE,
-    RATING_MVP_BONUS,
     RATING_PARTICIPATION_BONUS,
     RATING_MIN_WIN,
     RATING_MAX_WIN,
@@ -140,7 +139,6 @@ def calculate_rating_change(
     team_avg_rating,
     enemy_avg_rating,
     win_streak=0,
-    is_mvp=False
 ):
     """
     새로운 공개 레이팅 변동값을 계산합니다.
@@ -148,7 +146,6 @@ def calculate_rating_change(
     반영 요소:
     - 기본 승리 또는 패배 점수
     - 참가 보너스
-    - MVP 보너스
     - 연승 보너스
     - 언더독 승리 보너스
     - 최소·최대 변동 제한
@@ -164,10 +161,6 @@ def calculate_rating_change(
 
     # 경기 참가 보너스는 승패와 관계없이 적용
     change += RATING_PARTICIPATION_BONUS
-
-    # MVP는 승리팀 선수에게만 적용
-    if won and is_mvp:
-        change += RATING_MVP_BONUS
 
     # 연승 보너스는 승리했을 때만 적용
     if won:
