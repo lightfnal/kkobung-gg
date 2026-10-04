@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import discord
 
 from config import (
@@ -406,18 +407,21 @@ class CaptainSetupView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
-        first_pick_view = CaptainFirstPickView(
+        captain_ids = list(self.selected_captains)
+        random.shuffle(captain_ids)
+        draft_view = CaptainDraftView(
             self.recruit_view,
             self.player_ids,
             self.profiles,
-            captain1=self.selected_captains[0],
-            captain2=self.selected_captains[1]
+            red_captain=captain_ids[0],
+            blue_captain=captain_ids[1]
         )
+        embed = draft_view.create_embed()
         message, _ = await self.join_cog.send_output_message(
             room=self.room,
             fallback_channel=interaction.channel,
-            embed=first_pick_view.create_embed(),
-            view=first_pick_view
+            embed=embed,
+            view=draft_view
         )
         if message is None:
             self.recruit_view.team_generating = False
@@ -428,7 +432,7 @@ class CaptainSetupView(discord.ui.View):
                 ephemeral=True
             )
             return
-        first_pick_view.message = message
+        draft_view.message = message
         if interaction.message is not None:
             try:
                 await interaction.message.edit(
@@ -438,161 +442,15 @@ class CaptainSetupView(discord.ui.View):
             except discord.HTTPException:
                 pass
         await interaction.followup.send(
-            "✅ 캡틴들에게 첫 픽 담당을 합의해달라고 안내했습니다.\n"
-            f"진행 메시지: {message.jump_url}",
+            f"✅ 캡틴 드래프트를 시작했습니다. 진행 메시지: {message.jump_url}",
             ephemeral=True
         )
-
-
-class FirstPickButton(discord.ui.Button):
-    def __init__(self, first_pick_view, side, label):
-        self.first_pick_view = first_pick_view
-        self.side = side
-        super().__init__(
-            label=label,
-            style=discord.ButtonStyle.primary
-        )
-
-    async def callback(self, interaction):
-        await self.first_pick_view.vote(interaction, self.side)
-
-
-class CaptainFirstPickView(discord.ui.View):
-    """두 캡틴이 같은 첫 픽 담당자를 골라 드래프트를 시작합니다."""
-
-    def __init__(self, recruit_view, player_ids, profiles, captain1, captain2):
-        super().__init__(timeout=1800)
-        self.recruit_view = recruit_view
-        self.join_cog = recruit_view.join_cog
-        self.room = recruit_view.room
-        self.player_ids = list(player_ids)
-        self.profiles = profiles
-        self.captains = {"red": captain1, "blue": captain2}
-        self.votes = {}
-        self.message = None
-        self.add_item(FirstPickButton(self, "red", "캡틴1이 첫 픽"))
-        self.add_item(FirstPickButton(self, "blue", "캡틴2가 첫 픽"))
-        cancel = discord.ui.Button(
-            label="드래프트 취소",
-            emoji="⏹️",
-            style=discord.ButtonStyle.danger,
-            row=1
-        )
-        cancel.callback = self.cancel_button
-        self.add_item(cancel)
-
-    def create_embed(self):
-        red_vote = self.votes.get(self.captains["red"], "아직 선택 안 함")
-        blue_vote = self.votes.get(self.captains["blue"], "아직 선택 안 함")
-        vote_name = {"red": "캡틴1 선픽", "blue": "캡틴2 선픽"}
-        embed = discord.Embed(
-            title=f"🎖️ {self.room.room_name} · 첫 픽 캡틴 합의",
-            description=(
-                f"캡틴1: <@{self.captains['red']}>\n"
-                f"캡틴2: <@{self.captains['blue']}>\n\n"
-                "두 캡틴이 같은 선택 버튼을 눌러 첫 픽 담당을 정하세요."
-            )
-        )
-        embed.add_field(
-            name="캡틴1 선택",
-            value=vote_name.get(red_vote, red_vote),
-            inline=True
-        )
-        embed.add_field(
-            name="캡틴2 선택",
-            value=vote_name.get(blue_vote, blue_vote),
-            inline=True
-        )
-        embed.set_footer(text="합의되면 1-2-2-2-1 순서로 드래프트가 시작됩니다.")
-        return embed
-
-    async def vote(self, interaction, side):
-        user_id = str(interaction.user.id)
-        if user_id not in self.captains.values():
-            await interaction.response.send_message(
-                "❌ 첫 픽 담당은 두 캡틴이 직접 정해야 합니다.",
-                ephemeral=True
-            )
-            return
-        if (
-            list(self.room.players.keys()) != self.player_ids
-            or self.room.current_teams is not None
-            or self.room.match_in_progress
-        ):
-            await interaction.response.defer(ephemeral=True)
-            await self.abort("참가자 명단이 변경되어 드래프트가 취소되었습니다.")
-            await interaction.followup.send(
-                "❌ 참가자 명단이 바뀌어 드래프트를 취소했습니다.",
-                ephemeral=True
-            )
-            return
-
-        self.votes[user_id] = side
-        if (
-            len(self.votes) == 2
-            and len(set(self.votes.values())) == 1
-        ):
-            first_side = side
-            draft_view = CaptainDraftView(
-                self.recruit_view,
-                self.player_ids,
-                self.profiles,
-                red_captain=self.captains["red"],
-                blue_captain=self.captains["blue"],
-                first_side=first_side
-            )
-            draft_view.message = self.message
-            self.stop()
-            await interaction.response.edit_message(
-                embed=draft_view.create_embed(),
-                view=draft_view
-            )
-            return
-
-        await interaction.response.edit_message(
-            embed=self.create_embed(),
-            view=self
-        )
-
-    async def cancel_button(self, interaction):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
-            return
-        await interaction.response.defer(ephemeral=True)
-        await self.abort("관리자가 캡틴 드래프트를 취소했습니다.")
-        await interaction.followup.send(
-            "✅ 드래프트를 취소했습니다.",
-            ephemeral=True
-        )
-
-    async def abort(self, reason):
-        self.stop()
-        self.recruit_view.team_generating = False
-        self.recruit_view.recruit_closed = getattr(
-            self.recruit_view,
-            "_draft_was_closed",
-            False
-        )
-        await self.recruit_view.restore_recruitment_controls()
-        if self.message is not None:
-            try:
-                await self.message.edit(
-                    content=f"⏹️ {reason}",
-                    embed=None,
-                    view=None
-                )
-            except discord.HTTPException:
-                pass
-
-    async def on_timeout(self):
-        await self.abort("30분 동안 캡틴 간 합의가 없어 드래프트가 종료되었습니다.")
 
 
 class DraftPlayerSelect(discord.ui.Select):
     def __init__(self, draft_view):
         self.draft_view = draft_view
         side = draft_view.current_side
-        pick_size = draft_view.current_pick_size
         remaining = [
             user_id for user_id in draft_view.player_ids
             if user_id not in draft_view.red_team
@@ -610,30 +468,20 @@ class DraftPlayerSelect(discord.ui.Select):
         super().__init__(
             placeholder=(
                 f"{'🔴 레드팀' if side == 'red' else '🔵 블루팀'} 차례 — "
-                f"<@{captain_id}> {pick_size}명 선택"
+                f"<@{captain_id}> 선택"
             )[:150],
-            min_values=pick_size,
-            max_values=pick_size,
+            min_values=1,
+            max_values=1,
             options=options,
             disabled=not options
         )
 
     async def callback(self, interaction):
-        await self.draft_view.pick_players(interaction, list(self.values))
+        await self.draft_view.pick_player(interaction, self.values[0])
 
 
 class CaptainDraftView(discord.ui.View):
-    PICK_PATTERN = (1, 2, 2, 2, 1)
-
-    def __init__(
-        self,
-        recruit_view,
-        player_ids,
-        profiles,
-        red_captain,
-        blue_captain,
-        first_side="red"
-    ):
+    def __init__(self, recruit_view, player_ids, profiles, red_captain, blue_captain):
         super().__init__(timeout=1800)
         self.recruit_view = recruit_view
         self.join_cog = recruit_view.join_cog
@@ -643,20 +491,13 @@ class CaptainDraftView(discord.ui.View):
         self.captains = {"red": red_captain, "blue": blue_captain}
         self.red_team = [red_captain]
         self.blue_team = [blue_captain]
-        self.first_side = first_side
-        self.turn_index = 0
+        self.pick_count = 0
         self.message = None
         self._refresh_controls()
 
     @property
     def current_side(self):
-        if self.turn_index % 2 == 0:
-            return self.first_side
-        return "blue" if self.first_side == "red" else "red"
-
-    @property
-    def current_pick_size(self):
-        return self.PICK_PATTERN[self.turn_index]
+        return "red" if self.pick_count % 2 == 0 else "blue"
 
     def _refresh_controls(self):
         self.clear_items()
@@ -679,9 +520,8 @@ class CaptainDraftView(discord.ui.View):
             description=(
                 f"현재 선택 차례: **{side_text}** — "
                 f"<@{self.captains[self.current_side]}>\n"
-                f"이번 선택 인원: **{self.current_pick_size}명**\n"
                 f"남은 선수: **{remaining}명**\n\n"
-                "해당 팀 캡틴이 아래 목록에서 필요한 인원을 한 번에 선택하세요."
+                "해당 팀 캡틴이 아래 목록에서 다음 선수를 선택하세요."
             )
         )
         for side, team, label in (
@@ -695,10 +535,10 @@ class CaptainDraftView(discord.ui.View):
                 value="\n".join(picks) or "아직 선택한 선수가 없습니다.",
                 inline=True
             )
-        embed.set_footer(text="선택 순서: 1명 → 2명 → 2명 → 2명 → 마지막 1명")
+        embed.set_footer(text="캡틴은 레드·블루 번갈아 한 명씩 선택합니다.")
         return embed
 
-    async def pick_players(self, interaction, user_ids):
+    async def pick_player(self, interaction, user_id):
         expected_captain = self.captains[self.current_side]
         if str(interaction.user.id) != expected_captain and not is_admin(interaction):
             await interaction.response.send_message(
@@ -706,18 +546,9 @@ class CaptainDraftView(discord.ui.View):
                 ephemeral=True
             )
             return
-        if len(user_ids) != self.current_pick_size:
+        if user_id in self.red_team or user_id in self.blue_team:
             await interaction.response.send_message(
-                f"❌ 이번 차례에는 {self.current_pick_size}명을 선택해야 합니다.",
-                ephemeral=True
-            )
-            return
-        if any(
-            user_id in self.red_team or user_id in self.blue_team
-            for user_id in user_ids
-        ):
-            await interaction.response.send_message(
-                "❌ 이미 선택된 참가자가 포함되어 있습니다.",
+                "❌ 이미 선택된 참가자입니다.",
                 ephemeral=True
             )
             return
@@ -730,9 +561,9 @@ class CaptainDraftView(discord.ui.View):
             await self.abort("참가자 명단이나 팀 상태가 변경되어 드래프트가 취소되었습니다.")
             return
         side = self.current_side
-        (self.red_team if side == "red" else self.blue_team).extend(user_ids)
-        self.turn_index += 1
-        if self.turn_index >= len(self.PICK_PATTERN):
+        (self.red_team if side == "red" else self.blue_team).append(user_id)
+        self.pick_count += 1
+        if len(self.red_team) == 5 and len(self.blue_team) == 5:
             await interaction.response.defer()
             await self.finish_draft()
             return
