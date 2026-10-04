@@ -96,60 +96,7 @@
 
     <!-- MVP -->
 
-    <div
-        id="seasonMvpCard"
-        class="season-summary-card"
-    >
-
-        <div class="season-summary-icon">
-            ⭐
-        </div>
-
-        <div class="season-summary-label">
-            시즌 MVP
-        </div>
-
-
-        <div id="seasonMvpContent">
-
-            {% if season_mvp %}
-
-                {% if season_mvp.player_id %}
-
-                    <a
-                        href="/player/{{ season_mvp.player_id }}"
-                        class="season-highlight-player"
-                    >
-                        {{
-                            season_mvp.discord_nickname
-                            or "알 수 없는 플레이어"
-                        }}
-                    </a>
-
-                {% else %}
-
-                    <div class="season-highlight-player">
-                        알 수 없는 플레이어
-                    </div>
-
-                {% endif %}
-
-
-                <div class="season-summary-sub">
-                    MVP {{ season_mvp.mvp }}회
-                </div>
-
-            {% else %}
-
-                <div class="season-summary-value">
-                    -
-                </div>
-
-            {% endif %}
-
-        </div>
-
-    </div>
+    
 
 
     <!-- 최고 연승 -->
@@ -403,9 +350,6 @@
                 현재 흐름
             </div>
 
-            <div>
-                MVP
-            </div>
 
         </div>
 
@@ -614,19 +558,7 @@
 
                 <!-- MVP -->
 
-                <div class="season-mvp-count">
-
-                    {% if player.mvp > 0 %}
-
-                        ⭐ {{ player.mvp }}
-
-                    {% else %}
-
-                        -
-
-                    {% endif %}
-
-                </div>
+                
 
             </div>
 
@@ -1569,9 +1501,6 @@ document.addEventListener(
                                 현재 흐름
                             </div>
 
-                            <div>
-                                MVP
-                            </div>
 
                         </div>
 

@@ -405,35 +405,7 @@ document.querySelectorAll(".player-select-search").forEach((input) => {
 
         <!-- MVP -->
 
-        <div class="compare-stat-row">
-
-            <div
-                class="
-                    compare-stat-value
-                    {% if player1_data.mvp_count > player2_data.mvp_count %}
-                        compare-stat-winner
-                    {% endif %}
-                "
-            >
-                ⭐ {{ player1_data.mvp_count }}
-            </div>
-
-            <div class="compare-stat-label">
-                MVP
-            </div>
-
-            <div
-                class="
-                    compare-stat-value
-                    {% if player2_data.mvp_count > player1_data.mvp_count %}
-                        compare-stat-winner
-                    {% endif %}
-                "
-            >
-                ⭐ {{ player2_data.mvp_count }}
-            </div>
-
-        </div>
+        
 
 
         <!-- 최고 연승 -->
