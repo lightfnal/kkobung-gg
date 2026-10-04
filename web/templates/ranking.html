@@ -23,11 +23,11 @@
 <div class="ranking-header">
 
     <h1>
-        🏆 전체 랭킹
+        🏆 {{ active_season_name or '시즌 랭킹' }} 랭킹
     </h1>
 
     <p>
-        현재 공개 레이팅을 기준으로 한 전체 플레이어 순위입니다.
+        현재 시즌 공개 레이팅을 기준으로 한 플레이어 순위입니다.
     </p>
 
 </div>
@@ -1323,3 +1323,4 @@ document.addEventListener(
 </script>
 
 {% endblock %}
+

@@ -35,7 +35,7 @@
     <div class="rating-box">
 
         <div class="rating-title">
-            레이팅
+            시즌 레이팅
         </div>
 
         <div class="rating-score">
@@ -60,7 +60,7 @@
         </div>
 
         <div class="player-rank-value">
-            #{{ player_rank }}
+            #{{ player_rank if player_rank else '—' }}
         </div>
 
     </div>
@@ -69,7 +69,7 @@
     <div class="player-rank-card">
 
         <div class="player-rank-label">
-            👥 전체 플레이어
+            👥 시즌 참가자
         </div>
 
         <div class="player-rank-value">
@@ -349,7 +349,7 @@
     <div class="stat-card">
 
         <h3>
-            전체 전적
+            시즌 전적
         </h3>
 
         <p>
@@ -391,7 +391,7 @@
     <div class="stat-card">
 
         <h3>
-            전체 MVP
+            시즌 MVP
         </h3>
 
         <p>
@@ -1923,4 +1923,5 @@ new Chart(
 {% endif %}
 
 {% endblock %}
+
 
