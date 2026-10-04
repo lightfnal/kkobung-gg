@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 AUCTION_TEAM_BUDGET = 1000
 AUCTION_MIN_BID = 50
 AUCTION_BID_STEP = 50
-AUCTION_LOT_SECONDS = 15
+AUCTION_LOT_SECONDS = 10
 
 
     
@@ -603,6 +603,19 @@ class AuctionBidButton(discord.ui.Button):
         )
 
 
+class AuctionRetryButton(discord.ui.Button):
+    def __init__(self, auction_view):
+        self.auction_view = auction_view
+        super().__init__(
+            label="후순위 재입찰 시작",
+            emoji="🔁",
+            style=discord.ButtonStyle.success
+        )
+
+    async def callback(self, interaction):
+        await self.auction_view.retry_unsold_players(interaction)
+
+
 class AuctionView(discord.ui.View):
     """두 캡틴이 가상 포인트로 선수 8명을 영입하는 경매입니다."""
 
@@ -633,7 +646,10 @@ class AuctionView(discord.ui.View):
             if user_id not in (red_captain, blue_captain)
         ]
         random.shuffle(self.lots)
+        self.unsold_players = []
+        self.auction_round = 1
         self.lot_index = 0
+        self._lot_token = 0
         self.current_bid = 0
         self.current_bidder = None
         self._auction_lock = asyncio.Lock()
@@ -646,8 +662,18 @@ class AuctionView(discord.ui.View):
     def _refresh_controls(self):
         self.clear_items()
         if self.lot_index < len(self.lots) and not self._finished:
-            self.add_item(AuctionBidButton(self, "red", self.lot_index))
-            self.add_item(AuctionBidButton(self, "blue", self.lot_index))
+            self.add_item(AuctionBidButton(self, "red", self._lot_token))
+            self.add_item(AuctionBidButton(self, "blue", self._lot_token))
+            cancel = discord.ui.Button(
+                label="경매 취소",
+                emoji="⏹️",
+                style=discord.ButtonStyle.danger,
+                row=1
+            )
+            cancel.callback = self.cancel_button
+            self.add_item(cancel)
+        elif self.unsold_players and not self._finished:
+            self.add_item(AuctionRetryButton(self))
             cancel = discord.ui.Button(
                 label="경매 취소",
                 emoji="⏹️",
@@ -681,13 +707,25 @@ class AuctionView(discord.ui.View):
                     f"다음 입찰: **{next_bid}점**"
                 )
             auction_description = (
-                f"경매 대상 **{self.lot_index + 1}/{len(self.lots)}**\n"
+                f"{'본 경매' if self.auction_round == 1 else f'후순위 입찰 {self.auction_round - 1}회차'} · "
+                f"대상 **{self.lot_index + 1}/{len(self.lots)}**\n"
                 f"{self._player_label(current_player)}\n\n"
                 f"{bidding_text}\n"
                 f"입찰 시간은 {AUCTION_LOT_SECONDS}초이며, 입찰할 때마다 초기화됩니다."
             )
         else:
-            auction_description = "경매 결과를 정리하고 있습니다…"
+            if self.unsold_players:
+                unsold_mentions = "\n".join(
+                    f"• {self._player_label(user_id)}"
+                    for user_id in self.unsold_players
+                )
+                auction_description = (
+                    "후순위 입찰에서도 유찰된 선수입니다.\n"
+                    "아래 버튼으로 재입찰을 시작하거나 경매를 취소해주세요.\n\n"
+                    f"{unsold_mentions}"
+                )
+            else:
+                auction_description = "경매 결과를 정리하고 있습니다…"
 
         embed = discord.Embed(
             title=f"🔨 {self.room.room_name} · 선수 경매",
@@ -718,8 +756,8 @@ class AuctionView(discord.ui.View):
             )
         embed.set_footer(
             text=(
-                "선수 순서는 무작위입니다. 캡틴만 입찰할 수 있으며, 무입찰 선수는 "
-                "최소가로 현재 인원이 적은 팀에 자동 배정됩니다."
+                "선수 순서는 무작위입니다. 캡틴만 입찰할 수 있습니다. "
+                "유찰 선수는 후순위 입찰로 넘어가며 자동 배정되지 않습니다."
             )
         )
         return embed
@@ -730,7 +768,7 @@ class AuctionView(discord.ui.View):
         if old_task is not None and old_task is not current_task:
             old_task.cancel()
         if self.lot_index < len(self.lots) and not self._finished:
-            token = self.lot_index
+            token = self._lot_token
             self._timer_task = asyncio.create_task(
                 self._close_lot_after_timeout(token)
             )
@@ -739,7 +777,7 @@ class AuctionView(discord.ui.View):
         try:
             await asyncio.sleep(AUCTION_LOT_SECONDS)
             async with self._auction_lock:
-                if self._finished or expected_lot != self.lot_index:
+                if self._finished or expected_lot != self._lot_token:
                     return
                 await self._close_current_lot()
         except asyncio.CancelledError:
@@ -758,7 +796,7 @@ class AuctionView(discord.ui.View):
                     ephemeral=True
                 )
                 return
-            if expected_lot != self.lot_index:
+            if expected_lot != self._lot_token:
                 await interaction.followup.send(
                     "🔄 경매 대상이 바뀌었습니다. 최신 경매 메시지에서 입찰해주세요.",
                     ephemeral=True
@@ -788,6 +826,12 @@ class AuctionView(discord.ui.View):
                 )
                 await self.abort("참가자나 경기 상태가 변경되어 경매가 취소되었습니다.")
                 return
+            if len(self.teams[side]) >= 5:
+                await interaction.followup.send(
+                    "❌ 이 팀은 이미 정원이 찼습니다.",
+                    ephemeral=True
+                )
+                return
 
             bid = (
                 AUCTION_MIN_BID
@@ -811,25 +855,6 @@ class AuctionView(discord.ui.View):
             self.start_lot_timer()
             await self._publish_current_state()
 
-    async def _choose_no_bid_side(self):
-        eligible = []
-        for side in ("red", "blue"):
-            if len(self.teams[side]) >= 5:
-                continue
-            slots_after_purchase = 5 - (len(self.teams[side]) + 1)
-            if self.budgets[side] >= AUCTION_MIN_BID * (slots_after_purchase + 1):
-                eligible.append(side)
-        if not eligible:
-            return None
-        return min(
-            eligible,
-            key=lambda side: (
-                len(self.teams[side]),
-                -self.budgets[side],
-                0 if side == "red" else 1
-            )
-        )
-
     async def _close_current_lot(self):
         if self._finished or self.lot_index >= len(self.lots):
             return
@@ -847,26 +872,45 @@ class AuctionView(discord.ui.View):
             winner = self.current_bidder
             price = self.current_bid
             award_note = f"낙찰: {'레드팀' if winner == 'red' else '블루팀'} · {price}점"
+            self.teams[winner].append(player_id)
+            self.budgets[winner] -= price
+            self.spent[winner] += price
+            self.purchase_prices[player_id] = price
         else:
-            winner = await self._choose_no_bid_side()
-            if winner is None:
-                await self.abort("남은 예산으로 최소 입찰가를 감당할 수 없어 경매를 취소했습니다.")
-                return
-            price = AUCTION_MIN_BID
-            award_note = (
-                f"무입찰 자동 배정: {'레드팀' if winner == 'red' else '블루팀'} · "
-                f"{price}점"
-            )
+            self.unsold_players.append(player_id)
+            award_note = f"유찰 · <@{player_id}> 후순위 입찰 예정"
 
-        self.teams[winner].append(player_id)
-        self.budgets[winner] -= price
-        self.spent[winner] += price
-        self.purchase_prices[player_id] = price
         self.lot_index += 1
+        self._lot_token += 1
         self.current_bid = 0
         self.current_bidder = None
 
         if self.lot_index >= len(self.lots):
+            if self.unsold_players and self.auction_round == 1:
+                self.lots = list(self.unsold_players)
+                self.unsold_players.clear()
+                self.auction_round = 2
+                self.lot_index = 0
+                self.current_bid = 0
+                self.current_bidder = None
+                self._refresh_controls()
+                await self._publish_current_state(
+                    content=(
+                        "🔁 본 경매가 끝났습니다. 유찰 선수 "
+                        f"{len(self.lots)}명을 후순위로 다시 올립니다."
+                    )
+                )
+                self.start_lot_timer()
+                return
+            if self.unsold_players:
+                self._refresh_controls()
+                await self._publish_current_state(
+                    content=(
+                        "⏸️ 후순위 입찰이 끝났지만 유찰 선수가 남아 있습니다. "
+                        "관리자가 재입찰을 시작해주세요."
+                    )
+                )
+                return
             await self._finish_auction()
             return
 
@@ -875,6 +919,44 @@ class AuctionView(discord.ui.View):
             content=f"✅ {award_note} · <@{player_id}>"
         )
         self.start_lot_timer()
+
+    async def retry_unsold_players(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        await interaction.response.defer(ephemeral=True)
+        async with self._auction_lock:
+            if self._finished:
+                await interaction.followup.send(
+                    "이미 종료된 경매입니다.",
+                    ephemeral=True
+                )
+                return
+            if self.lot_index < len(self.lots) or not self.unsold_players:
+                await interaction.followup.send(
+                    "현재 후순위 재입찰을 시작할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+            self.lots = list(self.unsold_players)
+            self.unsold_players.clear()
+            self.auction_round += 1
+            self.lot_index = 0
+            self._lot_token += 1
+            self.current_bid = 0
+            self.current_bidder = None
+            self._refresh_controls()
+            await self._publish_current_state(
+                content=(
+                    f"🔁 후순위 입찰 {self.auction_round - 1}회차를 시작합니다. "
+                    f"유찰 선수 {len(self.lots)}명입니다."
+                )
+            )
+            self.start_lot_timer()
+        await interaction.followup.send(
+            "✅ 유찰 선수 후순위 입찰을 다시 시작했습니다.",
+            ephemeral=True
+        )
 
     async def _publish_current_state(self, content=None):
         if self.message is None or self._finished:
