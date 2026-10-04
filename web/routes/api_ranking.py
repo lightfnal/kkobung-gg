@@ -37,6 +37,15 @@ def ranking_api():
         season_id = active_season["id"]
         cursor.execute(
             """
+            WITH season_deltas AS (
+                SELECT
+                    mp.discord_id,
+                    1000 + SUM(COALESCE(mp.rating_change, 0)) AS rating
+                FROM match_players mp
+                JOIN matches m ON m.id = mp.match_id
+                WHERE m.season_id = ?
+                GROUP BY mp.discord_id
+            )
             SELECT
                 p.id,
                 p.discord_id,
@@ -45,26 +54,27 @@ def ranking_api():
                 p.tier,
                 p.main_position,
                 p.sub_position,
-                sps.rating,
-                sps.wins,
-                sps.losses,
-                sps.win_streak,
-                sps.lose_streak,
-                sps.best_win_streak,
-                sps.mvp
-            FROM season_player_stats sps
-            JOIN players p
-              ON p.discord_id = sps.discord_id
-            WHERE sps.season_id = ?
-              AND p.is_guild_member = 1
-              AND (sps.wins + sps.losses) > 0
+                COALESCE(sd.rating, 1000) AS rating,
+                COALESCE(sps.wins, 0) AS wins,
+                COALESCE(sps.losses, 0) AS losses,
+                COALESCE(sps.win_streak, 0) AS win_streak,
+                COALESCE(sps.lose_streak, 0) AS lose_streak,
+                COALESCE(sps.best_win_streak, 0) AS best_win_streak,
+                COALESCE(sps.mvp, 0) AS mvp
+            FROM players p
+            LEFT JOIN season_player_stats sps
+              ON sps.discord_id = p.discord_id
+             AND sps.season_id = ?
+            LEFT JOIN season_deltas sd
+              ON sd.discord_id = p.discord_id
+            WHERE p.is_guild_member = 1
             ORDER BY
-                sps.rating DESC,
-                sps.wins DESC,
-                sps.mvp DESC,
+                rating DESC,
+                wins DESC,
+                mvp DESC,
                 p.discord_nickname ASC
             """,
-            (season_id,)
+            (season_id, season_id)
         )
         rows = cursor.fetchall()
 
@@ -105,4 +115,3 @@ def ranking_api():
         },
         "players": players
     }
-

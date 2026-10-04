@@ -345,7 +345,27 @@ def player_detail(
                 cursor.fetchone()
             )
 
+            # 시즌 레이팅은 시즌 시작점 1000점에 해당 시즌 경기 변동만 더해 표시합니다.
+            cursor.execute(
+                """
+                SELECT 1000 + COALESCE(SUM(mp.rating_change), 0) AS rating
+                FROM match_players mp
+                JOIN matches m ON m.id = mp.match_id
+                WHERE m.season_id = ?
+                  AND mp.discord_id = ?
+                """,
+                (season_id, discord_id)
+            )
+            season_rating_row = cursor.fetchone()
+            season_rating = (
+                season_rating_row["rating"]
+                if season_rating_row is not None
+                else 1000
+            )
+
             if season_stats is not None:
+                season_stats = dict(season_stats)
+                season_stats["rating"] = season_rating
 
                 season_total_games = (
                     season_stats["wins"]
@@ -1115,5 +1135,4 @@ def player_detail(
                 positions
         }
     )
-
 
