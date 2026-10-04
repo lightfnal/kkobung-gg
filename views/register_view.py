@@ -38,6 +38,12 @@ class RegisterModal(discord.ui.Modal):
             max_length=40
         )
 
+        self.highest_tier = discord.ui.TextInput(
+            label="최고 티어",
+            placeholder="브론즈 / 실버 / 골드 / 플레 / 다이아 / M1~M9 / GM / C",
+            max_length=24
+        )
+
         self.main = discord.ui.TextInput(
             label="주 포지션",
             placeholder="TOP / JUNGLE / MID / ADC / SUPPORT",
@@ -51,6 +57,7 @@ class RegisterModal(discord.ui.Modal):
         )
 
         self.add_item(self.riot_id)
+        self.add_item(self.highest_tier)
         self.add_item(self.main)
         self.add_item(self.sub)
 
@@ -105,5 +112,6 @@ class RegisterModal(discord.ui.Modal):
             interaction=interaction,
             riot_id=str(self.riot_id.value),
             main_position=main_position,
-            sub_position=sub_position
+            sub_position=sub_position,
+            highest_tier=str(self.highest_tier.value)
         )
