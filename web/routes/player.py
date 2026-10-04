@@ -449,6 +449,37 @@ def player_detail(
                 or 0
             )
 
+        # 프로필 상단의 비챔피언 지표도 활성 시즌 값만 사용합니다.
+        # 챔피언 사용 기록은 위에서 조회한 전체 기간 데이터를 그대로 유지합니다.
+        if season_stats is None:
+            season_view = {
+                "rating": 1000,
+                "wins": 0,
+                "losses": 0,
+                "win_streak": 0,
+                "lose_streak": 0,
+                "best_win_streak": 0,
+                "mvp": 0
+            }
+            player_rank = None
+            total_player_count = season_player_count
+            top_percent = 0
+        else:
+            season_view = dict(season_stats)
+            player_rank = season_rank
+            total_player_count = season_player_count
+            top_percent = (
+                round(player_rank / total_player_count * 100, 1)
+                if player_rank is not None and total_player_count > 0
+                else 0
+            )
+
+        for metric in (
+            "rating", "wins", "losses", "win_streak", "lose_streak",
+            "best_win_streak", "mvp"
+        ):
+            player[metric] = season_view.get(metric, 0) or 0
+
         # =====================================================
         # 시즌별 화면 통계
         #
@@ -1084,4 +1115,5 @@ def player_detail(
                 positions
         }
     )
+
 

@@ -2,6 +2,7 @@ from fastapi import (
     APIRouter,
     Request
 )
+from fastapi.responses import RedirectResponse
 
 from fastapi.templating import (
     Jinja2Templates
@@ -23,6 +24,10 @@ templates = Jinja2Templates(
 def stats_page(
     request: Request
 ):
+    # 전체 누적 통계는 시즌2 수치와 혼합되어 보이지 않도록
+    # 현재 시즌 대시보드로 안내합니다. 모스트 챔피언은 플레이어 페이지에 유지됩니다.
+    return RedirectResponse(url="/season", status_code=307)
+
 
     with get_db_connection() as conn:
 
@@ -1024,3 +1029,4 @@ def stats_page(
                 recent_red_win_rate
         }
     )
+

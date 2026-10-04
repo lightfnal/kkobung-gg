@@ -417,19 +417,36 @@ def home(
 
 
         # ==============================
+        # 현재 시즌을 먼저 읽고 홈 통계를 현재 시즌으로 한정합니다.
+        cursor.execute(
+            """
+            SELECT id, season_name, started_at
+            FROM seasons
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        )
+        active_season = cursor.fetchone()
+        active_season_id = active_season["id"] if active_season else None
+
         # 등록 플레이어 수
         # ==============================
 
         cursor.execute(
             """
-            SELECT COUNT(*) AS count
-            FROM players
-            WHERE is_guild_member = 1
-            """
-        )
+            SELECT COUNT(DISTINCT sps.discord_id) AS count
+            FROM season_player_stats sps
+            JOIN players p ON p.discord_id = sps.discord_id
+            WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
+              AND (sps.wins + sps.losses) > 0
+            """,
+            (active_season_id,)
+        ) if active_season_id is not None else None
 
         player_count = (
-            cursor.fetchone()["count"]
+            cursor.fetchone()["count"] if active_season_id is not None else 0
         )
 
 
@@ -441,11 +458,13 @@ def home(
             """
             SELECT COUNT(*) AS count
             FROM matches
-            """
-        )
+            WHERE season_id = ?
+            """,
+            (active_season_id,)
+        ) if active_season_id is not None else None
 
         match_count = (
-            cursor.fetchone()["count"]
+            cursor.fetchone()["count"] if active_season_id is not None else 0
         )
 
 
@@ -456,28 +475,26 @@ def home(
         cursor.execute(
             """
             SELECT
-                id,
-                discord_nickname,
-                riot_name,
-                tier,
-                rating,
-                wins,
-                losses
-
-            FROM players
-
-            WHERE is_guild_member = 1
-
-            ORDER BY
-                rating DESC,
-                wins DESC
-
+                p.id,
+                p.discord_nickname,
+                p.riot_name,
+                p.tier,
+                sps.rating,
+                sps.wins,
+                sps.losses
+            FROM season_player_stats sps
+            JOIN players p ON p.discord_id = sps.discord_id
+            WHERE sps.season_id = ?
+              AND p.is_guild_member = 1
+              AND (sps.wins + sps.losses) > 0
+            ORDER BY sps.rating DESC, sps.wins DESC
             LIMIT 5
-            """
-        )
+            """,
+            (active_season_id,)
+        ) if active_season_id is not None else None
 
         top_players = (
-            cursor.fetchall()
+            cursor.fetchall() if active_season_id is not None else []
         )
 
 
@@ -509,48 +526,26 @@ def home(
                 ON s.id
                     = m.season_id
 
-            ORDER BY
-                m.id DESC
-
+            WHERE m.season_id = ?
+            ORDER BY m.id DESC
             LIMIT 5
-            """
-        )
+            """,
+            (active_season_id,)
+        ) if active_season_id is not None else None
 
         recent_matches = (
-            cursor.fetchall()
+            cursor.fetchall() if active_season_id is not None else []
         )
 
 
-        # ==============================
-        # 현재 활성 시즌
-        # ==============================
-
-        cursor.execute(
-            """
-            SELECT
-                id,
-                season_name,
-                started_at
-
-            FROM seasons
-
-            WHERE is_active = 1
-
-            ORDER BY
-                id DESC
-
-            LIMIT 1
-            """
-        )
-
-        active_season = (
-            cursor.fetchone()
-        )
 
 
         season_match_count = 0
         season_player_count = 0
-        weekly_awards, activity_feed = build_home_engagement(cursor)
+        weekly_awards, activity_feed = build_home_engagement(
+            cursor,
+            active_season_id
+        )
 
 
         # ==============================

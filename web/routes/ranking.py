@@ -1,64 +1,32 @@
-from fastapi import (
-    APIRouter,
-    Request
-)
+from fastapi import APIRouter, Request
+from fastapi.templating import Jinja2Templates
 
-from fastapi.templating import (
-    Jinja2Templates
-)
-
-from web.database import (
-    get_db_connection
-)
-
+from web.database import get_db_connection
 
 router = APIRouter()
-
-templates = Jinja2Templates(
-    directory="web/templates"
-)
+templates = Jinja2Templates(directory="web/templates")
 
 
 @router.get("/ranking")
-def ranking(
-    request: Request
-):
-
+def ranking(request: Request):
     with get_db_connection() as conn:
-
         cursor = conn.cursor()
-
         cursor.execute(
             """
-            SELECT
-                id,
-                discord_nickname,
-                tier,
-                rating,
-                wins,
-                losses
-
-            FROM players
-
-            WHERE is_guild_member = 1
-
-            ORDER BY
-                rating DESC,
-                wins DESC,
-                losses ASC,
-                id ASC
+            SELECT season_name
+            FROM seasons
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
             """
         )
-
-        players = (
-            cursor.fetchall()
-        )
-
+        season = cursor.fetchone()
 
     return templates.TemplateResponse(
         request=request,
         name="ranking.html",
         context={
-            "players": players
+            "active_season_name": season["season_name"] if season else None
         }
     )
+
