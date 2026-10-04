@@ -40,8 +40,6 @@ MAX_INHOUSE_ROOMS = 3
 # "bo3"    : 3판 2선승제
 MATCH_MODE = "bo3"
 
-# MVP 투표 제한 시간(초)
-MVP_VOTE_TIMEOUT_SECONDS = 10
 
 # 같은 사용자가 같은 슬래시 명령을 반복할 때의 제한 시간
 COMMAND_COOLDOWN_SECONDS = 2
@@ -82,8 +80,6 @@ RATING_WIN_BASE = 15
 # 패배 시 기본 차감 점수
 RATING_LOSS_BASE = -12
 
-# MVP 추가 보너스
-RATING_MVP_BONUS = 3
 
 # 경기 참가 보너스
 RATING_PARTICIPATION_BONUS = 1
