@@ -10,8 +10,10 @@ def _compact_player_name(value, limit=24):
     return compact
 
 
-def build_home_engagement(cursor):
-    """홈 화면의 주간 어워드와 최근 활동 피드를 구성합니다."""
+def build_home_engagement(cursor, season_id=None):
+    """현재 시즌의 주간 어워드와 활동 피드를 구성합니다."""
+    if season_id is None:
+        return [], []
     cursor.execute(
         """
         SELECT p.id AS player_id, p.discord_nickname AS name,
@@ -23,9 +25,11 @@ def build_home_engagement(cursor):
         JOIN matches m ON m.id = mp.match_id
         JOIN players p ON p.discord_id = mp.discord_id
         WHERE p.is_guild_member = 1
+          AND m.season_id = ?
           AND datetime(m.match_date) >= datetime('now', '-7 days')
         GROUP BY p.id, p.discord_nickname
-        """
+        """,
+        (season_id,)
     )
     rows = [dict(row) for row in cursor.fetchall()]
     awards = []
@@ -79,11 +83,13 @@ def build_home_engagement(cursor):
             JOIN players p ON p.discord_id = mp.discord_id
         {prediction_join}
             WHERE p.is_guild_member = 1
+              AND m.season_id = ?
         )
         SELECT * FROM player_events
         ORDER BY match_id DESC, player_id ASC
         LIMIT 500
-        """
+        """,
+        (season_id,)
     )
     activities = []
     seen_upset_matches = set()
@@ -132,14 +138,14 @@ def build_home_engagement(cursor):
         ):
             add_activity(
                 item, "👑", "MVP 기록 달성",
-                f'{_compact_player_name(item["player_name"])} 님이 통산 MVP {mvp_number}회를 달성했습니다.', "mvp"
+                f'{_compact_player_name(item["player_name"])} 님이 시즌 MVP {mvp_number}회를 달성했습니다.', "mvp"
             )
 
         game_number = int(item.get("game_number") or 0)
         if game_number in {50, 100} or (game_number >= 200 and game_number % 100 == 0):
             add_activity(
                 item, "🎮", "누적 경기 달성",
-                f'{_compact_player_name(item["player_name"])} 님이 통산 {game_number}경기를 달성했습니다.', "games"
+                f'{_compact_player_name(item["player_name"])} 님이 시즌 {game_number}경기를 달성했습니다.', "games"
             )
 
         rating_before = int(item.get("rating_before") or 0)
@@ -165,3 +171,4 @@ def build_home_engagement(cursor):
         if len(activities) >= 6:
             break
     return awards, activities
+
