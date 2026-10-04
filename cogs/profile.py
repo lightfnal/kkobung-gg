@@ -92,9 +92,8 @@ def get_member_role_tier(member):
 
 
 def build_profile_nickname(riot_id, tier, main_position, sub_position):
-    normalized_tier = normalize_highest_tier(tier) or "언랭크"
     return (
-        f"{riot_id} / {TIER_SHORT.get(normalized_tier, 'UR')} / "
+        f"{riot_id} / {TIER_SHORT.get(tier, 'UR')} / "
         f"{main_position} {str(sub_position)[:3]}"
     )[:32]
 
@@ -298,24 +297,7 @@ class Profile(commands.Cog):
 
             if role_changed and profile_row is not None:
                 profile = dict(profile_row)
-                stored_tier = normalize_highest_tier(
-                    profile.get("tier")
-                )
-                stored_tier_is_assigned = (
-                    stored_tier is not None
-                    and stored_tier != "언랭크"
-                    and any(
-                        normalize_highest_tier(role.name) == stored_tier
-                        for role in after.roles
-                    )
-                )
-                # 새 티어 역할이 이미 지급된 상태라면, 역할 정리 중 생기는
-                # 임시 상태가 저장된 티어와 닉네임을 덮어쓰지 않게 합니다.
-                role_tier = (
-                    stored_tier
-                    if stored_tier_is_assigned
-                    else get_member_role_tier(after)
-                )
+                role_tier = get_member_role_tier(after)
                 nickname = build_profile_nickname(
                     profile.get("riot_name") or after.display_name,
                     role_tier,
@@ -683,79 +665,76 @@ class Profile(commands.Cog):
 
         role_assignment_warning = None
         try:
-            # ---------- 멤버, 최고 티어 및 포지션 역할 자동 지급 ----------
+            # ---------- 최고 티어 및 포지션 역할 자동 지급 ----------
             if (
                 isinstance(interaction.user, discord.Member)
                 and interaction.guild is not None
             ):
-                member = interaction.user
-                guild_roles = interaction.guild.roles
-
-                member_role = discord.utils.get(
-                    guild_roles,
-                    name="멤버"
-                )
-
-                position_roles = {
+                current_tier_roles = [
+                    role for role in interaction.user.roles
+                    if normalize_highest_tier(role.name) is not None
+                ]
+                remove_tier_roles = [
+                    role for role in current_tier_roles
+                    if role != tier_role
+                ]
+                if remove_tier_roles:
+                    await interaction.user.remove_roles(
+                        *remove_tier_roles,
+                        reason="최고 티어 갱신"
+                    )
+                if tier_role is not None and tier_role not in interaction.user.roles:
+                    await interaction.user.add_roles(
+                        tier_role,
+                        reason="최고 티어 자동 지급"
+                    )
+    
+                position_roles = [
                     "TOP",
                     "JUNGLE",
                     "MID",
                     "ADC",
                     "SUPPORT"
-                }
-                tier_roles = [
-                    role for role in guild_roles
-                    if normalize_highest_tier(role.name) is not None
                 ]
-
+    
+                # 기존 포지션 역할 제거
+                remove_roles = [
+                    role
+                    for role in interaction.user.roles
+                    if role.name in position_roles
+                ]
+    
+                if remove_roles:
+                    await interaction.user.remove_roles(
+                        *remove_roles,
+                        reason="포지션 갱신"
+                    )
+    
+                # 주 포지션 지급
                 main_role = discord.utils.get(
-                    guild_roles,
+                    interaction.guild.roles,
                     name=main_position
                 )
+    
+                if main_role is not None:
+                    await interaction.user.add_roles(
+                        main_role,
+                        reason="주 포지션"
+                    )
+    
+                # 부 포지션 지급
                 sub_role = discord.utils.get(
-                    guild_roles,
+                    interaction.guild.roles,
                     name=sub_position
                 )
-
-                # 새 티어 역할을 먼저 지급해 티어가 비는 중간 상태를 피합니다.
-                roles_to_add = [
-                    role for role in (
-                        member_role,
-                        tier_role,
-                        main_role,
-                        sub_role
-                    )
-                    if role is not None and role not in member.roles
-                ]
-                if roles_to_add:
-                    await member.add_roles(
-                        *roles_to_add,
-                        reason="통합 프로필 등록"
-                    )
-
-                roles_to_remove = [
-                    role for role in member.roles
-                    if (
-                        (
-                            role in tier_roles
-                            and role != tier_role
-                        )
-                        or (
-                            role.name in position_roles
-                            and role not in (main_role, sub_role)
-                        )
-                    )
-                ]
-                if roles_to_remove:
-                    await member.remove_roles(
-                        *roles_to_remove,
-                        reason="프로필 티어/포지션 갱신"
-                    )
-
-                if member_role is None:
-                    role_assignment_warning = (
-                        "⚠️ 서버에 멤버 역할이 없어 멤버 역할은 지급하지 못했습니다. "
-                        "역할을 만든 뒤 다시 등록해주세요."
+    
+                if (
+                    sub_role is not None
+                    and sub_role != main_role
+                ):
+                    await interaction.user.add_roles(
+                        sub_role,
+                        reason="부 포지션"
                     )
         except discord.Forbidden:
             logger.warning(
@@ -946,3 +925,4 @@ class Profile(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Profile(bot))
+
