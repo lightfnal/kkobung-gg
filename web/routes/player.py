@@ -69,6 +69,9 @@ def player_detail(
                 detail="플레이어를 찾을 수 없습니다."
             )
 
+        # sqlite3.Row는 읽기 전용이므로 아래 시즌별 표시값을 덮어쓰기 전에 dict로 변환합니다.
+        player = dict(player)
+
         discord_id = str(
             player["discord_id"]
         )
@@ -1135,4 +1138,3 @@ def player_detail(
                 positions
         }
     )
-
