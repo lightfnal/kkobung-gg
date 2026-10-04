@@ -79,7 +79,7 @@
 }
 .season-player-name{font-size:18px}
 .season-player-riot,.season-player-tier,.season-record,
-.season-current-streak,.season-no-streak,.season-mvp-count{font-size:14px}
+.season-current-streak,.season-no-streak{font-size:14px}
 
 .player-select-search{
     width:100%;min-height:44px;padding:0 14px 0 40px;
@@ -1168,14 +1168,7 @@ nav a:hover{
     font-size:13px;
 }
 
-.home-recent-mvp{
-    color:var(--gold);
 
-    text-align:right;
-
-    font-size:13px;
-    font-weight:bold;
-}
 
 
 /* =========================================================
@@ -2972,69 +2965,19 @@ nav a:hover{
    경기 MVP
 ========================================================= */
 
-.match-mvp-box{
-    position:relative;
 
-    overflow:hidden;
 
-    margin-bottom:30px;
 
-    padding:22px;
 
-    background:var(--surface);
 
-    border:1px solid var(--border);
 
-    border-radius:12px;
 
-    text-align:center;
-}
 
-.match-mvp-box::before{
-    content:"";
 
-    position:absolute;
 
-    top:0;
-    bottom:0;
-    left:0;
 
-    width:5px;
 
-    background:var(--gold);
-}
 
-.match-mvp-title{
-    color:var(--gold);
-
-    font-size:18px;
-}
-
-.match-mvp-player{
-    margin-top:10px;
-
-    font-size:26px;
-    font-weight:bold;
-}
-
-.match-mvp-player a{
-    color:white;
-
-    text-decoration:none;
-}
-
-.match-mvp-player a:hover{
-    color:var(--gold);
-}
-
-.match-mvp-riot-name{
-    margin-top:6px;
-
-    color:#999;
-
-    font-size:14px;
-    font-weight:normal;
-}
 
 
 /* =========================================================
@@ -3446,26 +3389,7 @@ nav a:hover{
     font-size:18px;
 }
 
-.match-player-mvp{
-    position:absolute;
 
-    top:6px;
-    right:6px;
-
-    padding:4px 7px;
-
-    color:var(--gold);
-
-    background:var(--gold-soft);
-
-    border:1px solid
-        rgba(255,215,0,.30);
-
-    border-radius:6px;
-
-    font-size:11px;
-    font-weight:bold;
-}
 
 
 /* =========================================================
@@ -4108,11 +4032,7 @@ nav a:hover{
     color:#666;
 }
 
-.season-mvp-count{
-    color:var(--gold);
 
-    font-weight:bold;
-}
 
 .season-empty{
     padding:100px 30px;
@@ -6795,9 +6715,7 @@ nav a:hover{
         gap:9px;
     }
 
-    .home-recent-mvp{
-        text-align:left;
-    }
+
 
     .player-rank-summary,
     .recent-form-grid{
@@ -6976,7 +6894,7 @@ nav a:hover{
 .activity-item{grid-template-columns:30px minmax(0,1fr) auto}
 .activity-item.activity-upset{border-left:3px solid #ff8a3d}
 .activity-item.activity-streak{border-left:3px solid #ffd000}
-.activity-item.activity-mvp{border-left:3px solid #d99cff}
+
 .activity-item.activity-games{border-left:3px solid #4aa8ff}
 .activity-item.activity-record{border-left:3px solid #42d69a}
 .activity-item.activity-promotion{border-left:3px solid #ffda57}
@@ -9303,3 +9221,12 @@ nav a:hover{
     .recent-champion-info strong{font-size:14px}
 }
 
+
+/* MVP feature removal: hide all remaining legacy summary widgets and badges. */
+[class*="mvp" i],
+[id*="mvp" i],
+.stats-summary-card:has(#statsTotalMvp),
+.stats-section:has(#statsTopMvpArea),
+.season-summary-card:has(#seasonMvpCard) {
+    display: none !important;
+}
