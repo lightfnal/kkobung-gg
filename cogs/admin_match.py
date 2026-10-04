@@ -355,6 +355,78 @@ class AdminMatch(commands.Cog):
         )
 
     @discord.app_commands.command(
+        name="경기삭제",
+        description="경기 번호를 지정해 해당 경기 결과와 레이팅 반영을 취소합니다."
+    )
+    @discord.app_commands.describe(
+        경기번호="삭제할 경기 번호 (해당 방의 가장 최근 경기만 가능)"
+    )
+    async def delete_match_by_number(
+        self,
+        interaction: discord.Interaction,
+        경기번호: int
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+
+        async with room.operation_lock:
+            match = get_match(경기번호)
+
+            if match is None:
+                await interaction.response.send_message(
+                    "❌ 해당 경기 기록이 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            if str(match.get("room_id")) != str(room.room_id):
+                await interaction.response.send_message(
+                    "❌ 현재 내전 방의 경기 기록이 아닙니다.",
+                    ephemeral=True
+                )
+                return
+
+            latest_match = get_last_match(room_id=room.room_id)
+
+            if latest_match is None:
+                await interaction.response.send_message(
+                    "❌ 이 내전 방에 삭제할 경기 기록이 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            if int(latest_match["id"]) != int(경기번호):
+                await interaction.response.send_message(
+                    "❌ 레이팅과 전적을 정확히 복구하려면 해당 방의 "
+                    "가장 최근 경기만 삭제할 수 있습니다.\n"
+                    f"삭제를 요청한 경기: **#{경기번호}**\n"
+                    f"현재 가장 최근 경기: **#{latest_match['id']}**\n"
+                    "뒤에 진행된 경기부터 차례대로 삭제한 뒤 다시 시도해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            await self._cancel_match_locked(
+                interaction,
+                room
+            )
+
+    @discord.app_commands.command(
         name="경기취소",
         description="가장 최근 경기 결과를 취소합니다."
     )
