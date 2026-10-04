@@ -43,8 +43,6 @@ def build_home_engagement(cursor, season_id=None):
                 "value": value(row), "player_id": row["player_id"]
             })
 
-    add_award("👑", "주간 MVP", max(rows, key=lambda r: (r["mvp_count"], r["wins"]), default=None),
-              lambda r: f'{r["mvp_count"]}회 선정')
     add_award("🔥", "주간 최다승", max(rows, key=lambda r: (r["wins"], r["games"]), default=None),
               lambda r: f'{r["wins"]}승 · {r["games"]}경기')
     eligible = [row for row in rows if row["games"] >= 3]
