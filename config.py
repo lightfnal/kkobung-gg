@@ -151,6 +151,15 @@ INITIAL_HIDDEN_MMR_BY_TIER = {
     "플래티넘": 1400,
     "에메랄드": 1500,
     "다이아": 1600,
+    # Master LP bands: 100~299=M1, 300~499=M3, etc.
+    "M1": 1700,
+    "M3": 1750,
+    "M5": 1800,
+    "M7": 1850,
+    "M9": 1900,
+    "GM": 1950,
+    "C": 2000,
+    # Keep legacy values readable for existing profiles.
     "마스터": 1800,
     "그랜드마스터": 1900,
     "챌린저": 2000,
@@ -223,3 +232,4 @@ if not RIOT_API_KEY:
         "⚠️ RIOT_API_KEY가 설정되지 않았습니다. "
         "Riot API 기능은 사용할 수 없습니다."
     )
+
