@@ -62,31 +62,55 @@ def home_api():
         )
 
 
+        # TOP 5와 시즌 카드는 같은 활성 시즌을 기준으로 표시합니다.
+        cursor.execute(
+            """
+            SELECT id, season_name, started_at
+            FROM seasons
+            WHERE is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        )
+        active_season_row = cursor.fetchone()
+        active_season = dict(active_season_row) if active_season_row else None
+        season_id = active_season["id"] if active_season else -1
+
+
         # ==============================
         # TOP 5 플레이어
         # ==============================
 
         cursor.execute(
             """
+            WITH season_deltas AS (
+                SELECT
+                    mp.discord_id,
+                    1000 + SUM(COALESCE(mp.rating_change, 0)) AS rating
+                FROM match_players mp
+                JOIN matches m ON m.id = mp.match_id
+                WHERE m.season_id = ?
+                GROUP BY mp.discord_id
+            )
             SELECT
-                id,
-                discord_nickname,
-                riot_name,
-                tier,
-                rating,
-                wins,
-                losses
-
-            FROM players
-
-            WHERE is_guild_member = 1
-
-            ORDER BY
-                rating DESC,
-                wins DESC
-
+                p.id,
+                p.discord_nickname,
+                p.riot_name,
+                p.tier,
+                COALESCE(sd.rating, 1000) AS rating,
+                COALESCE(sps.wins, 0) AS wins,
+                COALESCE(sps.losses, 0) AS losses
+            FROM players p
+            LEFT JOIN season_player_stats sps
+              ON sps.discord_id = p.discord_id
+             AND sps.season_id = ?
+            LEFT JOIN season_deltas sd
+              ON sd.discord_id = p.discord_id
+            WHERE p.is_guild_member = 1
+            ORDER BY rating DESC, wins DESC, p.discord_nickname ASC
             LIMIT 5
-            """
+            """,
+            (season_id, season_id)
         )
 
         top_rows = (
