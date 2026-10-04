@@ -284,10 +284,6 @@ class AdminGame(commands.Cog):
             bool(room.match_in_progress)
             for room in rooms
         )
-        active_mvp_count = sum(
-            bool(room.mvp_vote_in_progress)
-            for room in rooms
-        )
         active_transaction_count = sum(
             bool(room.match_transaction_active)
             for room in rooms
@@ -396,7 +392,6 @@ class AdminGame(commands.Cog):
             value=(
                 f"참가자: **{participant_count}명**\n"
                 f"진행 경기: **{active_match_count}개**\n"
-                f"MVP 투표: **{active_mvp_count}개**\n"
                 f"결과 트랜잭션: **{active_transaction_count}개**\n"
                 f"pending 복구: **{pending_result_count}개**"
             ),

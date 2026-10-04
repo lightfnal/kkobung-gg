@@ -94,12 +94,6 @@ class Statistics(commands.Cog):
         )
 
         embed.add_field(
-            name="🏅 MVP",
-            value=f"{profile['mvp']}회",
-            inline=True
-        )
-
-        embed.add_field(
             name="🔥 최고 연승",
             value=f"{profile['best_win_streak']}연승",
             inline=True

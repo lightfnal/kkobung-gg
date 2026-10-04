@@ -8,8 +8,7 @@ from cogs.champion_record import ChampionRecordView
 from discord.ext import commands
 
 from config import (
-    MATCH_MODE,
-    MVP_VOTE_TIMEOUT_SECONDS
+    MATCH_MODE
 )
 
 from datetime import datetime
@@ -47,10 +46,6 @@ from services.rating_service import RatingService
 from utils.rating import get_rating_tier
 from utils.room_display import format_room_status
 
-from collections import Counter
-import random
-
-from views.mvp_vote_view import MVPVoteView
 
 
 logger = logging.getLogger(__name__)
@@ -85,7 +80,7 @@ class Match(commands.Cog):
 
     @discord.app_commands.command(
         name="경기결과",
-        description="승리팀을 선택하고 MVP 투표를 시작합니다."
+        description="승리팀을 선택해 경기 결과를 등록합니다."
     )
     async def match_result(
         self,
@@ -117,7 +112,7 @@ class Match(commands.Cog):
             button_interaction: discord.Interaction,
             winner: str
         ):
-            await self.start_mvp_vote(
+            await self.process_match_result(
                 button_interaction,
                 winner,
                 room
@@ -134,13 +129,6 @@ class Match(commands.Cog):
             if not room.match_in_progress:
                 await interaction.response.send_message(
                     "❌ 현재 진행 중인 경기가 없습니다.",
-                    ephemeral=True
-                )
-                return
-
-            if room.mvp_vote_in_progress:
-                await interaction.response.send_message(
-                    "❌ 현재 MVP 투표가 진행 중입니다.",
                     ephemeral=True
                 )
                 return
@@ -249,351 +237,10 @@ class Match(commands.Cog):
         )
 
 
-    async def start_mvp_vote(
-        self,
-        interaction: discord.Interaction,
-        winner: str,
-        room
-    ):
-        join_cog = get_join_cog(
-            self.bot
-        )
-
-        if join_cog is None:
-            await interaction.followup.send(
-                "❌ 내전 관리 기능을 불러오지 못했습니다.",
-                ephemeral=True
-            )
-            return
-
-        if not join_cog.activate_room(
-            room
-        ):
-            await interaction.followup.send(
-                "❌ 연결된 내전 방을 찾지 못했습니다.",
-                ephemeral=True
-            )
-            return
-
-        async with room.operation_lock:
-            if room.current_teams is None:
-                await interaction.followup.send(
-                    "❌ 현재 팀 정보가 존재하지 않습니다.",
-                    ephemeral=True
-                )
-                return
-
-            if not room.match_in_progress:
-                await interaction.followup.send(
-                    "❌ 현재 진행 중인 경기가 없습니다.",
-                    ephemeral=True
-                )
-                return
-
-            if room.mvp_vote_in_progress:
-                await interaction.followup.send(
-                    "❌ 현재 MVP 투표가 이미 진행 중입니다.",
-                    ephemeral=True
-                )
-                return
-
-            winner_team = room.current_teams.get(
-                winner
-            )
-
-            if not winner_team:
-                await interaction.followup.send(
-                    "❌ 승리팀 정보를 찾지 못했습니다.",
-                    ephemeral=True
-                )
-                return
-
-            winner_team = dict(winner_team)
-
-            room.mvp_vote_in_progress = True
-
-            join_cog.save_rooms_state()
-
-        async def finish_vote(votes):
-            async with room.operation_lock:
-                await finish_vote_locked(votes)
-
-        async def finish_vote_locked(votes):
-            try:
-                if (
-                    not room.match_in_progress
-                    or not room.mvp_vote_in_progress
-                ):
-                    logger.info(
-                        "만료된 MVP 투표 결과 처리 생략 | 방=%s",
-                        room.room_id
-                    )
-                    return
-
-                if not votes:
-                    await join_cog.send_output_message(
-                        room=room,
-                        fallback_channel=recruitment_channel,
-                        content=(
-                            f"⚠️ **{room.room_name}** MVP 투표자가 없어 "
-                            "경기 결과를 등록하지 않았습니다.\n"
-                            f"방 번호: **{room.room_id}**\n"
-                            f"<#{room.channel_id}>에서 "
-                            "`/경기결과`를 다시 입력해주세요."
-                        )
-                    )
-                    return
-
-                vote_counts = Counter(
-                    votes.values()
-                )
-
-                highest_votes = max(
-                    vote_counts.values()
-                )
-
-                tied_candidates = [
-                    user_id
-                    for user_id, count in vote_counts.items()
-                    if count == highest_votes
-                ]
-
-                # 최고 득표자가 여러 명이면 무작위로 선정
-                mvp_id = random.choice(
-                    tied_candidates
-                )
-
-                sorted_votes = sorted(
-                    vote_counts.items(),
-                    key=lambda item: item[1],
-                    reverse=True
-                )
-
-                result_lines = []
-                medals = ["🥇", "🥈", "🥉"]
-
-                for index, (user_id, count) in enumerate(
-                    sorted_votes
-                ):
-                    icon = (
-                        medals[index]
-                        if index < 3
-                        else "▪️"
-                    )
-
-                    result_lines.append(
-                        f"{icon} <@{user_id}> - **{count}표**"
-                    )
-
-                await join_cog.send_output_message(
-                    room=room,
-                    fallback_channel=recruitment_channel,
-                    content=(
-                        f"🗳️ **{room.room_name} · "
-                        "MVP 투표 종료**\n"
-                        f"방 번호: **{room.room_id}**\n\n"
-                        + "\n".join(result_lines)
-                        + f"\n\n🏅 **최종 MVP: <@{mvp_id}>**"
-                    )
-                )
-
-                await self.process_match_result(
-                    interaction,
-                    winner,
-                    mvp_id,
-                    room
-                )
-
-            except Exception as error:
-                logger.exception(
-                    "경기 결과 처리 중 오류: %r",
-                    error
-                )
-
-                if room.match_transaction_active:
-                    rollback_transaction()
-
-                    room.match_transaction_active = False
-                    room.match_transaction_committed = False
-
-                    if room.transaction_series_score is not None:
-                        join_cog.series_score = dict(
-                            room.transaction_series_score
-                        )
-
-                    if room.transaction_series_game is not None:
-                        join_cog.series_game = (
-                            room.transaction_series_game
-                        )
-
-                    room.pending_match_token = None
-                    room.pending_series_score = None
-                    room.pending_series_game = None
-
-                    join_cog.reload_profiles()
-                    join_cog.save_rooms_state()
-
-                    error_message = (
-                        "❌ 경기 결과 저장 중 오류가 발생했습니다.\n"
-                        "레이팅, Hidden MMR, 배치 경기 수와 "
-                        "시즌 기록은 모두 경기 전 상태로 복구했습니다.\n"
-                        "`/경기결과`를 다시 실행해주세요."
-                    )
-
-                elif room.match_transaction_committed:
-                    # SQLite 커밋은 성공했으므로
-                    # 대기 중인 BO3 점수도 즉시 확정합니다.
-                    if room.pending_series_score is not None:
-                        join_cog.series_score = dict(
-                            room.pending_series_score
-                        )
-
-                    if room.pending_series_game is not None:
-                        join_cog.series_game = (
-                            room.pending_series_game
-                        )
-
-                    join_cog.match_in_progress = False
-
-                    room.pending_match_token = None
-                    room.pending_series_score = None
-                    room.pending_series_game = None
-
-                    join_cog.save_rooms_state()
-
-                    error_message = (
-                        "⚠️ 경기 데이터와 BO3 점수는 "
-                        "정상 저장되었지만 "
-                        "후속 처리 중 오류가 발생했습니다.\n"
-                        "관리자는 `/mmr기록`과 경기 기록을 "
-                        "확인해주세요."
-                    )
-
-                else:
-                    room.pending_match_token = None
-                    room.pending_series_score = None
-                    room.pending_series_game = None
-
-                    error_message = (
-                        "❌ 경기 결과 처리 중 오류가 발생했습니다.\n"
-                        "경기 데이터는 저장되지 않았습니다.\n"
-                        "`/경기결과`를 다시 실행해주세요."
-                    )
-
-                await join_cog.send_output_message(
-                    room=room,
-                    fallback_channel=recruitment_channel,
-                    content=error_message
-                )
-
-            finally:
-                room.mvp_vote_in_progress = False
-                room.match_transaction_active = False
-                room.match_transaction_committed = False
-                room.transaction_series_score = None
-                room.transaction_series_game = None
-
-                join_cog.save_rooms_state()
-
-        view = MVPVoteView(
-            self.bot,
-            join_cog,
-            winner,
-            finish_vote
-        )
-
-        candidate_list = "\n".join(
-            f"**{position}** · <@{user_id}>"
-            for position, user_id in winner_team.items()
-        )
-
-        winner_name = (
-            "🔴 레드팀"
-            if winner == "red"
-            else "🔵 블루팀"
-        )
-
-        embed = discord.Embed(
-            title=(
-                f"🏅 {room.room_name} · "
-                "MVP 투표"
-            ),
-            description=(
-                f"방 번호: **{room.room_id}**\n"
-                f"승리팀: **{winner_name}**\n\n"
-                "승리팀 선수 중 MVP를 선택해주세요.\n\n"
-                f"{candidate_list}\n\n"
-                f"⏱️ 투표 시간: "
-                f"**{MVP_VOTE_TIMEOUT_SECONDS}초**\n"
-                "경기 참가자만 투표할 수 있습니다.\n\n"
-                "📊 **현재 투표 현황**\n"
-                "🗳️ 0/10명 완료"
-            )
-        )
-
-        recruitment_channel = self.bot.get_channel(
-            room.channel_id
-        )
-
-        if recruitment_channel is None:
-            try:
-                recruitment_channel = (
-                    await self.bot.fetch_channel(
-                        room.channel_id
-                    )
-                )
-
-            except (
-                discord.Forbidden,
-                discord.NotFound,
-                discord.HTTPException
-            ):
-                recruitment_channel = None
-
-        vote_message, used_fallback = (
-            await join_cog.send_output_message(
-                room=room,
-                fallback_channel=recruitment_channel,
-                embed=embed,
-                view=view
-            )
-        )
-
-        if vote_message is None:
-            async with room.operation_lock:
-                room.mvp_vote_in_progress = False
-                join_cog.save_rooms_state()
-
-            await interaction.followup.send(
-                "❌ MVP 투표창을 전송하지 못했습니다.\n"
-                "MVP 투표 잠금은 자동으로 해제했습니다.\n"
-                "현재 모집 채널의 봇 권한을 "
-                "확인한 뒤 `/경기결과`를 다시 실행해주세요.",
-                ephemeral=True
-            )
-            return
-
-        view.message = vote_message
-
-        join_cog.save_rooms_state()
-
-        if used_fallback:
-            try:
-                await interaction.followup.send(
-                    "⚠️ 저장된 모집 채널을 찾을 수 없어 "
-                    "현재 명령 채널에 MVP 투표창을 표시했습니다.",
-                    ephemeral=True
-                )
-
-            except discord.HTTPException:
-                pass
-
-
     async def process_match_result(
         self,
         interaction: discord.Interaction,
         winner: str,
-        mvp_id: str,
         room
     ):
 
@@ -615,7 +262,6 @@ class Match(commands.Cog):
             return await self._process_match_result_locked(
                 interaction,
                 winner,
-                mvp_id,
                 room,
                 join_cog
             )
@@ -624,7 +270,6 @@ class Match(commands.Cog):
         self,
         interaction: discord.Interaction,
         winner: str,
-        mvp_id: str,
         room,
         join_cog
     ):
@@ -753,14 +398,6 @@ class Match(commands.Cog):
         placement_completed_players = []
 
 
-        if mvp_id not in winner_players + loser_players:
-            await interaction.followup.send(
-                "❌ MVP는 현재 경기에 참가한 선수만 선택할 수 있습니다.",
-                ephemeral=True
-            )
-            return
-
-
         # 이번 경기 결과를 구분하는 고유 토큰입니다.
         result_token = uuid4().hex
 
@@ -823,7 +460,7 @@ class Match(commands.Cog):
         match_id = add_match(
             match_date=match_date,
             winner=winner,
-            mvp_discord_id=mvp_id,
+            mvp_discord_id=None,
             auto_commit=False,
             room_id=room.room_id,
             result_token=result_token
@@ -873,7 +510,6 @@ class Match(commands.Cog):
                 team_avg_rating=winner_avg,
                 enemy_avg_rating=loser_avg,
                 enemy_avg_mmr=loser_mmr_avg,
-                is_mvp=(user_id == mvp_id)
             )
 
             profile = result["profile"]
@@ -909,9 +545,6 @@ class Match(commands.Cog):
                     season_profile["win_streak"]
                 )
 
-            if user_id == mvp_id:
-                season_profile["mvp"] += 1
-
             update_season_player_stats(
                 season_id,
                 user_id,
@@ -945,7 +578,7 @@ class Match(commands.Cog):
                 season_win_streak_before=season_before["win_streak"],
                 season_lose_streak_before=season_before["lose_streak"],
                 season_best_win_streak_before=season_before["best_win_streak"],
-                season_mvp_before=season_before["mvp"],
+                season_mvp_before=0,
                 win_streak_before=old_win_streak,
                 lose_streak_before=old_lose_streak,
                 best_win_streak_before=old_best_win_streak,
@@ -997,7 +630,6 @@ class Match(commands.Cog):
                 team_avg_rating=loser_avg,
                 enemy_avg_rating=winner_avg,
                 enemy_avg_mmr=winner_mmr_avg,
-                is_mvp=False
             )
 
             profile = result["profile"]
@@ -1022,9 +654,6 @@ class Match(commands.Cog):
             season_profile["lose_streak"] += 1
             season_profile["win_streak"] = 0
             season_profile["rating"] += change
-
-            if user_id == mvp_id:
-                season_profile["mvp"] += 1
 
             update_season_player_stats(
                 season_id,
@@ -1059,7 +688,7 @@ class Match(commands.Cog):
                 season_win_streak_before=season_before["win_streak"],
                 season_lose_streak_before=season_before["lose_streak"],
                 season_best_win_streak_before=season_before["best_win_streak"],
-                season_mvp_before=season_before["mvp"],
+                season_mvp_before=0,
                 win_streak_before=old_win_streak,
                 lose_streak_before=old_lose_streak,
                 best_win_streak_before=old_best_win_streak,
@@ -1208,7 +837,6 @@ class Match(commands.Cog):
             f"방 번호: **{room.room_id}**\n\n"
             f"{result_title}\n\n"
             f"{winner_label}: **{winner_name}**\n\n"
-            f"🏅 MVP: <@{mvp_id}>\n\n"
             f"📈 **승리팀 레이팅 변화**\n"
             f"{chr(10).join(winner_changes)}\n\n"
             f"📉 **패배팀 레이팅 변화**\n"
@@ -1404,13 +1032,6 @@ class Match(commands.Cog):
             return
 
         room = join_cog.active_room
-
-        if room.mvp_vote_in_progress:
-            await interaction.response.send_message(
-                "❌ MVP 투표 중에는 팀을 교체할 수 없습니다.",
-                ephemeral=True
-            )
-            return
 
         if room.match_in_progress:
             await interaction.response.send_message(
@@ -1764,13 +1385,6 @@ class Match(commands.Cog):
 
 
         async with room.operation_lock:
-            if room.mvp_vote_in_progress:
-                await interaction.response.send_message(
-                    "❌ MVP 투표가 진행 중입니다.",
-                    ephemeral=True
-                )
-                return
-
             if not room.match_in_progress:
                 await interaction.response.send_message(
                     "❌ 현재 진행 중인 경기가 없습니다.",

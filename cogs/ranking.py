@@ -199,47 +199,6 @@ class Ranking(commands.Cog):
         )
 
     @discord.app_commands.command(
-        name="mvp랭킹",
-        description="MVP 횟수 랭킹을 확인합니다."
-    )
-    async def mvp_ranking(
-        self,
-        interaction: discord.Interaction
-    ):
-        ranking = get_all_players()
-
-        if not ranking:
-            await interaction.response.send_message(
-                "등록된 프로필이 없습니다."
-            )
-            return
-
-        ranking = sorted(
-            ranking,
-            key=lambda x: x.get("mvp", 0),
-            reverse=True
-        )
-
-        medals = ["🥇", "🥈", "🥉"]
-        message = ""
-
-        for i, profile in enumerate(ranking, start=1):
-
-            if i <= 3:
-                icon = medals[i - 1]
-            else:
-                icon = f"{i}."
-
-            message += (
-                f"{icon} **{profile['discord_nickname']}**\n"
-                f"🏆 MVP {profile.get('mvp', 0)}회\n\n"
-            )
-
-        await interaction.response.send_message(
-            f"🏆 **MVP 랭킹**\n\n{message}"
-        )
-
-    @discord.app_commands.command(
         name="최다출전",
         description="가장 많은 경기를 플레이한 랭킹을 확인합니다."
     )

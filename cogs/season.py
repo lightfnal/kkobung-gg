@@ -159,14 +159,6 @@ class Season(commands.Cog):
             else None
         )
     
-        season_mvp = max(
-            ranking,
-            key=lambda player: (
-                player.get("mvp", 0),
-                player["rating"]
-            )
-        )
-    
         best_streak = max(
             ranking,
             key=lambda player: (
@@ -262,15 +254,6 @@ class Season(commands.Cog):
                 ),
                 inline=True
             )
-    
-        embed.add_field(
-            name="🏅 시즌 MVP",
-            value=(
-                f"{player_name(season_mvp)}\n"
-                f"{season_mvp['mvp']}회"
-            ),
-            inline=False
-        )
     
         embed.add_field(
             name="🔥 최고 연승",
@@ -427,15 +410,6 @@ class Season(commands.Cog):
             else None
         )
 
-        season_mvp = max(
-            ranking,
-            key=lambda player: (
-                player.get("mvp", 0),
-                player["rating"],
-                player["wins"]
-            )
-        )
-
         best_streak_player = max(
             ranking,
             key=lambda player: (
@@ -507,9 +481,7 @@ class Season(commands.Cog):
                 if third_place is not None
                 else None
             ),
-            mvp_id=str(
-                season_mvp["discord_id"]
-            ),
+            mvp_id=None,
             best_win_streak_id=str(
                 best_streak_player["discord_id"]
             ),
@@ -577,15 +549,6 @@ class Season(commands.Cog):
                 ),
                 inline=True
             )
-
-        embed.add_field(
-            name="🏅 시즌 MVP",
-            value=(
-                f"**{player_name(season_mvp)}**\n"
-                f"MVP {season_mvp.get('mvp', 0)}회"
-            ),
-            inline=False
-        )
 
         embed.add_field(
             name="🔥 최고 연승",
@@ -1223,87 +1186,6 @@ class Season(commands.Cog):
         )
 
     @discord.app_commands.command(
-        name="시즌mvp랭킹",
-        description="현재 시즌 MVP 횟수 랭킹을 확인합니다."
-    )
-    async def season_mvp_ranking(
-        self,
-        interaction: discord.Interaction
-    ):
-        active = get_active_season()
-
-        if active is None:
-            await interaction.response.send_message(
-                "❌ 현재 진행 중인 시즌이 없습니다.",
-                ephemeral=True
-            )
-            return
-
-        ranking = get_all_season_player_stats(
-            active["id"]
-        )
-
-        ranking = [
-            player
-            for player in ranking
-            if player["wins"] + player["losses"] > 0
-        ]
-
-        if not ranking:
-            await interaction.response.send_message(
-                "❌ 현재 시즌 경기 기록이 없습니다.",
-                ephemeral=True
-            )
-            return
-
-        ranking = sorted(
-            ranking,
-            key=lambda player: (
-                player.get("mvp", 0),
-                player.get("rating", 1000)
-            ),
-            reverse=True
-        )
-
-        medals = ["🥇", "🥈", "🥉"]
-        message = ""
-
-        for index, player in enumerate(
-            ranking,
-            start=1
-        ):
-            if index <= 3:
-                icon = medals[index - 1]
-            else:
-                icon = f"{index}."
-
-            user_id = str(
-                player["discord_id"]
-            )
-
-            player_name = (
-                player.get("discord_nickname")
-                or get_player_name(user_id)
-            )
-
-            total = (
-                player["wins"]
-                + player["losses"]
-            )
-
-            message += (
-                f"{icon} **{player_name}**\n"
-                f"🏆 MVP {player.get('mvp', 0)}회\n"
-                f"🎮 {total}경기 | "
-                f"⭐ {player['rating']}점\n\n"
-            )
-
-        await interaction.response.send_message(
-            f"🏆 **{active['season_name']} 시즌 MVP 랭킹**\n\n"
-            f"{message}"
-        )
-
-    @discord.app_commands.command(
         name="시즌랭킹",
         description="현재 시즌 레이팅 랭킹을 확인합니다."
     )
@@ -1513,12 +1395,6 @@ class Season(commands.Cog):
         embed.add_field(
             name="🏅 최고 연승",
             value=f"{season_profile['best_win_streak']}연승",
-            inline=True
-        )
-
-        embed.add_field(
-            name="🏆 시즌 MVP",
-            value=f"{season_profile['mvp']}회",
             inline=True
         )
 

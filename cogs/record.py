@@ -907,7 +907,6 @@ class Record(commands.Cog):
         win_streak = profile["win_streak"]
         lose_streak = profile["lose_streak"]
         best_win_streak = profile["best_win_streak"]
-        mvp_count = profile["mvp"]
 
         tier = profile["tier"]
         main_position = profile["main_position"]
@@ -994,12 +993,6 @@ class Record(commands.Cog):
         embed.add_field(
             name="🏅 최고 연승",
             value=f"{best_win_streak}연승",
-            inline=False
-        )
-
-        embed.add_field(
-            name="🏆 MVP",
-            value=f"{mvp_count}회",
             inline=False
         )
 

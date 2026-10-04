@@ -567,31 +567,6 @@ class AdminMatch(commands.Cog):
                         auto_commit=False
                     )
 
-            mvp_id = last_match.get(
-                "mvp_discord_id"
-            )
-
-            if mvp_id is not None:
-                mvp_profile_row = PlayerService.get(
-                    str(mvp_id)
-                )
-
-                if mvp_profile_row is not None:
-                    mvp_profile = dict(
-                        mvp_profile_row
-                    )
-
-                    mvp_profile["mvp"] = max(
-                        0,
-                        mvp_profile["mvp"] - 1
-                    )
-
-                    PlayerService.update_stats(
-                        str(mvp_id),
-                        mvp_profile,
-                        auto_commit=False
-                    )
-
             deleted = delete_last_match(
                 room_id=room.room_id,
                 auto_commit=False
@@ -629,8 +604,7 @@ class AdminMatch(commands.Cog):
                         f"방 번호: **{room.room_id}**\n"
                         f"취소된 경기: **#{match_id}**\n\n"
                         "전체 및 시즌 레이팅, Hidden MMR, "
-                        "배치 경기 수, 승패, 연승·연패, "
-                        "MVP 기록이 복구되었습니다."
+                        "배치 경기 수, 승패, 연승·연패 기록이 복구되었습니다."
                     )
                 )
             )
@@ -1076,144 +1050,13 @@ class AdminMatch(commands.Cog):
         )
 
     @discord.app_commands.command(
-        name="관리자경기결과",
-        description="MVP 투표 없이 관리자가 승리팀과 MVP를 직접 기록합니다."
-    )
-    async def admin_match_result(
-        self,
-        interaction: discord.Interaction,
-        승리팀: Literal["레드", "블루"],
-        mvp: discord.Member
-    ):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
-            return
-
-        join_cog = get_join_cog(self.bot)
-        match_cog = self.bot.get_cog("Match")
-        if join_cog is None or match_cog is None:
-            await interaction.response.send_message(
-                "❌ 경기 처리 기능을 불러오지 못했습니다.",
-                ephemeral=True
-            )
-            return
-
-        if not await join_cog.require_room(interaction):
-            return
-
-        room = join_cog.active_room
-        async with room.operation_lock:
-            if room.mvp_vote_in_progress:
-                await interaction.response.send_message(
-                    "❌ 이미 MVP 투표가 진행 중입니다.",
-                    ephemeral=True
-                )
-                return
-
-            if room.match_transaction_active:
-                await interaction.response.send_message(
-                    "❌ 현재 경기 결과를 처리 중입니다.",
-                    ephemeral=True
-                )
-                return
-
-            if not room.match_in_progress or room.current_teams is None:
-                await interaction.response.send_message(
-                    "❌ 먼저 팀을 생성하고 `/경기시작`을 실행해주세요.",
-                    ephemeral=True
-                )
-                return
-
-            player_ids = {
-                str(user_id)
-                for team in room.current_teams.values()
-                for user_id in team.values()
-            }
-            if str(mvp.id) not in player_ids:
-                await interaction.response.send_message(
-                    "❌ MVP는 현재 경기 참가자만 선택할 수 있습니다.",
-                    ephemeral=True
-                )
-                return
-
-            await interaction.response.defer(ephemeral=True)
-            winner = "red" if 승리팀 == "레드" else "blue"
-
-            try:
-                previous_match = get_last_match(room_id=room.room_id)
-                previous_match_id = (
-                    previous_match["id"]
-                    if previous_match is not None
-                    else None
-                )
-                await match_cog.process_match_result(
-                    interaction,
-                    winner,
-                    str(mvp.id),
-                    room
-                )
-                saved_match = get_last_match(room_id=room.room_id)
-                if (
-                    saved_match is None
-                    or saved_match["id"] == previous_match_id
-                    or saved_match["winner"] != winner
-                    or str(saved_match["mvp_discord_id"]) != str(mvp.id)
-                ):
-                    raise RuntimeError("관리자 경기 결과 검증에 실패했습니다.")
-
-            except Exception:
-                logger.exception(
-                    "관리자 경기 결과 처리 실패 | 방=%s",
-                    room.room_id
-                )
-                if room.match_transaction_active:
-                    rollback_transaction()
-                    room.match_transaction_active = False
-                    room.match_transaction_committed = False
-                    if room.transaction_series_score is not None:
-                        room.series_score = dict(room.transaction_series_score)
-                    if room.transaction_series_game is not None:
-                        room.series_game = room.transaction_series_game
-                    room.pending_match_token = None
-                    room.pending_series_score = None
-                    room.pending_series_game = None
-                room.match_in_progress = False
-                join_cog.save_rooms_state()
-                await interaction.followup.send(
-                    "❌ 경기 결과 처리 중 오류가 발생했습니다. 로그를 확인해주세요.",
-                    ephemeral=True
-                )
-                return
-
-            await interaction.followup.send(
-                "✅ 관리자 경기 결과 처리가 완료되었습니다.\n"
-                f"승리팀: {승리팀}\nMVP: {mvp.mention}",
-                ephemeral=True
-            )
-
-    @discord.app_commands.command(
         name="경기복구",
         description="누락된 BO3 결과를 선택한 세트부터 정상 처리로 복구합니다."
-    )
-    @discord.app_commands.describe(
-        시작세트="복구를 시작할 세트",
-        일세트_mvp="1세트 MVP (레드팀 승리)",
-        이세트_mvp="2세트 MVP (블루팀 승리)",
-        삼세트_mvp="3세트 MVP (레드팀 승리)",
-        일세트_mvp_id="1세트 MVP ID (멤버 선택 불가 시)",
-        이세트_mvp_id="2세트 MVP ID (멤버 선택 불가 시)",
-        삼세트_mvp_id="3세트 MVP ID (멤버 선택 불가 시)"
     )
     async def recover_match(
         self,
         interaction: discord.Interaction,
-        시작세트: Literal["1세트", "2세트", "3세트"],
-        일세트_mvp: Optional[discord.Member] = None,
-        이세트_mvp: Optional[discord.Member] = None,
-        삼세트_mvp: Optional[discord.Member] = None,
-        일세트_mvp_id: Optional[str] = None,
-        이세트_mvp_id: Optional[str] = None,
-        삼세트_mvp_id: Optional[str] = None
+        시작세트: Literal["1세트", "2세트", "3세트"]
     ):
         """선택한 시작 세트부터 기존 정상 경기 처리 경로로 복구합니다."""
         if not is_admin(interaction):
@@ -1241,13 +1084,7 @@ class AdminMatch(commands.Cog):
                 join_cog,
                 match_cog,
                 room,
-                시작세트,
-                일세트_mvp,
-                이세트_mvp,
-                삼세트_mvp,
-                일세트_mvp_id,
-                이세트_mvp_id,
-                삼세트_mvp_id
+                시작세트
             )
 
     async def _recover_match_locked(
@@ -1256,13 +1093,7 @@ class AdminMatch(commands.Cog):
         join_cog,
         match_cog,
         room,
-        start_set: str,
-        first_mvp: Optional[discord.Member],
-        second_mvp: Optional[discord.Member],
-        third_mvp: Optional[discord.Member],
-        first_mvp_id_text: Optional[str],
-        second_mvp_id_text: Optional[str],
-        third_mvp_id_text: Optional[str]
+        start_set: str
     ):
         if room.match_transaction_active:
             await interaction.response.send_message(
@@ -1273,7 +1104,7 @@ class AdminMatch(commands.Cog):
 
         if room.mvp_vote_in_progress or room.match_in_progress:
             await interaction.response.send_message(
-                "❌ 진행 중인 경기 또는 MVP 투표가 있어 복구할 수 없습니다.",
+                "❌ 진행 중인 경기가 있어 복구할 수 없습니다.",
                 ephemeral=True
             )
             return
@@ -1297,29 +1128,10 @@ class AdminMatch(commands.Cog):
             )
             return
 
-        def resolve_mvp_id(member, id_text):
-            normalized_text = None
-            if id_text:
-                normalized_text = id_text.strip()
-                if (
-                    normalized_text.startswith("<@")
-                    and normalized_text.endswith(">")
-                ):
-                    normalized_text = normalized_text[2:-1]
-                if normalized_text.startswith("!"):
-                    normalized_text = normalized_text[1:]
-            member_id = str(member.id) if member is not None else None
-            if member_id and normalized_text and member_id != normalized_text:
-                return "CONFLICT"
-            return member_id or normalized_text
-
-        first_mvp_id = resolve_mvp_id(first_mvp, first_mvp_id_text)
-        second_mvp_id = resolve_mvp_id(second_mvp, second_mvp_id_text)
-        third_mvp_id = resolve_mvp_id(third_mvp, third_mvp_id_text)
         all_results = [
-            ("1세트", "red", first_mvp_id),
-            ("2세트", "blue", second_mvp_id),
-            ("3세트", "red", third_mvp_id)
+            ("1세트", "red"),
+            ("2세트", "blue"),
+            ("3세트", "red")
         ]
         start_index = {
             "1세트": 0,
@@ -1327,34 +1139,6 @@ class AdminMatch(commands.Cog):
             "3세트": 2
         }[start_set]
         results_to_apply = all_results[start_index:]
-        missing_mvp_sets = [
-            set_name
-            for set_name, _, mvp_id in results_to_apply
-            if not mvp_id
-        ]
-        if missing_mvp_sets:
-            await interaction.response.send_message(
-                "❌ 복구할 세트의 MVP를 모두 선택해주세요: "
-                + ", ".join(missing_mvp_sets),
-                ephemeral=True
-            )
-            return
-
-        invalid_mvp_sets = [
-            set_name
-            for set_name, _, mvp_id in results_to_apply
-            if mvp_id == "CONFLICT"
-            or not mvp_id.isdigit()
-            or mvp_id not in player_ids
-        ]
-        if invalid_mvp_sets:
-            await interaction.response.send_message(
-                "❌ 현재 팀 참가자가 아닌 MVP가 있습니다: "
-                + ", ".join(invalid_mvp_sets),
-                ephemeral=True
-            )
-            return
-
         expected_states = {
             "1세트": ({"red": 0, "blue": 0}, 0),
             "2세트": ({"red": 1, "blue": 0}, 1),
@@ -1394,16 +1178,10 @@ class AdminMatch(commands.Cog):
                 for player in get_match_players(last_match["id"])
             }
             previous_set = all_results[start_index - 1]
-            _, previous_winner, previous_mvp_id = previous_set
-            previous_mvp_matches = (
-                previous_mvp_id is None
-                or str(last_match["mvp_discord_id"])
-                == previous_mvp_id
-            )
+            _, previous_winner = previous_set
             if (
                 recorded_ids != player_ids
                 or last_match["winner"] != previous_winner
-                or not previous_mvp_matches
             ):
                 await interaction.response.send_message(
                     "❌ 최근 DB 기록이 선택한 시작 세트의 직전 결과와 "
@@ -1427,14 +1205,13 @@ class AdminMatch(commands.Cog):
                 else None
             )
 
-            for set_name, winner, mvp_id in results_to_apply:
+            for set_name, winner in results_to_apply:
                 room.match_in_progress = True
                 join_cog.save_rooms_state()
 
                 await match_cog.process_match_result(
                     interaction,
                     winner,
-                    mvp_id,
                     room
                 )
 
@@ -1443,7 +1220,6 @@ class AdminMatch(commands.Cog):
                     saved_match is None
                     or saved_match["id"] == previous_match_id
                     or saved_match["winner"] != winner
-                    or str(saved_match["mvp_discord_id"]) != mvp_id
                 ):
                     raise RuntimeError(
                         f"{set_name} 결과 검증에 실패했습니다."
@@ -1452,7 +1228,7 @@ class AdminMatch(commands.Cog):
                 previous_match_id = saved_match["id"]
                 team_icon = "🔴 레드" if winner == "red" else "🔵 블루"
                 completed_lines.append(
-                    f"{set_name}: {team_icon} 승 / MVP <@{mvp_id}>"
+                    f"{set_name}: {team_icon} 승"
                 )
 
         except Exception:

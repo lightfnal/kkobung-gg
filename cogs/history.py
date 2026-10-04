@@ -117,14 +117,6 @@ class History(commands.Cog):
             else "🔵 블루팀"
         )
 
-        mvp_id = match.get("mvp_discord_id")
-
-        mvp = (
-            f"<@{mvp_id}>"
-            if mvp_id
-            else "없음"
-        )
-
         embed = discord.Embed(
             title=f"📜 {경기번호}번째 경기"
         )
@@ -138,12 +130,6 @@ class History(commands.Cog):
         embed.add_field(
             name="🏆 승리팀",
             value=winner,
-            inline=False
-        )
-
-        embed.add_field(
-            name="🏅 MVP",
-            value=mvp,
             inline=False
         )
 
@@ -219,14 +205,6 @@ class History(commands.Cog):
             else "🔵 블루팀"
         )
 
-        mvp_id = match["mvp_discord_id"]
-
-        mvp = (
-            f"<@{mvp_id}>"
-            if mvp_id
-            else "없음"
-        )
-
         embed = discord.Embed(
             title="📜 최근 경기"
         )
@@ -240,12 +218,6 @@ class History(commands.Cog):
         embed.add_field(
             name="🏆 승리팀",
             value=winner,
-            inline=False
-        )
-
-        embed.add_field(
-            name="🏅 MVP",
-            value=mvp,
             inline=False
         )
 
