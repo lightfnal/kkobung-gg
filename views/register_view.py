@@ -40,7 +40,10 @@ class RegisterModal(discord.ui.Modal):
 
         self.highest_tier = discord.ui.TextInput(
             label="최고 티어",
-            placeholder="브론즈 / 실버 / 골드 / 플레 / 다이아 / M1~M9 / GM / C",
+            placeholder=(
+                "아이언 / 브론즈 / 실버 / 골드 / 플레 / 에메랄드 / "
+                "다이아 / M1~M9 / GM / C"
+            ),
             max_length=24
         )
 
