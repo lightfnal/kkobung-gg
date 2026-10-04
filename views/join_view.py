@@ -16,6 +16,10 @@ from services.team_balancer import (
     generate_balanced_teams,
     validate_team_profiles
 )
+from storage.sqlite_db import (
+    get_active_season,
+    get_season_player_stats
+)
 from utils.room_display import format_room_status
 
 
@@ -708,7 +712,30 @@ class JoinView(discord.ui.View):
         await interaction.response.defer()
 
 
-        profiles = self.join_cog.profiles
+        # 시즌이 진행 중이면 전체 누적 레이팅 대신 이번 시즌 레이팅으로
+        # 팀을 계산하고 표시합니다. 새 시즌 참가자는 1000점에서 시작합니다.
+        active_season = get_active_season()
+        profiles = {
+            user_id: dict(profile)
+            for user_id, profile in self.join_cog.profiles.items()
+        }
+        if active_season is not None:
+            for user_id in players:
+                profile = profiles.get(user_id)
+                if profile is None:
+                    continue
+                season_stats = get_season_player_stats(
+                    active_season["id"],
+                    user_id
+                )
+                season_rating = int(
+                    (season_stats or {}).get("rating") or 1000
+                )
+                profile["rating"] = season_rating
+                profile["hidden_mmr"] = season_rating
+                # 포지션별 MMR/최근 폼도 시즌 전 자료를 이어받지 않게 합니다.
+                profile["position_ratings"] = {}
+                profile["recent_position_form"] = {}
 
         validation_errors = (
             validate_team_profiles(
