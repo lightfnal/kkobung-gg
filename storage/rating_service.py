@@ -23,7 +23,6 @@ class RatingService:
     - 승/패
     - 연승/연패
     - 최고 연승
-    - MVP
     - 티어 변화 확인용 데이터
 
     DB 저장은 이 서비스에서 하지 않습니다.
@@ -51,7 +50,6 @@ class RatingService:
         team_avg_rating,
         enemy_avg_rating,
         enemy_avg_mmr,
-        is_mvp=False
     ):
         """
         플레이어 1명의 경기 결과를 계산합니다.
@@ -168,20 +166,6 @@ class RatingService:
 
 
         # ==============================
-        # 경기 전 MVP
-        # ==============================
-
-        mvp_before = (
-            RatingService._safe_int(
-                updated_profile.get(
-                    "mvp",
-                    0
-                )
-            )
-        )
-
-
-        # ==============================
         # 경기 전 티어
         # ==============================
 
@@ -235,11 +219,6 @@ class RatingService:
                     win_streak_after
                     if won
                     else 0
-                ),
-                is_mvp=(
-                    bool(is_mvp)
-                    if won
-                    else False
                 )
             )
         )
@@ -315,27 +294,6 @@ class RatingService:
 
 
         # ==============================
-        # MVP
-        # ==============================
-
-        if (
-            won
-            and is_mvp
-        ):
-
-            mvp_after = (
-                mvp_before
-                + 1
-            )
-
-        else:
-
-            mvp_after = (
-                mvp_before
-            )
-
-
-        # ==============================
         # 티어
         # ==============================
 
@@ -379,10 +337,6 @@ class RatingService:
         updated_profile[
             "best_win_streak"
         ] = best_win_streak_after
-
-        updated_profile[
-            "mvp"
-        ] = mvp_after
 
 
         # ==============================
@@ -463,20 +417,6 @@ class RatingService:
             "best_win_streak_after":
                 best_win_streak_after,
 
-            # MVP
-            "mvp_before":
-                mvp_before,
-
-            "mvp_after":
-                mvp_after,
-
             # 경기 결과
-            "won":
-                bool(won),
-
-            "is_mvp":
-                bool(
-                    is_mvp
-                    and won
-                )
+            "won": bool(won)
         }
