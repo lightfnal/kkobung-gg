@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import discord
 
 from config import (
@@ -27,6 +28,11 @@ from utils.room_display import format_room_status
 
 
 logger = logging.getLogger(__name__)
+
+AUCTION_TEAM_BUDGET = 1000
+AUCTION_MIN_BID = 50
+AUCTION_BID_STEP = 50
+AUCTION_LOT_SECONDS = 15
 
 
     
@@ -242,11 +248,15 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        await interaction.response.edit_message(
-            content="⚖️ 자동 밸런스 팀을 편성하고 있습니다…",
-            view=None
-        )
-        await self.recruit_view.generate_teams(interaction)
+        self.recruit_view.team_generating = True
+        try:
+            await interaction.response.edit_message(
+                content="⚖️ 자동 밸런스 팀을 편성하고 있습니다…",
+                view=None
+            )
+            await self.recruit_view.generate_teams(interaction)
+        finally:
+            self.recruit_view.team_generating = False
 
     @discord.ui.button(
         label="캡틴 드래프트",
@@ -284,14 +294,75 @@ class TeamModeView(discord.ui.View):
             player_ids,
             profiles
         )
-        await interaction.response.edit_message(
-            content=(
-                "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
-                "캡틴도 각자 한 팀에 포함됩니다."
-            ),
-            view=setup_view
+        self.recruit_view.team_generating = True
+        self.recruit_view._captain_setup_view = setup_view
+        try:
+            await interaction.response.edit_message(
+                content=(
+                    "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
+                    "캡틴도 각자 한 팀에 포함됩니다."
+                ),
+                view=setup_view
+            )
+            setup_view.message = interaction.message
+        except discord.HTTPException:
+            self.recruit_view._captain_setup_view = None
+            self.recruit_view.team_generating = False
+            raise
+
+    @discord.ui.button(
+        label="경매 내전",
+        emoji="🔨",
+        style=discord.ButtonStyle.secondary
+    )
+    async def auction_button(self, interaction, button):
+        if self.recruit_view.team_generating:
+            await interaction.response.send_message(
+                "⏳ 이미 팀 편성 또는 드래프트가 진행 중입니다.",
+                ephemeral=True
+            )
+            return
+        player_ids = list(self.room.players.keys())
+        if len(player_ids) != MAX_PLAYERS:
+            await interaction.response.send_message(
+                f"❌ 참가자가 {MAX_PLAYERS}명 모여야 경매를 시작할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+        profiles = _season_profiles_for_players(
+            self.join_cog,
+            player_ids
         )
-        setup_view.message = interaction.message
+        errors = validate_team_profiles(player_ids, profiles)
+        if errors:
+            await interaction.response.send_message(
+                "❌ 참가자 프로필의 포지션 정보를 확인해주세요.\n"
+                + "\n".join(f"• {error}" for error in errors),
+                ephemeral=True
+            )
+            return
+
+        setup_view = AuctionSetupView(
+            self.recruit_view,
+            player_ids,
+            profiles
+        )
+        self.recruit_view.team_generating = True
+        self.recruit_view._auction_setup_view = setup_view
+        try:
+            await interaction.response.edit_message(
+                content=(
+                    "🔨 경매 내전 준비: 캡틴 2명을 선택하고 시작을 눌러주세요.\n"
+                    f"팀별 예산은 {AUCTION_TEAM_BUDGET}포인트이며, "
+                    f"선수 시작가는 {AUCTION_MIN_BID}포인트입니다."
+                ),
+                view=setup_view
+            )
+            setup_view.message = interaction.message
+        except discord.HTTPException:
+            self.recruit_view._auction_setup_view = None
+            self.recruit_view.team_generating = False
+            raise
 
 
 class CaptainSelection(discord.ui.Select):
@@ -323,6 +394,686 @@ class CaptainSelection(discord.ui.Select):
         )
 
 
+class AuctionSetupView(discord.ui.View):
+    """경매 시작 전에 관리자가 두 캡틴을 지정합니다."""
+
+    def __init__(self, recruit_view, player_ids, profiles):
+        super().__init__(timeout=180)
+        self.recruit_view = recruit_view
+        self.join_cog = recruit_view.join_cog
+        self.room = recruit_view.room
+        self.player_ids = list(player_ids)
+        self.profiles = profiles
+        self.selected_captains = []
+        self.message = None
+        self.started = False
+        self.lock_acquired = False
+        self.previous_recruit_closed = recruit_view.recruit_closed
+        self.add_item(CaptainSelection(self))
+
+    def _release_room_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
+
+    async def _rollback_start(self):
+        self._release_room_lock()
+        self.recruit_view.team_generating = False
+        self.recruit_view._auction_setup_view = None
+        self.recruit_view.recruit_closed = self.previous_recruit_closed
+        await self.recruit_view.restore_recruitment_controls()
+
+    @discord.ui.button(
+        label="경매 시작",
+        emoji="🔨",
+        style=discord.ButtonStyle.success,
+        row=1
+    )
+    async def start_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if not self.join_cog.activate_room(self.room):
+            await interaction.response.send_message(
+                "❌ 연결된 내전 방을 찾지 못했습니다.",
+                ephemeral=True
+            )
+            return
+        if (
+            self.recruit_view._auction_setup_view is not self
+            or self.started
+        ):
+            await interaction.response.send_message(
+                "⏳ 경매가 이미 시작됐거나 이 설정창이 만료되었습니다.",
+                ephemeral=True
+            )
+            return
+        if list(self.room.players.keys()) != self.player_ids:
+            await interaction.response.send_message(
+                "❌ 참가 명단이 바뀌었습니다. 팀 생성 버튼부터 다시 눌러주세요.",
+                ephemeral=True
+            )
+            await self._rollback_start()
+            return
+        if len(self.selected_captains) != 2:
+            await interaction.response.send_message(
+                "❌ 먼저 캡틴 2명을 선택해주세요.",
+                ephemeral=True
+            )
+            return
+        if (
+            self.room.current_teams is not None
+            or self.room.match_in_progress
+            or self.room.mvp_vote_in_progress
+            or self.room.match_transaction_active
+        ):
+            await interaction.response.send_message(
+                "❌ 이미 팀이 생성됐거나 경기가 진행 중입니다.",
+                ephemeral=True
+            )
+            await self._rollback_start()
+            return
+        if self.room.team_generation_lock.locked():
+            await interaction.response.send_message(
+                "⏳ 이 내전방에서 다른 팀 생성 작업이 진행 중입니다.",
+                ephemeral=True
+            )
+            return
+
+        self.started = True
+        self.recruit_view._auction_setup_view = None
+        await interaction.response.defer(ephemeral=True)
+        await self.room.team_generation_lock.acquire()
+        self.lock_acquired = True
+
+        if list(self.room.players.keys()) != self.player_ids:
+            await self._rollback_start()
+            await interaction.followup.send(
+                "❌ 경매 시작 중 참가 명단이 바뀌어 취소했습니다.",
+                ephemeral=True
+            )
+            return
+
+        self.recruit_view._draft_was_closed = self.recruit_view.recruit_closed
+        self.recruit_view.recruit_closed = True
+        for item in self.recruit_view.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+        if self.recruit_view.message is not None:
+            try:
+                await self.recruit_view.message.edit(
+                    embed=self.recruit_view.create_embed(),
+                    view=self.recruit_view
+                )
+            except discord.HTTPException:
+                logger.exception("경매 시작 시 모집 버튼 잠금 실패")
+
+        auction_view = AuctionView(
+            self.recruit_view,
+            self.player_ids,
+            self.profiles,
+            red_captain=self.selected_captains[0],
+            blue_captain=self.selected_captains[1]
+        )
+        try:
+            message, _ = await self.join_cog.send_output_message(
+                room=self.room,
+                fallback_channel=interaction.channel,
+                embed=auction_view.create_embed(),
+                view=auction_view
+            )
+        except discord.HTTPException:
+            logger.exception("경매 진행 메시지 전송 실패 | 방=%s", self.room.room_id)
+            message = None
+        if message is None:
+            await self._rollback_start()
+            await interaction.followup.send(
+                "❌ 경매 메시지를 보낼 수 없습니다. 채널 권한을 확인해주세요.",
+                ephemeral=True
+            )
+            return
+
+        auction_view.message = message
+        auction_view.lock_acquired = True
+        self.lock_acquired = False
+        auction_view.start_lot_timer()
+        if interaction.message is not None:
+            try:
+                await interaction.message.edit(
+                    content="✅ 경매를 시작했습니다. 모집 채널의 경매 메시지를 확인해주세요.",
+                    view=None
+                )
+            except discord.HTTPException:
+                pass
+        await interaction.followup.send(
+            f"✅ 경매를 시작했습니다.\n진행 메시지: {message.jump_url}",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="취소",
+        emoji="✖️",
+        style=discord.ButtonStyle.secondary,
+        row=1
+    )
+    async def cancel_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if self.started:
+            await interaction.response.send_message(
+                "⏳ 경매가 이미 시작되었습니다.",
+                ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        self.stop()
+        await self._rollback_start()
+        await interaction.followup.send(
+            "경매 설정을 취소했습니다.",
+            ephemeral=True
+        )
+
+    async def on_timeout(self):
+        if not self.started and self.recruit_view._auction_setup_view is self:
+            self.stop()
+            await self._rollback_start()
+
+
+class AuctionBidButton(discord.ui.Button):
+    def __init__(self, auction_view, side, lot_index):
+        self.auction_view = auction_view
+        self.side = side
+        self.lot_index = lot_index
+        bid = (
+            AUCTION_MIN_BID
+            if auction_view.current_bid == 0
+            else auction_view.current_bid + AUCTION_BID_STEP
+        )
+        team_name = "레드" if side == "red" else "블루"
+        label = f"{team_name} {bid}점 입찰"
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction):
+        await self.auction_view.place_bid(
+            interaction,
+            self.side,
+            expected_lot=self.lot_index
+        )
+
+
+class AuctionView(discord.ui.View):
+    """두 캡틴이 가상 포인트로 선수 8명을 영입하는 경매입니다."""
+
+    def __init__(
+        self,
+        recruit_view,
+        player_ids,
+        profiles,
+        red_captain,
+        blue_captain
+    ):
+        super().__init__(timeout=86400)
+        self.recruit_view = recruit_view
+        self.join_cog = recruit_view.join_cog
+        self.room = recruit_view.room
+        self.player_ids = list(player_ids)
+        self.profiles = profiles
+        self.captains = {"red": red_captain, "blue": blue_captain}
+        self.teams = {"red": [red_captain], "blue": [blue_captain]}
+        self.budgets = {
+            "red": AUCTION_TEAM_BUDGET,
+            "blue": AUCTION_TEAM_BUDGET
+        }
+        self.spent = {"red": 0, "blue": 0}
+        self.purchase_prices = {red_captain: 0, blue_captain: 0}
+        self.lots = [
+            user_id for user_id in self.player_ids
+            if user_id not in (red_captain, blue_captain)
+        ]
+        random.shuffle(self.lots)
+        self.lot_index = 0
+        self.current_bid = 0
+        self.current_bidder = None
+        self._auction_lock = asyncio.Lock()
+        self._timer_task = None
+        self._finished = False
+        self.lock_acquired = False
+        self.message = None
+        self._refresh_controls()
+
+    def _refresh_controls(self):
+        self.clear_items()
+        if self.lot_index < len(self.lots) and not self._finished:
+            self.add_item(AuctionBidButton(self, "red", self.lot_index))
+            self.add_item(AuctionBidButton(self, "blue", self.lot_index))
+            cancel = discord.ui.Button(
+                label="경매 취소",
+                emoji="⏹️",
+                style=discord.ButtonStyle.danger,
+                row=1
+            )
+            cancel.callback = self.cancel_button
+            self.add_item(cancel)
+
+    def _player_label(self, user_id):
+        profile = self.profiles.get(user_id, {})
+        rating = profile.get("rating", 1000)
+        main = profile.get("main_position", "-")
+        sub = profile.get("sub_position", "-")
+        return f"<@{user_id}> · ⭐{rating} · {main}/{sub}"
+
+    def create_embed(self):
+        if self.lot_index < len(self.lots):
+            current_player = self.lots[self.lot_index]
+            next_bid = (
+                AUCTION_MIN_BID
+                if self.current_bid == 0
+                else self.current_bid + AUCTION_BID_STEP
+            )
+            if self.current_bidder is None:
+                bidding_text = f"입찰 대기 · 시작가 **{AUCTION_MIN_BID}점**"
+            else:
+                bidding_text = (
+                    f"현재 최고 입찰: **{self.current_bid}점** · "
+                    f"{'🔴 레드팀' if self.current_bidder == 'red' else '🔵 블루팀'}\n"
+                    f"다음 입찰: **{next_bid}점**"
+                )
+            auction_description = (
+                f"경매 대상 **{self.lot_index + 1}/{len(self.lots)}**\n"
+                f"{self._player_label(current_player)}\n\n"
+                f"{bidding_text}\n"
+                f"입찰 시간은 {AUCTION_LOT_SECONDS}초이며, 입찰할 때마다 초기화됩니다."
+            )
+        else:
+            auction_description = "경매 결과를 정리하고 있습니다…"
+
+        embed = discord.Embed(
+            title=f"🔨 {self.room.room_name} · 선수 경매",
+            description=(
+                f"{auction_description}\n\n"
+                f"팀별 예산 **{AUCTION_TEAM_BUDGET}포인트** · "
+                f"입찰 단위 **{AUCTION_BID_STEP}포인트**\n"
+                "경매 포인트는 시즌 레이팅과 별도로 사용됩니다.\n"
+                "캡틴은 팀에 자동 포함되며, 예산은 나머지 4명 영입에 사용합니다."
+            )
+        )
+        for side, label in (("red", "🔴 레드팀"), ("blue", "🔵 블루팀")):
+            roster = self.teams[side]
+            roster_lines = [
+                f"<@{user_id}>" + (
+                    " · 캡틴" if user_id == self.captains[side]
+                    else f" · {self.purchase_prices.get(user_id, 0)}점"
+                )
+                for user_id in roster
+            ]
+            embed.add_field(
+                name=(
+                    f"{label} · {len(roster)}/5명 · "
+                    f"잔액 {self.budgets[side]}점"
+                ),
+                value="\n".join(roster_lines),
+                inline=True
+            )
+        embed.set_footer(
+            text=(
+                "선수 순서는 무작위입니다. 캡틴만 입찰할 수 있으며, 무입찰 선수는 "
+                "최소가로 현재 인원이 적은 팀에 자동 배정됩니다."
+            )
+        )
+        return embed
+
+    def start_lot_timer(self):
+        old_task = self._timer_task
+        current_task = asyncio.current_task()
+        if old_task is not None and old_task is not current_task:
+            old_task.cancel()
+        if self.lot_index < len(self.lots) and not self._finished:
+            token = self.lot_index
+            self._timer_task = asyncio.create_task(
+                self._close_lot_after_timeout(token)
+            )
+
+    async def _close_lot_after_timeout(self, expected_lot):
+        try:
+            await asyncio.sleep(AUCTION_LOT_SECONDS)
+            async with self._auction_lock:
+                if self._finished or expected_lot != self.lot_index:
+                    return
+                await self._close_current_lot()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("경매 자동 마감 처리 중 오류 | 방=%s", self.room.room_id)
+            if not self._finished:
+                await self.abort("경매 처리 중 오류가 발생해 경매를 취소했습니다.")
+
+    async def place_bid(self, interaction, side, expected_lot):
+        await interaction.response.defer()
+        async with self._auction_lock:
+            if self._finished or self.is_finished():
+                await interaction.followup.send(
+                    "❌ 이 경매는 이미 종료되었습니다.",
+                    ephemeral=True
+                )
+                return
+            if expected_lot != self.lot_index:
+                await interaction.followup.send(
+                    "🔄 경매 대상이 바뀌었습니다. 최신 경매 메시지에서 입찰해주세요.",
+                    ephemeral=True
+                )
+                return
+            captain_id = self.captains[side]
+            if str(interaction.user.id) != captain_id and not is_admin(interaction):
+                await interaction.followup.send(
+                    f"❌ {'레드팀' if side == 'red' else '블루팀'} 캡틴만 입찰할 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+            if self.current_bidder == side:
+                await interaction.followup.send(
+                    "이미 이 팀이 최고 입찰 중입니다.",
+                    ephemeral=True
+                )
+                return
+            if (
+                list(self.room.players.keys()) != self.player_ids
+                or self.room.current_teams is not None
+                or self.room.match_in_progress
+            ):
+                await interaction.followup.send(
+                    "❌ 참가자나 경기 상태가 바뀌어 경매를 취소합니다.",
+                    ephemeral=True
+                )
+                await self.abort("참가자나 경기 상태가 변경되어 경매가 취소되었습니다.")
+                return
+
+            bid = (
+                AUCTION_MIN_BID
+                if self.current_bid == 0
+                else self.current_bid + AUCTION_BID_STEP
+            )
+            slots_after_purchase = 5 - (len(self.teams[side]) + 1)
+            reserve = slots_after_purchase * AUCTION_MIN_BID
+            max_allowed_bid = self.budgets[side] - reserve
+            if bid > max_allowed_bid:
+                await interaction.followup.send(
+                    f"❌ 예산 부족입니다. 남은 팀원에게 최소 {reserve}점을 남겨야 해서 "
+                    f"최대 {max_allowed_bid}점까지 입찰할 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+
+            self.current_bid = bid
+            self.current_bidder = side
+            self._refresh_controls()
+            self.start_lot_timer()
+            await self._publish_current_state()
+
+    async def _choose_no_bid_side(self):
+        eligible = []
+        for side in ("red", "blue"):
+            if len(self.teams[side]) >= 5:
+                continue
+            slots_after_purchase = 5 - (len(self.teams[side]) + 1)
+            if self.budgets[side] >= AUCTION_MIN_BID * (slots_after_purchase + 1):
+                eligible.append(side)
+        if not eligible:
+            return None
+        return min(
+            eligible,
+            key=lambda side: (
+                len(self.teams[side]),
+                -self.budgets[side],
+                0 if side == "red" else 1
+            )
+        )
+
+    async def _close_current_lot(self):
+        if self._finished or self.lot_index >= len(self.lots):
+            return
+        if (
+            list(self.room.players.keys()) != self.player_ids
+            or self.room.current_teams is not None
+            or self.room.match_in_progress
+            or self.room.mvp_vote_in_progress
+        ):
+            await self.abort("참가자나 경기 상태가 바뀌어 경매를 취소했습니다.")
+            return
+
+        player_id = self.lots[self.lot_index]
+        if self.current_bidder is not None:
+            winner = self.current_bidder
+            price = self.current_bid
+            award_note = f"낙찰: {'레드팀' if winner == 'red' else '블루팀'} · {price}점"
+        else:
+            winner = await self._choose_no_bid_side()
+            if winner is None:
+                await self.abort("남은 예산으로 최소 입찰가를 감당할 수 없어 경매를 취소했습니다.")
+                return
+            price = AUCTION_MIN_BID
+            award_note = (
+                f"무입찰 자동 배정: {'레드팀' if winner == 'red' else '블루팀'} · "
+                f"{price}점"
+            )
+
+        self.teams[winner].append(player_id)
+        self.budgets[winner] -= price
+        self.spent[winner] += price
+        self.purchase_prices[player_id] = price
+        self.lot_index += 1
+        self.current_bid = 0
+        self.current_bidder = None
+
+        if self.lot_index >= len(self.lots):
+            await self._finish_auction()
+            return
+
+        self._refresh_controls()
+        await self._publish_current_state(
+            content=f"✅ {award_note} · <@{player_id}>"
+        )
+        self.start_lot_timer()
+
+    async def _publish_current_state(self, content=None):
+        if self.message is None or self._finished:
+            return
+        try:
+            await self.message.edit(
+                content=content,
+                embed=self.create_embed(),
+                view=self
+            )
+        except discord.HTTPException:
+            logger.exception("경매 메시지 갱신 실패 | 방=%s", self.room.room_id)
+            try:
+                replacement, _ = await self.join_cog.send_output_message(
+                    room=self.room,
+                    fallback_channel=getattr(self.message, "channel", None),
+                    content=content,
+                    embed=self.create_embed(),
+                    view=self
+                )
+            except Exception:
+                logger.exception("경매 대체 메시지 전송 실패 | 방=%s", self.room.room_id)
+                replacement = None
+            if replacement is None:
+                await self.abort("경매 메시지를 갱신할 수 없어 경매를 취소했습니다.")
+            else:
+                self.message = replacement
+
+    def _release_generation_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
+        self.recruit_view.team_generating = False
+
+    async def _finish_auction(self):
+        self._finished = True
+        self.stop()
+        timer_task = self._timer_task
+        if timer_task is not None and timer_task is not asyncio.current_task():
+            timer_task.cancel()
+
+        try:
+            red_assignment, _ = assign_positions(self.teams["red"], self.profiles)
+            blue_assignment, _ = assign_positions(self.teams["blue"], self.profiles)
+            self.join_cog.activate_room(self.room)
+            self.room.current_teams = {
+                "red": red_assignment,
+                "blue": blue_assignment
+            }
+            self.room.current_balance_prediction = None
+            self.join_cog.last_team_signature = create_team_signature(
+                self.teams["red"],
+                self.teams["blue"]
+            )
+            self.join_cog.save_rooms_state()
+        except Exception:
+            logger.exception("경매 팀 배정/저장 실패 | 방=%s", self.room.room_id)
+            self.room.current_teams = None
+            self.room.current_balance_prediction = None
+            self._finished = False
+            await self.abort("팀 배정 중 오류가 발생해 경매를 취소했습니다.")
+            return
+
+        self.recruit_view.recruit_closed = True
+        self.recruit_view.team_generating = False
+        for item in self.recruit_view.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = item.custom_id not in (
+                    "inhouse_list",
+                    "inhouse_reset"
+                )
+        self._release_generation_lock()
+        if self.recruit_view.message is not None:
+            try:
+                await self.recruit_view.message.edit(
+                    embed=self.recruit_view.create_embed(),
+                    view=self.recruit_view
+                )
+            except discord.HTTPException:
+                logger.exception("경매 완료 후 모집창 갱신 실패")
+
+        red_rating = sum(
+            int(self.profiles.get(user_id, {}).get("rating", 1000))
+            for user_id in self.teams["red"]
+        )
+        blue_rating = sum(
+            int(self.profiles.get(user_id, {}).get("rating", 1000))
+            for user_id in self.teams["blue"]
+        )
+        embed = discord.Embed(
+            title=f"✅ {self.room.room_name} · 경매 팀 편성 완료",
+            description=(
+                f"{format_room_status(self.room)}\n\n"
+                f"팀 레이팅 차이: **{abs(red_rating - blue_rating)}점**\n"
+                f"경매 지출: 레드 **{self.spent['red']}점**, "
+                f"블루 **{self.spent['blue']}점**"
+            )
+        )
+        for side, assignment, total, label in (
+            ("red", red_assignment, red_rating, "🔴 레드팀"),
+            ("blue", blue_assignment, blue_rating, "🔵 블루팀")
+        ):
+            lines = []
+            for position in POSITIONS:
+                user_id = assignment[position]
+                rating = self.profiles.get(user_id, {}).get("rating", 1000)
+                if user_id == self.captains[side]:
+                    acquisition = "캡틴"
+                else:
+                    acquisition = f"낙찰 {self.purchase_prices.get(user_id, 0)}점"
+                lines.append(
+                    f"**{position}** - <@{user_id}> ({rating}) · {acquisition}"
+                )
+            embed.add_field(
+                name=f"{label} · {total}점",
+                value="\n".join(lines),
+                inline=True
+            )
+
+        guild = getattr(self.message, "guild", None)
+        await self.join_cog.move_members_to_voice_channel(
+            guild=guild,
+            user_ids=blue_assignment.values(),
+            channel_id=self.room.blue_voice_channel_id
+        )
+        await self.join_cog.move_members_to_voice_channel(
+            guild=guild,
+            user_ids=red_assignment.values(),
+            channel_id=self.room.red_voice_channel_id
+        )
+        result_message, _ = await self.join_cog.send_output_message(
+            room=self.room,
+            fallback_channel=getattr(self.message, "channel", None),
+            embed=embed,
+            view=MatchControlView(self.join_cog)
+        )
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    embed=discord.Embed(
+                        title=f"✅ {self.room.room_name} · 경매 종료",
+                        description=(
+                            "최종 팀 편성 결과를 새 메시지에 게시했습니다."
+                            if result_message is not None
+                            else "팀 편성은 저장했지만 결과 메시지를 보내지 못했습니다."
+                        )
+                    ),
+                    view=None
+                )
+            except discord.HTTPException:
+                pass
+
+    async def abort(self, reason):
+        if self._finished:
+            return
+        self._finished = True
+        self.stop()
+        timer_task = self._timer_task
+        if timer_task is not None and timer_task is not asyncio.current_task():
+            timer_task.cancel()
+        self._release_generation_lock()
+        self.recruit_view.recruit_closed = getattr(
+            self.recruit_view,
+            "_draft_was_closed",
+            False
+        )
+        await self.recruit_view.restore_recruitment_controls()
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    content=f"⏹️ {reason}",
+                    embed=None,
+                    view=None
+                )
+            except discord.HTTPException:
+                pass
+
+    async def cancel_button(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        await interaction.response.defer(ephemeral=True)
+        async with self._auction_lock:
+            if self._finished:
+                await interaction.followup.send(
+                    "이미 종료된 경매입니다.",
+                    ephemeral=True
+                )
+                return
+            await self.abort("관리자가 경매를 취소했습니다.")
+        await interaction.followup.send("✅ 경매를 취소했습니다.", ephemeral=True)
+
+    async def on_timeout(self):
+        async with self._auction_lock:
+            if not self._finished:
+                await self.abort("경매 화면이 만료되어 경매를 취소했습니다.")
+
+
 class CaptainSetupView(discord.ui.View):
     def __init__(self, recruit_view, player_ids, profiles):
         super().__init__(timeout=180)
@@ -333,6 +1084,7 @@ class CaptainSetupView(discord.ui.View):
         self.profiles = profiles
         self.selected_captains = []
         self.message = None
+        self.started = False
         self.add_item(CaptainSelection(self))
 
     @discord.ui.button(
@@ -357,7 +1109,10 @@ class CaptainSetupView(discord.ui.View):
                 ephemeral=True
             )
             return
-        if self.recruit_view.team_generating:
+        if (
+            self.recruit_view._captain_setup_view is not self
+            or self.started
+        ):
             await interaction.response.send_message(
                 "⏳ 이미 팀 편성 또는 드래프트가 진행 중입니다.",
                 ephemeral=True
@@ -388,6 +1143,8 @@ class CaptainSetupView(discord.ui.View):
             )
             return
 
+        self.started = True
+        self.recruit_view._captain_setup_view = None
         await interaction.response.defer(ephemeral=True)
         self.recruit_view.team_generating = True
         self.recruit_view._draft_was_closed = self.recruit_view.recruit_closed
@@ -443,6 +1200,11 @@ class CaptainSetupView(discord.ui.View):
             ephemeral=True
         )
 
+    async def on_timeout(self):
+        if self.recruit_view._captain_setup_view is self:
+            self.recruit_view._captain_setup_view = None
+            self.recruit_view.team_generating = False
+
 
 class FirstPickButton(discord.ui.Button):
     def __init__(self, first_pick_view, side, label):
@@ -469,6 +1231,7 @@ class CaptainFirstPickView(discord.ui.View):
         self.profiles = profiles
         self.captains = {"red": captain1, "blue": captain2}
         self.votes = {}
+        self.vote_lock = asyncio.Lock()
         self.message = None
         self.add_item(FirstPickButton(self, "red", "캡틴1이 첫 픽"))
         self.add_item(FirstPickButton(self, "blue", "캡틴2가 첫 픽"))
@@ -514,52 +1277,66 @@ class CaptainFirstPickView(discord.ui.View):
                 ephemeral=True
             )
             return
-        if (
-            list(self.room.players.keys()) != self.player_ids
-            or self.room.current_teams is not None
-            or self.room.match_in_progress
-        ):
-            await interaction.response.defer(ephemeral=True)
-            await self.abort("참가자 명단이 변경되어 드래프트가 취소되었습니다.")
-            await interaction.followup.send(
-                "❌ 참가자 명단이 바뀌어 드래프트를 취소했습니다.",
-                ephemeral=True
-            )
-            return
+        await interaction.response.defer()
+        async with self.vote_lock:
+            if self.is_finished():
+                await interaction.followup.send(
+                    "이 첫 픽 선택은 이미 처리되었습니다.",
+                    ephemeral=True
+                )
+                return
+            if (
+                list(self.room.players.keys()) != self.player_ids
+                or self.room.current_teams is not None
+                or self.room.match_in_progress
+            ):
+                await self.abort("참가자 또는 경기 상태가 변경되어 드래프트가 취소되었습니다.")
+                await interaction.followup.send(
+                    "❌ 참가자나 경기 상태가 바뀌어 드래프트를 취소했습니다.",
+                    ephemeral=True
+                )
+                return
 
-        self.votes[user_id] = side
-        if (
-            len(self.votes) == 2
-            and len(set(self.votes.values())) == 1
-        ):
-            first_side = side
-            draft_view = CaptainDraftView(
-                self.recruit_view,
-                self.player_ids,
-                self.profiles,
-                red_captain=self.captains["red"],
-                blue_captain=self.captains["blue"],
-                first_side=first_side
-            )
-            draft_view.message = self.message
-            self.stop()
-            await interaction.response.edit_message(
-                embed=draft_view.create_embed(),
-                view=draft_view
-            )
-            return
+            self.votes[user_id] = side
+            if (
+                len(self.votes) == 2
+                and len(set(self.votes.values())) == 1
+            ):
+                first_side = side
+                draft_view = CaptainDraftView(
+                    self.recruit_view,
+                    self.player_ids,
+                    self.profiles,
+                    red_captain=self.captains["red"],
+                    blue_captain=self.captains["blue"],
+                    first_side=first_side
+                )
+                draft_view.message = self.message
+                self.stop()
+                await self.message.edit(
+                    embed=draft_view.create_embed(),
+                    view=draft_view
+                )
+                return
 
-        await interaction.response.edit_message(
-            embed=self.create_embed(),
-            view=self
-        )
+            await self.message.edit(
+                embed=self.create_embed(),
+                view=self
+            )
 
     async def cancel_button(self, interaction):
         if not is_admin(interaction):
             await send_admin_only_message(interaction)
             return
         await interaction.response.defer(ephemeral=True)
-        await self.abort("관리자가 캡틴 드래프트를 취소했습니다.")
+        async with self.vote_lock:
+            if self.is_finished():
+                await interaction.followup.send(
+                    "이미 종료된 드래프트입니다.",
+                    ephemeral=True
+                )
+                return
+            await self.abort("관리자가 캡틴 드래프트를 취소했습니다.")
         await interaction.followup.send(
             "✅ 드래프트를 취소했습니다.",
             ephemeral=True
@@ -585,12 +1362,17 @@ class CaptainFirstPickView(discord.ui.View):
                 pass
 
     async def on_timeout(self):
-        await self.abort("30분 동안 캡틴 간 합의가 없어 드래프트가 종료되었습니다.")
+        async with self.vote_lock:
+            if not self.is_finished():
+                await self.abort(
+                    "30분 동안 캡틴 간 합의가 없어 드래프트가 종료되었습니다."
+                )
 
 
 class DraftPlayerSelect(discord.ui.Select):
     def __init__(self, draft_view):
         self.draft_view = draft_view
+        self.turn_index = draft_view.turn_index
         side = draft_view.current_side
         pick_size = draft_view.current_pick_size
         remaining = [
@@ -619,7 +1401,11 @@ class DraftPlayerSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction):
-        await self.draft_view.pick_players(interaction, list(self.values))
+        await self.draft_view.pick_players(
+            interaction,
+            list(self.values),
+            expected_turn=self.turn_index
+        )
 
 
 class CaptainDraftView(discord.ui.View):
@@ -645,6 +1431,8 @@ class CaptainDraftView(discord.ui.View):
         self.blue_team = [blue_captain]
         self.first_side = first_side
         self.turn_index = 0
+        self._finishing = False
+        self._draft_lock = asyncio.Lock()
         self.message = None
         self._refresh_controls()
 
@@ -698,16 +1486,39 @@ class CaptainDraftView(discord.ui.View):
         embed.set_footer(text="선택 순서: 1명 → 2명 → 2명 → 2명 → 마지막 1명")
         return embed
 
-    async def pick_players(self, interaction, user_ids):
+    async def pick_players(self, interaction, user_ids, expected_turn):
+        # Acknowledge before waiting on another pick/cancel callback so queued
+        # interactions do not expire while the current message is being edited.
+        await interaction.response.defer()
+        async with self._draft_lock:
+            await self._pick_players_locked(
+                interaction,
+                user_ids,
+                expected_turn
+            )
+
+    async def _pick_players_locked(self, interaction, user_ids, expected_turn):
+        if self._finishing or self.is_finished():
+            await interaction.followup.send(
+                "❌ 이 드래프트는 이미 종료되었습니다.",
+                ephemeral=True
+            )
+            return
+        if expected_turn != self.turn_index:
+            await interaction.followup.send(
+                "🔄 선택 차례가 바뀌었습니다. 최신 드래프트 메시지에서 골라주세요.",
+                ephemeral=True
+            )
+            return
         expected_captain = self.captains[self.current_side]
         if str(interaction.user.id) != expected_captain and not is_admin(interaction):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ 지금은 <@{expected_captain}> 캡틴의 선택 차례입니다.",
                 ephemeral=True
             )
             return
         if len(user_ids) != self.current_pick_size:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ 이번 차례에는 {self.current_pick_size}명을 선택해야 합니다.",
                 ephemeral=True
             )
@@ -716,14 +1527,14 @@ class CaptainDraftView(discord.ui.View):
             user_id in self.red_team or user_id in self.blue_team
             for user_id in user_ids
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 이미 선택된 참가자가 포함되어 있습니다.",
                 ephemeral=True
             )
             return
         current_ids = list(self.room.players.keys())
         if current_ids != self.player_ids or self.room.current_teams is not None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 참가자 명단이나 팀 상태가 바뀌어 드래프트를 취소합니다.",
                 ephemeral=True
             )
@@ -733,11 +1544,11 @@ class CaptainDraftView(discord.ui.View):
         (self.red_team if side == "red" else self.blue_team).extend(user_ids)
         self.turn_index += 1
         if self.turn_index >= len(self.PICK_PATTERN):
-            await interaction.response.defer()
+            self._finishing = True
             await self.finish_draft()
             return
         self._refresh_controls()
-        await interaction.response.edit_message(
+        await self.message.edit(
             embed=self.create_embed(),
             view=self
         )
@@ -839,10 +1650,20 @@ class CaptainDraftView(discord.ui.View):
             await send_admin_only_message(interaction)
             return
         await interaction.response.defer(ephemeral=True)
-        await self.abort("관리자가 캡틴 드래프트를 취소했습니다.")
+        async with self._draft_lock:
+            if self._finishing or self.is_finished():
+                await interaction.followup.send(
+                    "⏳ 팀 편성을 마무리하고 있거나 드래프트가 종료되었습니다.",
+                    ephemeral=True
+                )
+                return
+            await self.abort("관리자가 캡틴 드래프트를 취소했습니다.")
         await interaction.followup.send("✅ 드래프트를 취소했습니다.", ephemeral=True)
 
     async def abort(self, reason):
+        if self._finishing:
+            return
+        self._finishing = True
         self.stop()
         self.recruit_view.team_generating = False
         self.recruit_view.recruit_closed = getattr(
@@ -862,7 +1683,9 @@ class CaptainDraftView(discord.ui.View):
                 pass
 
     async def on_timeout(self):
-        await self.abort("30분 동안 선택이 없어 드래프트가 종료되었습니다.")
+        async with self._draft_lock:
+            if not self.is_finished():
+                await self.abort("30분 동안 선택이 없어 드래프트가 종료되었습니다.")
 
 class JoinView(discord.ui.View):
 
@@ -877,6 +1700,8 @@ class JoinView(discord.ui.View):
 
         # 팀 생성 중복 실행 방지
         self.team_generating = False
+        self._captain_setup_view = None
+        self._auction_setup_view = None
 
         if len(self.join_cog.players) < MAX_PLAYERS:
             self.make_teams_button.disabled = True
@@ -953,7 +1778,12 @@ class JoinView(discord.ui.View):
         if players:
             participant_list = []
 
-            self.join_cog.reload_profiles()
+            # 모집 명단도 시즌2 레이팅을 표시합니다. 저장된 전체 시즌
+            # 프로필 rating을 그대로 쓰면 이전 시즌 점수가 노출됩니다.
+            display_profiles = _season_profiles_for_players(
+                self.join_cog,
+                players
+            )
 
             tier_short = {
                 "아이언": "I",
@@ -976,7 +1806,7 @@ class JoinView(discord.ui.View):
 
             for index, user_id in enumerate(players, start=1):
 
-                profile = self.join_cog.profiles.get(user_id)
+                profile = display_profiles.get(user_id)
 
                 if profile:
                     tier = tier_short.get(
@@ -1337,7 +2167,12 @@ class JoinView(discord.ui.View):
         room = self.join_cog.active_room
 
         if room.team_generation_lock.locked():
-            await interaction.response.send_message(
+            send_method = (
+                interaction.followup.send
+                if interaction.response.is_done()
+                else interaction.response.send_message
+            )
+            await send_method(
                 "⏳ 이 내전방은 이미 팀을 생성하고 있습니다.\n"
                 "현재 작업이 끝난 뒤 다시 시도해주세요.",
                 ephemeral=True
