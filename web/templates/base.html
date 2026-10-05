@@ -134,6 +134,18 @@
             통계
         </a>
 
+        <a
+            href="/betting"
+            class="
+                nav-link
+                {% if request.url.path.startswith('/betting') %}
+                    nav-active
+                {% endif %}
+            "
+        >
+            승부예측
+        </a>
+
     </div>
 
 
@@ -260,5 +272,4 @@
 </body>
 
 </html>
-
 

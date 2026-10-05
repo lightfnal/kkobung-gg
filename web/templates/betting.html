@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}승부예측 · 꼬붕.gg{% endblock %}
+
+{% block content %}
+<style>
+    .betting-page { max-width: 1050px; margin: 24px auto 64px; }
+    .betting-hero, .betting-card { background: #1d222c; border: 1px solid #303744; border-radius: 18px; padding: 24px; margin-bottom: 18px; }
+    .betting-hero h1 { margin: 0 0 8px; }
+    .betting-muted { color: #a7afbd; }
+    .betting-login, .betting-submit { display: inline-block; border: 0; border-radius: 10px; background: #5865f2; color: #fff; padding: 12px 18px; font-weight: 700; text-decoration: none; cursor: pointer; }
+    .betting-submit { background: #168b5b; }
+    .betting-message { background: #263c33; border: 1px solid #347355; border-radius: 10px; padding: 12px 16px; margin: 14px 0; }
+    .betting-topline, .betting-controls, .betting-pools { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    .betting-status { border-radius: 999px; background: #28303b; padding: 6px 12px; font-size: .9rem; }
+    .betting-status.open { color: #6de3a7; }
+    .betting-status.locked { color: #ffd36a; }
+    .betting-status.settled { color: #7dbdff; }
+    .betting-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0; }
+    .betting-team { border-radius: 14px; padding: 16px; background: #151920; border: 1px solid #343b49; }
+    .betting-team.red { border-top: 3px solid #f15b68; }
+    .betting-team.blue { border-top: 3px solid #55a9ff; }
+    .betting-team h3 { margin: 0 0 10px; }
+    .betting-team ul { margin: 0; padding-left: 20px; color: #d6dbe4; }
+    .betting-pool { flex: 1; min-width: 135px; background: #151920; padding: 12px 14px; border-radius: 10px; }
+    .betting-controls { justify-content: flex-start; margin-top: 14px; }
+    .betting-controls select, .betting-controls input { background: #11151b; color: #f4f6fa; border: 1px solid #424a58; border-radius: 8px; padding: 11px 12px; }
+    .betting-controls input { width: 135px; }
+    .betting-own { color: #d5dbea; margin-top: 12px; }
+    .betting-account { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    @media (max-width: 650px) { .betting-page { margin: 16px 0 40px; } .betting-card, .betting-hero { padding: 17px; } .betting-teams { grid-template-columns: 1fr; } }
+</style>
+
+<div class="betting-page">
+    <section class="betting-hero">
+        <h1>🎯 내전 승부예측</h1>
+        <p class="betting-muted">관전자 전용 무료 포인트 예측입니다. 현금 구매와 환전은 지원하지 않습니다.</p>
+        {% if message %}<div class="betting-message">{{ message }}</div>{% endif %}
+        {% if user %}
+        <div class="betting-account">
+            <strong>{{ user.username }}</strong>
+            <span>보유 포인트 <strong>{{ "{:,}".format(wallet or 0) }}</strong></span>
+            <form method="post" action="/betting/logout">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button class="betting-login" type="submit">로그아웃</button>
+            </form>
+        </div>
+        {% elif oauth_ready %}
+        <a class="betting-login" href="/betting/login">Discord로 로그인 · 첫 로그인 1,000점</a>
+        {% else %}
+        <p class="betting-muted">Discord 로그인을 사용하려면 Render 환경 변수 설정이 필요합니다.</p>
+        {% endif %}
+    </section>
+
+    {% for game in rounds %}
+    <article class="betting-card">
+        <div class="betting-topline">
+            <div>
+                <strong>{{ game.room_name }} · 경기 {{ game.game_number }}세트</strong>
+                <span class="betting-muted">(방 {{ game.room_id }})</span>
+            </div>
+            <span class="betting-status {{ game.status }}">
+                {% if game.status == 'open' %}베팅 진행 중{% elif game.status == 'locked' %}경기 진행 · 베팅 마감{% elif game.status == 'settled' %}정산 완료{% else %}경기 취소 · 환불 완료{% endif %}
+            </span>
+        </div>
+
+        <div class="betting-teams">
+            <section class="betting-team red">
+                <h3>🔴 레드팀</h3>
+                <ul>{% for player in game.red_team %}<li>{{ player.name }}</li>{% endfor %}</ul>
+            </section>
+            <section class="betting-team blue">
+                <h3>🔵 블루팀</h3>
+                <ul>{% for player in game.blue_team %}<li>{{ player.name }}</li>{% endfor %}</ul>
+            </section>
+        </div>
+
+        <div class="betting-pools">
+            <div class="betting-pool">레드팀 풀 <strong>{{ "{:,}".format(game.red_pool) }}점</strong><br><small>예상 배당 {% if game.red_odds %}{{ game.red_odds }}배{% else %}첫 베팅 대기{% endif %}</small></div>
+            <div class="betting-pool">블루팀 풀 <strong>{{ "{:,}".format(game.blue_pool) }}점</strong><br><small>예상 배당 {% if game.blue_odds %}{{ game.blue_odds }}배{% else %}첫 베팅 대기{% endif %}</small></div>
+            <div class="betting-pool">전체 베팅 <strong>{{ "{:,}".format(game.red_pool + game.blue_pool) }}점</strong></div>
+        </div>
+
+        {% if game.winner %}<p class="betting-own">승리 팀: <strong>{{ '🔴 레드팀' if game.winner == 'red' else '🔵 블루팀' }}</strong> · 경기 기록 #{{ game.result_match_id }}</p>{% endif %}
+        {% if game.own_bet %}
+            {% if game.own_bet.status == 'pending' %}<p class="betting-own">내 베팅: {{ '레드팀' if game.own_bet.side == 'red' else '블루팀' }} · {{ "{:,}".format(game.own_bet.amount) }}점 (마감 전 변경 가능)</p>
+            {% elif game.own_bet.status == 'won' %}<p class="betting-own">✅ 적중 · {{ "{:,}".format(game.own_bet.payout) }}점 지급</p>
+            {% elif game.own_bet.status == 'lost' %}<p class="betting-own">이번 예측은 아쉽게 빗나갔습니다.</p>
+            {% elif game.own_bet.status == 'refunded' %}<p class="betting-own">베팅이 취소되어 포인트를 돌려받았습니다.</p>{% endif %}
+        {% endif %}
+
+        {% if game.status == 'open' and user and not game.is_participant %}
+        <form class="betting-controls" method="post" action="/betting/{{ game.id }}/bet">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label>예측 팀
+                <select name="side" required>
+                    <option value="red" {% if game.own_bet and game.own_bet.side == 'red' %}selected{% endif %}>🔴 레드팀</option>
+                    <option value="blue" {% if game.own_bet and game.own_bet.side == 'blue' %}selected{% endif %}>🔵 블루팀</option>
+                </select>
+            </label>
+            <label>포인트
+                <input type="number" name="amount" min="1" max="{{ wallet + (game.own_bet.amount if game.own_bet and game.own_bet.status == 'pending' else 0) }}" value="{{ game.own_bet.amount if game.own_bet and game.own_bet.status == 'pending' else '' }}" placeholder="예: 100" required>
+            </label>
+            <button class="betting-submit" type="submit">{{ '베팅 변경' if game.own_bet and game.own_bet.status == 'pending' else '베팅하기' }}</button>
+        </form>
+        {% elif game.status == 'open' and user and game.is_participant %}
+            <p class="betting-muted">경기 참가자는 이 경기에 베팅할 수 없습니다.</p>
+        {% elif game.status == 'open' and not user and oauth_ready %}
+            <a class="betting-login" href="/betting/login">로그인하고 베팅하기</a>
+        {% endif %}
+    </article>
+    {% else %}
+    <section class="betting-card"><strong>베팅 가능한 팀 구성이 없습니다.</strong><p class="betting-muted">디스코드에서 팀이 편성되면 이 페이지에 경기가 표시됩니다.</p></section>
+    {% endfor %}
+
+    <p class="betting-muted">예상 배당은 현재 베팅 풀 기준의 참고값이며, 베팅 마감 시 확정됩니다. 경기 시작 후에는 베팅할 수 없습니다.</p>
+</div>
+{% endblock %}
