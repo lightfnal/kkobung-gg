@@ -492,6 +492,164 @@ class CombinedChampionRecordModal(discord.ui.Modal):
         )
 
 
+class MissingChampionRecordModal(discord.ui.Modal):
+
+    def __init__(self, match_id, missing_players):
+        super().__init__(title=f"{match_id}번 경기 · 미입력자 챔피언")
+        self.match_id = int(match_id)
+        # Discord 모달은 최대 5개 입력 항목을 허용합니다. 남은 인원이
+        # 더 많으면 저장 후 다시 열어 다음 인원을 입력할 수 있습니다.
+        self.players = missing_players[:5]
+        self.champion_inputs = []
+
+        for player in self.players:
+            display_name = str(
+                player.get("discord_nickname")
+                or player.get("riot_name")
+                or player["discord_id"]
+            )
+            team = str(player.get("team") or "?").upper()
+            position = str(player.get("position") or "미정").upper()
+            field = discord.ui.TextInput(
+                label=f"{team} {position} · {display_name}"[:45],
+                placeholder="챔피언명 (필요하면 @실제포지션)",
+                required=True,
+                max_length=80
+            )
+            self.champion_inputs.append(field)
+            self.add_item(field)
+
+    async def on_submit(self, interaction):
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        entries = []
+
+        for player, field in zip(self.players, self.champion_inputs):
+            value = str(field.value).strip()
+            champion_name, separator, actual_position = value.rpartition("@")
+            if separator:
+                aliases = {
+                    "탑": "TOP", "정글": "JUNGLE", "미드": "MID",
+                    "원딜": "ADC", "바텀": "ADC", "서폿": "SUPPORT",
+                    "서포터": "SUPPORT"
+                }
+                actual_position = actual_position.strip().upper()
+                actual_position = aliases.get(
+                    actual_position.lower(), actual_position
+                )
+                if actual_position not in {
+                    "TOP", "JUNGLE", "MID", "ADC", "SUPPORT"
+                } or not champion_name.strip():
+                    await interaction.followup.send(
+                        "❌ 실제 포지션은 TOP/JUNGLE/MID/ADC/SUPPORT 또는 "
+                        "탑/정글/미드/원딜/서폿으로 입력해주세요.",
+                        ephemeral=True
+                    )
+                    return
+                champion_name = champion_name.strip()
+            else:
+                champion_name = value
+                actual_position = str(player.get("position") or "").upper()
+
+            entries.append((player, champion_name, actual_position))
+
+        try:
+            resolved = await asyncio.to_thread(
+                lambda: [
+                    ChampionService.resolve(champion_name)
+                    for _, champion_name, _ in entries
+                ]
+            )
+        except Exception:
+            await interaction.followup.send(
+                "❌ Riot 챔피언 목록을 불러오지 못했습니다. "
+                "잠시 후 다시 시도해주세요.",
+                ephemeral=True
+            )
+            return
+
+        invalid_names = [
+            champion_name
+            for (_, champion_name, _), champion in zip(entries, resolved)
+            if champion is None
+        ]
+        if invalid_names:
+            await interaction.followup.send(
+                "❌ 다음 챔피언 이름을 확인해주세요: "
+                + ", ".join(f"`{name}`" for name in invalid_names),
+                ephemeral=True
+            )
+            return
+
+        # 모달을 연 뒤 참가자가 먼저 입력했을 수 있으므로 최신 상태를
+        # 확인해 이미 등록된 선수 기록은 덮어쓰지 않습니다.
+        latest_by_id = {
+            str(row["discord_id"]): row
+            for row in get_match_champion_status(self.match_id)
+        }
+        saved_lines = []
+        skipped_names = []
+
+        for (player, _, actual_position), champion in zip(entries, resolved):
+            discord_id = str(player["discord_id"])
+            latest = latest_by_id.get(discord_id)
+            if latest is None or latest.get("champion_name"):
+                skipped_names.append(
+                    player.get("discord_nickname") or discord_id
+                )
+                continue
+
+            try:
+                progress = save_match_player_champion(
+                    self.match_id,
+                    discord_id,
+                    champion,
+                    actual_position=actual_position
+                )
+            except (TypeError, ValueError) as error:
+                await interaction.followup.send(
+                    f"❌ {player.get('discord_nickname') or discord_id} 저장 실패: "
+                    f"{error}",
+                    ephemeral=True
+                )
+                return
+            except Exception as error:
+                logger.exception(
+                    "미입력자 챔피언 기록 저장 실패 | 경기=%s | 사용자=%s",
+                    self.match_id,
+                    discord_id
+                )
+                await interaction.followup.send(
+                    "❌ 챔피언 기록 저장 중 오류가 발생했습니다. "
+                    f"오류 종류: `{type(error).__name__}`",
+                    ephemeral=True
+                )
+                return
+
+            saved_lines.append(
+                f"• **{str(player.get('team') or '?').upper()} "
+                f"{player.get('position') or '미정'}** · "
+                f"{player.get('discord_nickname') or discord_id} — "
+                f"{champion['champion_name']}"
+            )
+
+        summary = (
+            f"✅ **{self.match_id}번 경기** 미입력자 챔피언을 저장했습니다.\n"
+            + ("\n".join(saved_lines) if saved_lines else "저장된 항목이 없습니다.")
+        )
+        if skipped_names:
+            summary += "\n이미 입력되어 건너뜀: " + ", ".join(skipped_names)
+        summary += (
+            f"\n현재 입력 현황: **{progress['completed_count']}/"
+            f"{progress['total_count']}명**"
+            if saved_lines else ""
+        )
+        await interaction.followup.send(summary, ephemeral=True)
+
+
 class CombinedChampionModalLauncherView(discord.ui.View):
 
     def __init__(self, match_id, red_players, blue_players):
@@ -516,6 +674,44 @@ class CombinedChampionModalLauncherView(discord.ui.View):
                 self.red_players,
                 self.blue_players
             )
+        )
+
+    @discord.ui.button(
+        label="미입력자만 입력 (최대 5명)",
+        emoji="📝",
+        style=discord.ButtonStyle.secondary
+    )
+    async def open_missing_modal(self, interaction, button):
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        try:
+            missing_players = [
+                row for row in get_match_champion_status(self.match_id)
+                if not row.get("champion_name")
+            ]
+        except Exception as error:
+            logger.exception(
+                "미입력자 챔피언 입력 준비 실패 | 경기=%s",
+                self.match_id
+            )
+            await interaction.response.send_message(
+                "❌ 입력 현황을 불러오지 못했습니다. "
+                f"오류 종류: `{type(error).__name__}`",
+                ephemeral=True
+            )
+            return
+
+        if not missing_players:
+            await interaction.response.send_message(
+                "✅ 이 경기에는 챔피언 미입력자가 없습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(
+            MissingChampionRecordModal(self.match_id, missing_players)
         )
 
 
@@ -773,8 +969,8 @@ class ChampionRecord(commands.Cog):
             return
 
         await interaction.followup.send(
-            "양 팀 입력을 준비했습니다. 아래 버튼을 눌러 "
-            "챔피언 / 챔피언 입력창을 여세요.",
+            "남은 선수만 입력하려면 **미입력자만 입력**을 누르세요. "
+            "양 팀 기록을 한 번에 입력하려면 **양 팀 챔피언 입력창 열기**를 누르세요.",
             view=CombinedChampionModalLauncherView(
                 경기번호,
                 teams[0],
@@ -786,5 +982,4 @@ class ChampionRecord(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ChampionRecord(bot))
-
 
