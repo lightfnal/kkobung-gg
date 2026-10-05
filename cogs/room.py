@@ -196,6 +196,17 @@ class Room(commands.Cog):
             None
         )
 
+        # 기존 방에 설정된 홍보 채널은 새 방에도 이어서 사용합니다.
+        announcement_channel_id = next(
+            (
+                current_room.announcement_channel_id
+                for current_room in room_manager.get_rooms()
+                if current_room.guild_id == interaction.guild.id
+                and current_room.announcement_channel_id is not None
+            ),
+            None
+        )
+
         if room is None:
             available_room_id = None
 
@@ -232,6 +243,7 @@ class Room(commands.Cog):
                 guild_id=interaction.guild.id,
                 channel_id=interaction.channel_id
             )
+            room.announcement_channel_id = announcement_channel_id
 
         else:
             async with room.operation_lock:
@@ -242,6 +254,8 @@ class Room(commands.Cog):
                 room.channel_id = (
                     interaction.channel_id
                 )
+                if room.announcement_channel_id is None:
+                    room.announcement_channel_id = announcement_channel_id
 
         join_cog.save_rooms_state()
 
@@ -250,6 +264,74 @@ class Room(commands.Cog):
             f"방 번호: `{room.room_id}`\n"
             f"방 이름: **{room.room_name}**\n"
             f"최대 참가자: 10명"
+        )
+
+    @discord.app_commands.command(
+        name="내전홍보채널설정",
+        description="내전 참가 알림을 보낼 홍보 채널을 설정합니다."
+    )
+    @discord.app_commands.describe(
+        채널="참가 알림을 게시할 텍스트 채널"
+    )
+    async def set_announcement_channel(
+        self,
+        interaction: discord.Interaction,
+        채널: discord.TextChannel
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        if interaction.guild is None or 채널.guild.id != interaction.guild.id:
+            await interaction.response.send_message(
+                "❌ 현재 서버의 텍스트 채널을 선택해주세요.",
+                ephemeral=True
+            )
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        rooms = [
+            room for room in join_cog.room_manager.get_rooms()
+            if room.guild_id == interaction.guild.id
+        ]
+        if not rooms:
+            await interaction.response.send_message(
+                "❌ 먼저 각 모집 채널에서 `/내전방생성`으로 내전 방을 연결해주세요.",
+                ephemeral=True
+            )
+            return
+
+        bot_member = interaction.guild.me
+        permissions = 채널.permissions_for(bot_member) if bot_member else None
+        if (
+            permissions is None
+            or not permissions.view_channel
+            or not permissions.send_messages
+            or not permissions.mention_everyone
+        ):
+            await interaction.response.send_message(
+                f"❌ 꼬붕봇에 {채널.mention}에서 채널 보기, 메시지 보내기, "
+                "`@everyone` 멘션 권한을 부여한 뒤 다시 설정해주세요.",
+                ephemeral=True
+            )
+            return
+
+        for room in rooms:
+            room.announcement_channel_id = 채널.id
+        join_cog.save_rooms_state()
+
+        await interaction.response.send_message(
+            f"✅ 내전 참가 알림 채널을 {채널.mention}(으)로 설정했습니다.\n"
+            "현재 서버의 내전 1·2·3번 방에 적용되며, 참가 확정 또는 대기 등록 때마다 "
+            "@everyone 알림과 모집글 바로가기 버튼을 보냅니다.",
+            ephemeral=True
         )
 
     @discord.app_commands.command(
