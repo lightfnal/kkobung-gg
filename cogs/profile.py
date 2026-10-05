@@ -736,18 +736,34 @@ class Profile(commands.Cog):
                         sub_role,
                         reason="부 포지션"
                     )
+
+                # 등록된 서버 멤버에게 기본 멤버 역할도 부여합니다.
+                member_role = discord.utils.get(
+                    interaction.guild.roles,
+                    name="멤버"
+                )
+                if member_role is None:
+                    role_assignment_warning = (
+                        "⚠️ 프로필은 저장했지만 서버에 `멤버` 역할이 없어 "
+                        "자동 지급하지 못했습니다. 역할 이름을 확인해주세요."
+                    )
+                elif member_role not in interaction.user.roles:
+                    await interaction.user.add_roles(
+                        member_role,
+                        reason="통합 프로필 등록 완료"
+                    )
         except discord.Forbidden:
             logger.warning(
-                "티어/포지션 역할 지급 실패: 봇 역할 권한과 역할 순서를 확인해주세요."
+                "멤버/티어/포지션 역할 지급 실패: 봇 역할 권한과 역할 순서를 확인해주세요."
             )
             role_assignment_warning = (
-                "⚠️ 프로필은 저장했지만 역할을 변경하지 못했습니다. "
+                "⚠️ 프로필은 저장했지만 멤버/티어/포지션 역할을 변경하지 못했습니다. "
                 "봇의 역할 관리 권한과 역할 순서를 확인해주세요."
             )
         except discord.HTTPException:
-            logger.exception("티어/포지션 역할 변경 중 Discord 오류")
+            logger.exception("멤버/티어/포지션 역할 변경 중 Discord 오류")
             role_assignment_warning = (
-                "⚠️ 프로필은 저장했지만 Discord 오류로 역할을 변경하지 못했습니다."
+                "⚠️ 프로필은 저장했지만 Discord 오류로 멤버/티어/포지션 역할을 변경하지 못했습니다."
             )
 
         result_message = (
@@ -925,4 +941,3 @@ class Profile(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Profile(bot))
-
