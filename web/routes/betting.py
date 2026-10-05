@@ -8,6 +8,7 @@ import hmac
 import json
 import os
 import secrets
+import sqlite3
 import time
 from urllib.parse import urlencode
 
@@ -26,6 +27,21 @@ SESSION_COOKIE = "kkobung_betting_session"
 OAUTH_STATE_COOKIE = "kkobung_betting_oauth_state"
 SESSION_MAX_AGE = 60 * 60 * 24 * 14
 STARTING_POINTS = 1000
+DB_WRITE_RETRIES = 4
+
+
+def _begin_immediate_with_retry(conn) -> None:
+    """Wait and retry when the bot temporarily owns SQLite's write lock."""
+    for attempt in range(DB_WRITE_RETRIES):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            return
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            is_transient_lock = "locked" in message or "busy" in message
+            if not is_transient_lock or attempt == DB_WRITE_RETRIES - 1:
+                raise
+            time.sleep(0.25 * (attempt + 1))
 
 
 def ensure_betting_schema() -> None:
@@ -141,7 +157,7 @@ def _current_user(request: Request) -> dict | None:
 def _refresh_wallet_season(discord_id: str, username: str) -> int:
     """Grant one non-purchasable starting balance per active site season."""
     with get_db_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_immediate_with_retry(conn)
         active_season = conn.execute("SELECT id FROM seasons WHERE is_active = 1 ORDER BY id DESC LIMIT 1").fetchone()
         season_id = int(active_season["id"]) if active_season else 0
         wallet = conn.execute("SELECT balance, season_id FROM betting_wallets WHERE discord_id = ?", (discord_id,)).fetchone()
@@ -249,7 +265,7 @@ def _allocate_pool(bets: list[dict], winner: str, total_pool: int) -> dict[int, 
 
 def _settle_round(round_id: str, result: dict) -> None:
     with get_db_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_immediate_with_retry(conn)
         round_row = conn.execute("SELECT * FROM betting_rounds WHERE id = ?", (round_id,)).fetchone()
         if not round_row or round_row["status"] in {"settled", "void"}:
             conn.rollback()
@@ -276,7 +292,7 @@ def _settle_round(round_id: str, result: dict) -> None:
 
 def _void_round(round_id: str) -> None:
     with get_db_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_immediate_with_retry(conn)
         row = conn.execute("SELECT status FROM betting_rounds WHERE id = ?", (round_id,)).fetchone()
         if not row or row["status"] in {"settled", "void"}:
             conn.rollback()
@@ -302,7 +318,7 @@ def _refund_removed_results() -> None:
         ).fetchall()
     for round_row in rows:
         with get_db_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            _begin_immediate_with_retry(conn)
             current = conn.execute("SELECT status, result_match_id FROM betting_rounds WHERE id = ?", (round_row["id"],)).fetchone()
             if not current or current["status"] != "settled" or current["result_match_id"] != round_row["result_match_id"]:
                 conn.rollback()
@@ -470,7 +486,7 @@ def place_bet(request: Request, round_id: str, side: str = Form(...), amount: in
     if not live_snapshot or live_snapshot["match_in_progress"]:
         return RedirectResponse("/betting?message=경기가 시작되어 베팅이 마감되었습니다.", status_code=303)
     with get_db_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_immediate_with_retry(conn)
         round_row = conn.execute("SELECT * FROM betting_rounds WHERE id = ?", (round_id,)).fetchone()
         if not round_row or round_row["status"] != "open":
             conn.rollback()
