@@ -35,6 +35,65 @@ AUCTION_BID_STEP = 50
 AUCTION_LOT_SECONDS = 10
 
 
+async def announce_recruitment_join(join_view, user_id, waiting=False):
+    """내전 참가 등록을 홍보 채널에 알리고 모집글 바로가기를 붙입니다."""
+    room = join_view.room
+    channel_id = room.announcement_channel_id
+    if channel_id is None or room.guild_id is None or room.channel_id is None:
+        return
+
+    bot = join_view.join_cog.bot
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "내전 홍보 채널을 찾지 못했습니다 | room=%s | channel=%s",
+                room.room_id,
+                channel_id
+            )
+            return
+
+    recruit_message = join_view.message
+    if recruit_message is None:
+        return
+
+    participant_count = len(room.players)
+    waiting_count = len(room.waiting_players)
+    status = f"참가자 {participant_count}/{MAX_PLAYERS}명"
+    if waiting or waiting_count:
+        status += f" · 대기자 {waiting_count}/{MAX_WAITING_PLAYERS}명"
+    registration_type = "대기 등록" if waiting else "참가 등록"
+
+    view = discord.ui.View(timeout=None)
+    view.add_item(discord.ui.Button(
+        label=f"{room.room_name} 모집 채널로 이동",
+        emoji="📣",
+        style=discord.ButtonStyle.link,
+        url=recruit_message.jump_url
+    ))
+
+    try:
+        await channel.send(
+            f"@everyone 🔔 **{room.room_name} {registration_type} 알림**\n"
+            f"현재 {status}입니다. 아래 버튼을 눌러 모집글로 이동하세요.",
+            view=view,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=True,
+                users=False,
+                roles=False
+            )
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        logger.exception(
+            "내전 참가 알림 전송 실패 | room=%s | channel=%s | user=%s",
+            room.room_id,
+            channel_id,
+            user_id
+        )
+
+
     
 class ExpiredInhouseView(discord.ui.View):
     """재시작 전에 만들어진 persistent 버튼에 만료 안내를 보냅니다."""
@@ -2079,6 +2138,11 @@ class JoinView(discord.ui.View):
                     f"🕒 대기 **{waiting_number}번**으로 등록되었습니다.",
                     ephemeral=True
                 )
+                await announce_recruitment_join(
+                    self,
+                    user_id,
+                    waiting=True
+                )
                 return
 
             players[user_id] = {
@@ -2099,6 +2163,10 @@ class JoinView(discord.ui.View):
             await interaction.followup.send(
                 "✅ 내전에 참가했습니다.",
                 ephemeral=True
+            )
+            await announce_recruitment_join(
+                self,
+                user_id
             )
 
     @discord.ui.button(
