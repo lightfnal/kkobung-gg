@@ -31,6 +31,9 @@ class InhouseRoom:
     # 팀 생성 이후의 진행 정보를 출력할 공용 채널
     output_channel_id: int | None = None
 
+    # 참가·대기 등록 알림을 게시할 서버 공용 내전 홍보 채널
+    announcement_channel_id: int | None = None
+
     # 방마다 사용하는 음성채널
     waiting_voice_channel_id: int | None = None
     red_voice_channel_id: int | None = None
@@ -169,6 +172,9 @@ class InhouseRoom:
             "output_channel_id": (
                 self.output_channel_id
             ),
+            "announcement_channel_id": (
+                self.announcement_channel_id
+            ),
             "waiting_voice_channel_id": (
                 self.waiting_voice_channel_id
             ),
@@ -238,6 +244,9 @@ class InhouseRoom:
             ),
             output_channel_id=data.get(
                 "output_channel_id"
+            ),
+            announcement_channel_id=data.get(
+                "announcement_channel_id"
             ),
             waiting_voice_channel_id=data.get(
                 "waiting_voice_channel_id"
