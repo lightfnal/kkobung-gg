@@ -10,6 +10,7 @@ import os
 import secrets
 import sqlite3
 import time
+from contextlib import contextmanager
 from urllib.parse import urlencode
 
 import requests
@@ -17,8 +18,9 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from web.database import get_db_connection
+from web.database import get_db_connection as get_main_db_connection
 from web.routes.api_room import find_room, load_rooms, prepare_room_data
+from storage.paths import DATA_DIR, DB_PATH as MAIN_DB_PATH
 
 
 router = APIRouter()
@@ -28,6 +30,20 @@ OAUTH_STATE_COOKIE = "kkobung_betting_oauth_state"
 SESSION_MAX_AGE = 60 * 60 * 24 * 14
 STARTING_POINTS = 1000
 DB_WRITE_RETRIES = 4
+BETTING_DB_PATH = DATA_DIR / "betting.sqlite3"
+
+
+@contextmanager
+def get_db_connection():
+    """Use a separate persistent SQLite file for prediction data and writes."""
+    connection = sqlite3.connect(BETTING_DB_PATH, timeout=10)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 10000")
+    try:
+        yield connection
+    finally:
+        connection.close()
 
 
 def _begin_immediate_with_retry(conn) -> None:
@@ -98,6 +114,10 @@ def ensure_betting_schema() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_betting_ledger_user
                 ON betting_ledger(discord_id, id DESC);
+            CREATE TABLE IF NOT EXISTS betting_migrations (
+                migration_key TEXT PRIMARY KEY,
+                completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         wallet_columns = {row["name"] for row in conn.execute("PRAGMA table_info(betting_wallets)").fetchall()}
@@ -107,6 +127,49 @@ def ensure_betting_schema() -> None:
 
 
 ensure_betting_schema()
+
+
+def _migrate_legacy_betting_data() -> None:
+    """Copy any prediction records from the shared game DB once, without changing it."""
+    if not MAIN_DB_PATH.is_file():
+        return
+    legacy_tables = ("betting_wallets", "betting_rounds", "betting_bets", "betting_ledger")
+    legacy_rows = {}
+    try:
+        uri = f"file:{MAIN_DB_PATH.as_posix()}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=10) as source:
+            source.row_factory = sqlite3.Row
+            existing = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in legacy_tables:
+                if table in existing:
+                    legacy_rows[table] = [dict(row) for row in source.execute(f"SELECT * FROM {table}").fetchall()]
+    except sqlite3.Error:
+        # A busy game DB must not prevent the website from starting.
+        return
+    if not any(legacy_rows.values()):
+        legacy_rows = {}
+    with get_db_connection() as target:
+        if target.execute(
+            "SELECT 1 FROM betting_migrations WHERE migration_key = 'shared_db_v1'"
+        ).fetchone():
+            return
+        _begin_immediate_with_retry(target)
+        for table in legacy_tables:
+            for row in legacy_rows.get(table, []):
+                columns = list(row)
+                placeholders = ", ".join("?" for _ in columns)
+                names = ", ".join(f'"{column}"' for column in columns)
+                target.execute(
+                    f'INSERT OR IGNORE INTO "{table}" ({names}) VALUES ({placeholders})',
+                    tuple(row[column] for column in columns),
+                )
+        target.execute(
+            "INSERT INTO betting_migrations(migration_key) VALUES ('shared_db_v1')"
+        )
+        target.commit()
+
+
+_migrate_legacy_betting_data()
 
 
 def _oauth_settings() -> tuple[str, str, str] | None:
@@ -156,10 +219,13 @@ def _current_user(request: Request) -> dict | None:
 
 def _refresh_wallet_season(discord_id: str, username: str) -> int:
     """Grant one non-purchasable starting balance per active site season."""
+    with get_main_db_connection() as main_conn:
+        active_season = main_conn.execute(
+            "SELECT id FROM seasons WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    season_id = int(active_season["id"]) if active_season else 0
     with get_db_connection() as conn:
         _begin_immediate_with_retry(conn)
-        active_season = conn.execute("SELECT id FROM seasons WHERE is_active = 1 ORDER BY id DESC LIMIT 1").fetchone()
-        season_id = int(active_season["id"]) if active_season else 0
         wallet = conn.execute("SELECT balance, season_id FROM betting_wallets WHERE discord_id = ?", (discord_id,)).fetchone()
         if not wallet:
             conn.execute("INSERT INTO betting_wallets(discord_id, username, balance, season_id) VALUES (?, ?, ?, ?)", (discord_id, username, STARTING_POINTS, season_id))
@@ -201,7 +267,7 @@ def _snapshot_rounds() -> list[dict]:
         if len(red_ids) != 5 or len(blue_ids) != 5:
             continue
         room_id = str(room_data["room_id"])
-        with get_db_connection() as conn:
+        with get_main_db_connection() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(id), 0) AS match_id FROM matches WHERE room_id = ?",
                 (room_id,),
@@ -228,7 +294,7 @@ def _snapshot_rounds() -> list[dict]:
 def _matching_result(round_row: dict) -> dict | None:
     red = set(json.loads(round_row["red_team_json"]))
     blue = set(json.loads(round_row["blue_team_json"]))
-    with get_db_connection() as conn:
+    with get_main_db_connection() as conn:
         matches = conn.execute(
             "SELECT id, winner FROM matches WHERE room_id = ? AND id > ? ORDER BY id ASC",
             (round_row["room_id"], round_row["base_match_id"]),
@@ -308,14 +374,15 @@ def _void_round(round_id: str) -> None:
 
 def _refund_removed_results() -> None:
     """Return stakes if an admin later deletes the match result used to settle a round."""
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """SELECT br.id, br.result_match_id
-               FROM betting_rounds br
-               LEFT JOIN matches m ON m.id = br.result_match_id
-               WHERE br.status = 'settled' AND br.result_match_id IS NOT NULL
-                 AND m.id IS NULL"""
+    with get_db_connection() as betting_conn:
+        settled_rows = betting_conn.execute(
+            "SELECT id, result_match_id FROM betting_rounds WHERE status = 'settled' AND result_match_id IS NOT NULL"
         ).fetchall()
+    with get_main_db_connection() as main_conn:
+        existing_ids = {
+            int(row[0]) for row in main_conn.execute("SELECT id FROM matches").fetchall()
+        }
+    rows = [row for row in settled_rows if int(row["result_match_id"]) not in existing_ids]
     for round_row in rows:
         with get_db_connection() as conn:
             _begin_immediate_with_retry(conn)
@@ -372,16 +439,23 @@ def _round_cards(user_id: str | None) -> list[dict]:
     with get_db_connection() as conn:
         rows = conn.execute("SELECT * FROM betting_rounds ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, created_at DESC LIMIT 30").fetchall()
         cards = []
+        team_ids_by_round = {}
+        for row in rows:
+            team_ids_by_round[row["id"]] = json.loads(row["red_team_json"]) + json.loads(row["blue_team_json"])
+        all_ids = sorted({player_id for ids in team_ids_by_round.values() for player_id in ids})
+        profiles = {}
+        if all_ids:
+            placeholders = ",".join("?" for _ in all_ids)
+            with get_main_db_connection() as main_conn:
+                profile_rows = main_conn.execute(
+                    f"SELECT discord_id, discord_nickname FROM players WHERE discord_id IN ({placeholders})",
+                    all_ids,
+                ).fetchall()
+            profiles = {str(profile["discord_id"]): str(profile["discord_nickname"]) for profile in profile_rows}
         for row in rows:
             round_data = dict(row)
             red_ids = json.loads(row["red_team_json"])
             blue_ids = json.loads(row["blue_team_json"])
-            profiles = {}
-            all_ids = red_ids + blue_ids
-            if all_ids:
-                placeholders = ",".join("?" for _ in all_ids)
-                profile_rows = conn.execute(f"SELECT discord_id, discord_nickname FROM players WHERE discord_id IN ({placeholders})", all_ids).fetchall()
-                profiles = {str(profile["discord_id"]): str(profile["discord_nickname"]) for profile in profile_rows}
             red_pool = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM betting_bets WHERE round_id = ? AND side = 'red' AND status = 'pending'", (row["id"],)).fetchone()[0])
             blue_pool = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM betting_bets WHERE round_id = ? AND side = 'blue' AND status = 'pending'", (row["id"],)).fetchone()[0])
             own_bet = conn.execute("SELECT side, amount, payout, status FROM betting_bets WHERE round_id = ? AND discord_id = ?", (row["id"], user_id)).fetchone() if user_id else None
