@@ -792,8 +792,42 @@ class Profile(commands.Cog):
                 "봇 역할과 `별명 관리하기` 권한을 확인해주세요."
             )
 
+        announcement_channel_id = None
+        if interaction.guild is not None:
+            announcement_channel_id = next(
+                (
+                    room.announcement_channel_id
+                    for room in join_cog.room_manager.get_rooms()
+                    if room.guild_id == interaction.guild.id
+                    and room.announcement_channel_id is not None
+                ),
+                None
+            )
+
+        result_view = None
+        if announcement_channel_id is not None and interaction.guild is not None:
+            result_message += (
+                "\n\n📣 내전 참가를 원하시면 아래 버튼에서 모집 중인 방을 확인하세요."
+            )
+            result_view = discord.ui.View(timeout=None)
+            result_view.add_item(discord.ui.Button(
+                label="내전홍보 채널 바로가기",
+                emoji="📣",
+                style=discord.ButtonStyle.link,
+                url=(
+                    f"https://discord.com/channels/"
+                    f"{interaction.guild.id}/{announcement_channel_id}"
+                )
+            ))
+        elif interaction.guild is not None:
+            result_message += (
+                "\n\n📣 내전 참가를 원하시면 서버의 내전홍보 채널에서 "
+                "모집 중인 방을 확인해주세요."
+            )
+
         await interaction.followup.send(
             result_message,
+            view=result_view,
             ephemeral=True
         )
 
