@@ -261,6 +261,7 @@ class MatchControlView(discord.ui.View):
             getattr(self.room, "series_score", {"red": 0, "blue": 0})
         )
         self.series_game_snapshot = getattr(self.room, "series_game", 0)
+        self.champion_record_view = None
         self._result_lock = asyncio.Lock()
 
         # 한 장의 팀 안내 메시지에서 시작과 결과 등록을 모두 처리합니다.
@@ -507,12 +508,20 @@ class MatchControlView(discord.ui.View):
                 self.start_button.disabled = False
                 self.red_button.disabled = True
                 self.blue_button.disabled = True
-                await refresh_match_controls_at_bottom(
+                control_message, control_view = await refresh_match_controls_at_bottom(
                     self.join_cog,
                     self.room,
                     team_message,
                     self
                 )
+
+                if self.champion_record_view is not None:
+                    self.champion_record_view.join_cog = self.join_cog
+                    self.champion_record_view.control_message = control_message
+                    self.champion_record_view.control_message_view = control_view
+
+            if self.champion_record_view is not None:
+                await self.champion_record_view.move_to_bottom()
 
             await interaction.followup.send(
                 "✅ 승리팀 결과를 등록했습니다.\n"
