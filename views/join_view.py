@@ -275,8 +275,8 @@ class MatchControlView(discord.ui.View):
                         await interaction.response.send_message(
                             f"⏳ 이전 세트 경기번호 **{previous_match['id']}**의 "
                             f"챔피언 입력이 **{missing}명** 남았습니다.\n"
-                            "각자 `내 챔피언 입력`을 누르거나, 한 참가자가 "
-                            "`참가자 1명이 10명 입력`으로 한 번에 등록해주세요.",
+                            "각자 결과 메시지에서 `내 챔피언 입력`을 눌러주세요. "
+                            "남은 칸은 참가자가 `미입력자만 입력` 버튼으로 채울 수 있습니다.",
                             ephemeral=True
                         )
                         return
