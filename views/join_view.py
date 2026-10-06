@@ -5,7 +5,8 @@ import discord
 
 from config import (
     MAX_PLAYERS,
-    MAX_WAITING_PLAYERS
+    MAX_WAITING_PLAYERS,
+    MATCH_MODE
 )
 
 from utils.permissions import (
@@ -22,7 +23,9 @@ from services.team_balancer import (
 )
 from storage.sqlite_db import (
     get_active_season,
-    get_season_player_stats
+    get_season_player_stats,
+    get_last_match,
+    get_match_champion_progress
 )
 from utils.room_display import format_room_status
 
@@ -33,6 +36,18 @@ AUCTION_TEAM_BUDGET = 1000
 AUCTION_MIN_BID = 50
 AUCTION_BID_STEP = 50
 AUCTION_LOT_SECONDS = 10
+
+
+def add_match_button_instructions(embed):
+    """팀 편성 결과에 버튼 사용 순서를 짧게 붙입니다."""
+    instruction = (
+        "**경기 진행 방법**\n"
+        "1. 참가자 한 명이 `🎮 경기 시작`을 누릅니다.\n"
+        "2. 경기가 끝나면 이 메시지에서 승리팀 버튼을 한 번 누릅니다."
+    )
+    description = (embed.description or "").rstrip()
+    embed.description = f"{description}\n\n{instruction}" if description else instruction
+    return embed
 
 
 async def announce_recruitment_join(join_view, user_id, waiting=False):
@@ -105,7 +120,10 @@ class ExpiredInhouseView(discord.ui.View):
         ("팀 생성", "inhouse_make_teams"),
         ("모집 종료", "inhouse_close"),
         ("모집 초기화", "inhouse_reset"),
-        ("경기 시작", "match_start_button")
+        ("경기 시작", "match_start_button"),
+        ("경기 시작", "match_start_participant_button"),
+        ("레드팀 승리", "match_result_red_button"),
+        ("블루팀 승리", "match_result_blue_button")
     )
 
     def __init__(self):
@@ -144,6 +162,14 @@ class MatchControlView(discord.ui.View):
             join_cog.active_room
         )
         self.teams_reference = self.room.current_teams
+        self._result_lock = asyncio.Lock()
+
+        # 한 장의 팀 안내 메시지에서 시작과 결과 등록을 모두 처리합니다.
+        # 방금 팀이 만들어졌다면 시작만 누를 수 있고, 경기 중이라면
+        # 승리팀 버튼만 누를 수 있습니다.
+        self.start_button.disabled = self.room.match_in_progress
+        self.red_button.disabled = not self.room.match_in_progress
+        self.blue_button.disabled = not self.room.match_in_progress
 
     async def interaction_check(
         self,
@@ -174,13 +200,29 @@ class MatchControlView(discord.ui.View):
             )
             return False
 
+        team_ids = {
+            str(user_id)
+            for team in (self.room.current_teams or {}).values()
+            if isinstance(team, dict)
+            for user_id in team.values()
+        }
+        if (
+            not is_admin(interaction)
+            and str(interaction.user.id) not in team_ids
+        ):
+            await interaction.response.send_message(
+                "❌ 현재 내전 참가자만 경기 버튼을 사용할 수 있습니다.",
+                ephemeral=True
+            )
+            return False
+
         return True
 
 
     @discord.ui.button(
         label="🎮 경기 시작",
         style=discord.ButtonStyle.success,
-        custom_id="match_start_button"
+        custom_id="match_start_participant_button"
     )
     async def start_button(
         self,
@@ -190,13 +232,6 @@ class MatchControlView(discord.ui.View):
         self.join_cog.activate_room(
             self.room
         )
-
-        if not is_admin(interaction):
-            await send_admin_only_message(
-                interaction
-            )
-            return
-
 
         async with self.room.operation_lock:
             if self.room.current_teams is None:
@@ -222,11 +257,37 @@ class MatchControlView(discord.ui.View):
                 )
                 return
 
+            if MATCH_MODE == "bo3" and self.room.series_game > 0:
+                previous_match = get_last_match(self.room.room_id)
+                if previous_match is not None:
+                    progress = get_match_champion_progress(
+                        previous_match["id"]
+                    )
+                    if (
+                        progress["total_count"] > 0
+                        and progress["completed_count"]
+                            < progress["total_count"]
+                    ):
+                        missing = (
+                            progress["total_count"]
+                            - progress["completed_count"]
+                        )
+                        await interaction.response.send_message(
+                            f"⏳ 이전 세트 경기번호 **{previous_match['id']}**의 "
+                            f"챔피언 입력이 **{missing}명** 남았습니다.\n"
+                            "각자 `내 챔피언 입력`을 누르거나, 한 참가자가 "
+                            "`참가자 1명이 10명 입력`으로 한 번에 등록해주세요.",
+                            ephemeral=True
+                        )
+                        return
+
             self.room.match_in_progress = True
 
             self.join_cog.save_rooms_state()
 
-            button.disabled = True
+            self.start_button.disabled = True
+            self.red_button.disabled = False
+            self.blue_button.disabled = False
 
         await interaction.response.edit_message(
             view=self
@@ -234,11 +295,121 @@ class MatchControlView(discord.ui.View):
 
         await interaction.followup.send(
             f"🎮 **{self.room.room_name} 경기가 "
-            "시작되었습니다!**\n\n"
-            f"{format_room_status(self.room)}\n\n"
-            f"경기 종료 후 <#{self.room.channel_id}>에서 "
-            "`/경기결과`를 입력해주세요."
+            "시작되었습니다!**\n"
+            "게임이 끝나면 이 팀 안내 메시지에서 "
+            "🔴 레드팀 승리 또는 🔵 블루팀 승리 버튼을 한 번 눌러주세요."
         )
+
+    async def _report_winner(self, interaction, winner):
+        if self._result_lock.locked():
+            await interaction.response.send_message(
+                "⏳ 결과를 이미 처리하고 있습니다. 잠시만 기다려주세요.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with self._result_lock:
+            if not self.room.match_in_progress:
+                await interaction.followup.send(
+                    "❌ 현재 진행 중인 경기가 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            match_cog = self.join_cog.bot.get_cog("Match")
+            if match_cog is None:
+                await interaction.followup.send(
+                    "❌ 경기 결과 기능을 불러오지 못했습니다. 관리자에게 알려주세요.",
+                    ephemeral=True
+                )
+                return
+
+            self.start_button.disabled = True
+            self.red_button.disabled = True
+            self.blue_button.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+            try:
+                await match_cog.process_match_result(
+                    interaction,
+                    winner,
+                    self.room
+                )
+            except Exception:
+                logger.exception(
+                    "버튼 경기 결과 처리 실패 | 방=%s",
+                    self.room.room_id
+                )
+                # 실패하면 결과 버튼을 다시 열어 입력을 복구합니다.
+                self.start_button.disabled = True
+                self.red_button.disabled = False
+                self.blue_button.disabled = False
+                try:
+                    await interaction.message.edit(view=self)
+                except discord.HTTPException:
+                    pass
+                await interaction.followup.send(
+                    "❌ 결과 저장 중 오류가 발생했습니다.\n"
+                    "버튼을 다시 누르지 말고 관리자에게 알려주세요.",
+                    ephemeral=True
+                )
+                return
+
+            if self.room.match_in_progress:
+                # Validation can reject the report without closing the game.
+                # Keep the result buttons available in that case.
+                self.start_button.disabled = True
+                self.red_button.disabled = False
+                self.blue_button.disabled = False
+                try:
+                    await interaction.message.edit(view=self)
+                except discord.HTTPException:
+                    pass
+                return
+
+            if self.room.current_teams is None:
+                # 단판 종료 또는 BO3 종료
+                self.start_button.disabled = True
+                self.red_button.disabled = True
+                self.blue_button.disabled = True
+                self.stop()
+            else:
+                # BO3에서 다음 세트를 같은 팀 안내 메시지로 시작
+                self.teams_reference = self.room.current_teams
+                self.start_button.disabled = False
+                self.red_button.disabled = True
+                self.blue_button.disabled = True
+
+            try:
+                await interaction.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+            await interaction.followup.send(
+                "✅ 승리팀 결과를 등록했습니다.\n"
+                "챔피언 입력 안내는 아래 경기 결과 메시지를 확인해주세요.",
+                ephemeral=True
+            )
+
+    @discord.ui.button(
+        label="🔴 레드팀 승리",
+        style=discord.ButtonStyle.danger,
+        custom_id="match_result_red_button"
+    )
+    async def red_button(self, interaction, button):
+        await self._report_winner(interaction, "red")
+
+    @discord.ui.button(
+        label="🔵 블루팀 승리",
+        style=discord.ButtonStyle.primary,
+        custom_id="match_result_blue_button"
+    )
+    async def blue_button(self, interaction, button):
+        await self._report_winner(interaction, "blue")
 
 
 def _season_profiles_for_players(join_cog, players):
@@ -1147,6 +1318,7 @@ class AuctionView(discord.ui.View):
             user_ids=red_assignment.values(),
             channel_id=self.room.red_voice_channel_id
         )
+        add_match_button_instructions(embed)
         result_message, _ = await self.join_cog.send_output_message(
             room=self.room,
             fallback_channel=getattr(self.message, "channel", None),
@@ -1767,6 +1939,7 @@ class CaptainDraftView(discord.ui.View):
             user_ids=red_assignment.values(),
             channel_id=self.room.red_voice_channel_id
         )
+        add_match_button_instructions(embed)
         await self.join_cog.send_output_message(
             room=self.room,
             fallback_channel=getattr(self.message, "channel", None),
@@ -2828,6 +3001,7 @@ class JoinView(discord.ui.View):
                 pass
 
 
+        add_match_button_instructions(embed)
         output_message, used_fallback = (
             await self.join_cog.send_output_message(
                 room=room,

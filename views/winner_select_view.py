@@ -2,8 +2,7 @@ import asyncio
 import discord
 
 from utils.permissions import (
-    is_match_operator as is_admin,
-    send_match_operator_only_message as send_admin_only_message
+    is_match_operator as is_admin
 )
 
 
@@ -65,9 +64,19 @@ class WinnerSelectView(discord.ui.View):
             )
             return False
 
-        if not is_admin(interaction):
-            await send_admin_only_message(
-                interaction
+        participant_ids = {
+            str(user_id)
+            for team in (self.room.current_teams or {}).values()
+            if isinstance(team, dict)
+            for user_id in team.values()
+        }
+        if (
+            not is_admin(interaction)
+            and str(interaction.user.id) not in participant_ids
+        ):
+            await interaction.response.send_message(
+                "❌ 현재 내전 참가자만 경기 결과를 등록할 수 있습니다.",
+                ephemeral=True
             )
             return False
 
@@ -166,7 +175,7 @@ class WinnerSelectView(discord.ui.View):
                 await self.message.edit(
                     content=(
                         "⌛ 승리팀 선택 시간이 만료되었습니다.\n"
-                        "`/경기결과`를 다시 입력해주세요."
+                        "경기 팀 안내 메시지의 결과 버튼을 다시 사용해주세요."
                     ),
                     view=self
                 )
