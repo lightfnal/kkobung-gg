@@ -51,6 +51,95 @@ def add_match_button_instructions(embed):
     return embed
 
 
+async def refresh_match_controls_at_bottom(
+    join_cog,
+    room,
+    source_message,
+    previous_view,
+    stage="next_set"
+):
+    """다음 작업 버튼을 새 메시지로 올려 채널 하단에서 바로 누르게 합니다."""
+    previous_view.start_button.disabled = room.match_in_progress
+    previous_view.red_button.disabled = not room.match_in_progress
+    previous_view.blue_button.disabled = not room.match_in_progress
+
+    try:
+        await source_message.edit(view=previous_view)
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        logger.info(
+            "이전 경기 조작 메시지 갱신 실패 | 방=%s",
+            room.room_id
+        )
+
+    next_view = MatchControlView(join_cog)
+    next_embed = None
+    if source_message.embeds:
+        next_embed = discord.Embed.from_dict(
+            source_message.embeds[0].to_dict()
+        )
+        next_set = max(1, int(room.series_game) + 1)
+        next_embed.title = (
+            f"🎮 {room.room_name} · {next_set}세트 경기 조작"
+        )
+        score = room.series_score
+        if stage == "in_progress":
+            stage_line = "🎮 경기가 진행 중입니다. 끝나면 아래에서 승리팀을 선택하세요."
+        elif stage == "reselect":
+            stage_line = "↩️ 잘못된 결과를 취소했습니다. 이번 세트의 승리팀을 다시 선택하세요."
+        else:
+            stage_line = f"다음은 **{next_set}세트**입니다. 경기 시작 버튼을 눌러주세요."
+        score_line = (
+            f"📊 현재 시리즈 점수: 🔴 레드 **{score['red']}** : "
+            f"**{score['blue']}** 블루 🔵\n"
+            + stage_line
+        )
+        description = (next_embed.description or "").split(
+            "\n\n📊 현재 시리즈 점수:",
+            1
+        )[0].strip()
+        next_embed.description = (
+            f"{description}\n\n{score_line}"
+            if description else score_line
+        )
+
+    content = source_message.content or None
+    if next_embed is None and content is None:
+        content = (
+            f"🎮 **{room.room_name} · "
+            f"{max(1, int(room.series_game) + 1)}세트 경기 조작**\n"
+            f"팀 편성 확인: {source_message.jump_url}"
+        )
+
+    try:
+        new_message = await source_message.channel.send(
+            content=content,
+            embed=next_embed,
+            view=next_view,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        logger.exception(
+            "새 경기 조작 메시지를 채널 하단에 전송하지 못함 | 방=%s",
+            room.room_id
+        )
+        return source_message, previous_view
+
+    next_view.team_message = new_message
+    # 이 세트의 결과 카드가 참조하는 컨텍스트도 최신 메시지를 가리키게 합니다.
+    previous_view.team_message = new_message
+    previous_view.stop()
+
+    try:
+        await source_message.edit(view=None)
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        logger.info(
+            "이전 경기 조작 버튼 제거 실패 | 방=%s",
+            room.room_id
+        )
+
+    return new_message, next_view
+
+
 async def announce_recruitment_join(join_view, user_id, waiting=False):
     """내전 참가 등록을 홍보 채널에 알리고 모집글 바로가기를 붙입니다."""
     room = join_view.room
@@ -320,6 +409,13 @@ class MatchControlView(discord.ui.View):
             "게임이 끝나면 이 팀 안내 메시지에서 "
             "🔴 레드팀 승리 또는 🔵 블루팀 승리 버튼을 한 번 눌러주세요."
         )
+        await refresh_match_controls_at_bottom(
+            self.join_cog,
+            self.room,
+            self.team_message,
+            self,
+            stage="in_progress"
+        )
 
     async def _report_winner(self, interaction, winner, response_deferred=False):
         if self._result_lock.locked():
@@ -401,17 +497,22 @@ class MatchControlView(discord.ui.View):
                 self.red_button.disabled = True
                 self.blue_button.disabled = True
                 self.stop()
+                try:
+                    await team_message.edit(view=self)
+                except discord.HTTPException:
+                    pass
             else:
-                # BO3에서 다음 세트를 같은 팀 안내 메시지로 시작
+                # BO3 다음 세트 조작창을 채널 맨 아래에 새로 올립니다.
                 self.teams_reference = self.room.current_teams
                 self.start_button.disabled = False
                 self.red_button.disabled = True
                 self.blue_button.disabled = True
-
-            try:
-                await team_message.edit(view=self)
-            except discord.HTTPException:
-                pass
+                await refresh_match_controls_at_bottom(
+                    self.join_cog,
+                    self.room,
+                    team_message,
+                    self
+                )
 
             await interaction.followup.send(
                 "✅ 승리팀 결과를 등록했습니다.\n"
