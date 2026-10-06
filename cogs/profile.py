@@ -8,6 +8,7 @@ from services.player_service import PlayerService
 from services.riot_service import RiotService
 
 from utils.mmr import get_initial_hidden_mmr
+from utils.positions import display_position, normalize_position
 from config import (
     PLACEMENT_GAMES,
     MMR_EARLY_GAMES
@@ -94,7 +95,8 @@ def get_member_role_tier(member):
 def build_profile_nickname(riot_id, tier, main_position, sub_position):
     return (
         f"{riot_id} / {TIER_SHORT.get(tier, 'UR')} / "
-        f"{main_position} {str(sub_position)[:3]}"
+        f"{display_position(main_position)} "
+        f"{display_position(sub_position)[:3]}"
     )[:32]
 
 
@@ -377,8 +379,8 @@ class Profile(commands.Cog):
             return
 
         riot_id = riot_id.strip()
-        main_position = main_position.strip().upper()
-        sub_position = sub_position.strip().upper()
+        main_position = normalize_position(main_position)
+        sub_position = normalize_position(sub_position)
 
         valid_positions = {
             "TOP",
@@ -391,8 +393,7 @@ class Profile(commands.Cog):
         if main_position not in valid_positions:
             await interaction.followup.send(
                 "❌ 주 포지션이 올바르지 않습니다.\n"
-                "`TOP`, `JUNGLE`, `MID`, `ADC`, `SUPPORT` 중 "
-                "하나를 입력해주세요.",
+                "`탑`, `정글`, `미드`, `원딜`, `서폿` 중 하나를 입력해주세요.",
                 ephemeral=True
             )
             return
@@ -400,8 +401,7 @@ class Profile(commands.Cog):
         if sub_position not in valid_positions:
             await interaction.followup.send(
                 "❌ 부 포지션이 올바르지 않습니다.\n"
-                "`TOP`, `JUNGLE`, `MID`, `ADC`, `SUPPORT` 중 "
-                "하나를 입력해주세요.",
+                "`탑`, `정글`, `미드`, `원딜`, `서폿` 중 하나를 입력해주세요.",
                 ephemeral=True
             )
             return
@@ -694,7 +694,8 @@ class Profile(commands.Cog):
                     "JUNGLE",
                     "MID",
                     "ADC",
-                    "SUPPORT"
+                    "SUPPORT",
+                    "SUP"
                 ]
     
                 # 기존 포지션 역할 제거
@@ -711,9 +712,15 @@ class Profile(commands.Cog):
                     )
     
                 # 주 포지션 지급
+                main_role_name = (
+                    "SUP"
+                    if main_position == "SUPPORT"
+                    and discord.utils.get(interaction.guild.roles, name="SUP")
+                    else main_position
+                )
                 main_role = discord.utils.get(
                     interaction.guild.roles,
-                    name=main_position
+                    name=main_role_name
                 )
     
                 if main_role is not None:
@@ -723,9 +730,15 @@ class Profile(commands.Cog):
                     )
     
                 # 부 포지션 지급
+                sub_role_name = (
+                    "SUP"
+                    if sub_position == "SUPPORT"
+                    and discord.utils.get(interaction.guild.roles, name="SUP")
+                    else sub_position
+                )
                 sub_role = discord.utils.get(
                     interaction.guild.roles,
-                    name=sub_position
+                    name=sub_role_name
                 )
     
                 if (
@@ -771,8 +784,8 @@ class Profile(commands.Cog):
             f"🎮 라이엇 계정: `{official_riot_id}`\n"
             f"🏆 최고 티어: **{tier}**\n"
             f"🔎 라이엇 솔로랭크: **{riot_tier}**\n"
-            f"🎯 주 포지션: **{main_position}**\n"
-            f"🔄 부 포지션: **{sub_position}**\n"
+            f"🎯 주 포지션: **{display_position(main_position)}**\n"
+            f"🔄 부 포지션: **{display_position(sub_position)}**\n"
             f"🧮 기준 Hidden MMR: **{join_cog.profiles[user_id]['hidden_mmr']}**\n"
             f"⭐ 현재 레이팅: "
             f"**{join_cog.profiles[user_id]['rating']}점**\n"
@@ -899,8 +912,8 @@ class Profile(commands.Cog):
             f"👤 **{interaction.user.display_name}**\n\n"
             f"🎮 라이엇 계정: {profile['riot_name']}\n"
             f"🏆 티어: {profile['tier']}\n"
-            f"🎯 주 포지션: {profile['main_position']}\n"
-            f"🔄 부 포지션: {profile['sub_position']}\n\n"
+            f"🎯 주 포지션: {display_position(profile['main_position'])}\n"
+            f"🔄 부 포지션: {display_position(profile['sub_position'])}\n\n"
             f"⭐ 레이팅: {profile['rating']}\n"
             f"🏅 전적: {profile['wins']}승 "
             f"{profile['losses']}패\n\n"
@@ -931,7 +944,7 @@ class Profile(commands.Cog):
                 value="ADC"
             ),
             discord.app_commands.Choice(
-                name="서포터",
+                name="서폿",
                 value="SUPPORT"
             )
         ],
