@@ -1,5 +1,7 @@
 import discord
 
+from utils.positions import normalize_position
+
 
 class RegisterView(discord.ui.View):
 
@@ -49,14 +51,14 @@ class RegisterModal(discord.ui.Modal):
 
         self.main = discord.ui.TextInput(
             label="주 포지션",
-            placeholder="TOP / JUNGLE / MID / ADC / SUPPORT",
-            max_length=10
+            placeholder="탑 / 정글 / 미드 / 원딜 / 서폿",
+            max_length=8
         )
 
         self.sub = discord.ui.TextInput(
             label="부 포지션",
-            placeholder="TOP / JUNGLE / MID / ADC / SUPPORT",
-            max_length=10
+            placeholder="탑 / 정글 / 미드 / 원딜 / 서폿",
+            max_length=8
         )
 
         self.add_item(self.riot_id)
@@ -77,29 +79,21 @@ class RegisterModal(discord.ui.Modal):
             )
             return
 
-        main_position = str(self.main.value).strip().upper()
-        sub_position = str(self.sub.value).strip().upper()
+        main_position = normalize_position(self.main.value)
+        sub_position = normalize_position(self.sub.value)
 
-        valid_positions = {
-            "TOP",
-            "JUNGLE",
-            "MID",
-            "ADC",
-            "SUPPORT"
-        }
-
-        if main_position not in valid_positions:
+        if main_position is None:
             await interaction.response.send_message(
                 "❌ 주 포지션을 올바르게 입력해주세요.\n"
-                "`TOP`, `JUNGLE`, `MID`, `ADC`, `SUPPORT` 중 하나입니다.",
+                "`탑`, `정글`, `미드`, `원딜`, `서폿` 중 하나를 입력해주세요.",
                 ephemeral=True
             )
             return
 
-        if sub_position not in valid_positions:
+        if sub_position is None:
             await interaction.response.send_message(
                 "❌ 부 포지션을 올바르게 입력해주세요.\n"
-                "`TOP`, `JUNGLE`, `MID`, `ADC`, `SUPPORT` 중 하나입니다.",
+                "`탑`, `정글`, `미드`, `원딜`, `서폿` 중 하나를 입력해주세요.",
                 ephemeral=True
             )
             return
