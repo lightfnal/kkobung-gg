@@ -76,7 +76,8 @@ class Match(commands.Cog):
             await channel.send(
                 f"⏰ **{match_id}번 경기 챔피언 미입력 안내**\n"
                 + " ".join(f"<@{user_id}>" for user_id in missing_ids)
-                + "\n경기 결과 메시지의 `내 챔피언 입력` 버튼을 눌러주세요."
+                + "\n각자 `내 챔피언 입력`을 누르거나, 알고 있는 참가자 한 명이 "
+                "`참가자 1명이 10명 입력` 버튼으로 한 번에 등록할 수 있습니다."
             )
         except (discord.Forbidden, discord.HTTPException):
             logger.warning("챔피언 미입력 안내 전송 실패 | 경기=%s", match_id)
@@ -829,14 +830,14 @@ class Match(commands.Cog):
                     f"🔴 레드팀 {red_score} : "
                     f"{blue_score} 블루팀 🔵\n"
                     f"다음은 **{next_game}세트**입니다.\n"
-                    f"<#{room.channel_id}>에서 "
-                    "`/경기시작`으로 다음 세트를 시작해주세요."
+                    "팀 편성 안내 메시지에서 **🎮 경기 시작** 버튼을 눌러주세요."
                 )
 
         result_message = (
             f"🎮 **{room.room_name} · 경기 결과**\n"
             f"방 번호: **{room.room_id}**\n\n"
             f"{result_title}\n\n"
+            f"🧾 결과 입력: <@{interaction.user.id}>\n\n"
             f"{winner_label}: **{winner_name}**\n\n"
             f"📈 **승리팀 레이팅 변화**\n"
             f"{chr(10).join(winner_changes)}\n\n"
@@ -845,8 +846,9 @@ class Match(commands.Cog):
             f"{placement_message}"
             f"{series_message}\n\n"
             f"🖼️ **챔피언 기록 (필수)**\n"
-            "모든 참가자는 `내 챔피언 입력` 버튼으로 사용 챔피언을 등록해주세요.\n"
-            "관리자는 `입력 현황`에서 누락자만 확인하면 됩니다.\n"
+            "참가자마다 `내 챔피언 입력`을 눌러도 되고, 양 팀을 아는 참가자 한 명이 "
+            "`참가자 1명이 10명 입력` 버튼으로 한 번에 입력해도 됩니다.\n"
+            "관리자는 `입력 현황`에서 누락자만 확인할 수 있습니다.\n"
             f"미입력 상태가 5분 이상 이어지면 알림을 보냅니다.\n"
             f"필요하면 `/챔피언기록 경기번호:{match_id}`에서 "
             "미입력자만 입력할 수 있습니다."
@@ -1404,7 +1406,7 @@ class Match(commands.Cog):
                 "취소되었습니다.**\n"
                 f"방 번호: **{room.room_id}**\n\n"
                 "팀과 참가자 정보는 유지됩니다.\n"
-                f"<#{room.channel_id}>에서 `/경기시작`으로 "
+                "팀 편성 안내 메시지에서 `🎮 경기 시작` 버튼을 눌러 "
                 "다시 시작할 수 있습니다."
             )
         else:
@@ -1413,7 +1415,7 @@ class Match(commands.Cog):
                 "취소되었습니다.**\n"
                 f"방 번호: **{room.room_id}**\n\n"
                 "팀과 시리즈 점수는 유지됩니다.\n"
-                f"<#{room.channel_id}>에서 `/경기시작`으로 "
+                "팀 편성 안내 메시지에서 `🎮 경기 시작` 버튼을 눌러 "
                 "같은 세트를 다시 시작할 수 있습니다."
             )
 
@@ -1552,8 +1554,8 @@ class Match(commands.Cog):
                     "시작되었습니다!**\n"
                     f"{format_room_status(room)}\n\n"
                     "게임이 끝나면 아래 **게임 종료 · 결과 입력** 버튼을 눌러주세요.\n"
-                    "참가자 누구나 버튼을 눌러 승리팀 선택창을 열 수 있습니다.\n"
-                    "승리팀 선택은 관리자/내전진행자가 하고, 이후 모두 챔피언을 입력해주세요."
+                    "참가자 누구나 버튼을 눌러 승리팀을 등록할 수 있습니다.\n"
+                    "결과 입력자는 메시지에 표시됩니다. 챔피언 입력은 아래 버튼을 눌러주세요."
                 ),
                 view=MatchFinishButtonView(self, join_cog, room)
             )
@@ -1645,7 +1647,10 @@ class MatchFinishButtonView(discord.ui.View):
             for user_id in team.values()
         }
         if not is_admin(interaction) and str(interaction.user.id) not in team_ids:
-            await send_admin_only_message(interaction)
+            await interaction.response.send_message(
+                "❌ 현재 내전 참가자만 경기 결과를 입력할 수 있습니다.",
+                ephemeral=True
+            )
             return
 
         if not self.room.match_in_progress:

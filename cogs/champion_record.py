@@ -338,8 +338,15 @@ class CombinedChampionRecordModal(discord.ui.Modal):
             self.add_item(field)
 
     async def on_submit(self, interaction):
-        if not is_match_operator(interaction):
-            await send_match_operator_only_message(interaction)
+        participant = get_match_player_for_champion(
+            self.match_id,
+            interaction.user.id
+        )
+        if not is_match_operator(interaction) and participant is None:
+            await interaction.response.send_message(
+                "❌ 이 경기 참가자 또는 내전 진행자만 챔피언 기록을 입력할 수 있습니다.",
+                ephemeral=True
+            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -490,6 +497,18 @@ class CombinedChampionRecordModal(discord.ui.Modal):
             + "\n".join(result_lines),
             ephemeral=True
         )
+
+        if participant is not None:
+            try:
+                await interaction.channel.send(
+                    f"✅ <@{interaction.user.id}>님이 **{self.match_id}번 경기** "
+                    "양 팀 챔피언 기록을 한 번에 입력했습니다."
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.info(
+                    "전체 챔피언 입력 완료 알림 전송 실패 | 경기=%s",
+                    self.match_id
+                )
 
 
 class MissingChampionRecordModal(discord.ui.Modal):
@@ -774,6 +793,39 @@ class ChampionRecordView(discord.ui.View):
         )
 
     @discord.ui.button(
+        label="참가자 1명이 10명 입력",
+        emoji="🎭",
+        style=discord.ButtonStyle.primary
+    )
+    async def open_participant_bulk_modal(self, interaction, button):
+        participant = get_match_player_for_champion(
+            self.match_id,
+            interaction.user.id
+        )
+        if participant is None:
+            await interaction.response.send_message(
+                "❌ 이 경기 참가자만 양 팀 챔피언을 입력할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        teams = get_both_team_players(self.match_id)
+        if teams is None:
+            await interaction.response.send_message(
+                "❌ 경기 참가자 10명을 찾지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(
+            CombinedChampionRecordModal(
+                self.match_id,
+                teams[0],
+                teams[1]
+            )
+        )
+
+    @discord.ui.button(
         label="관리자 일괄 입력",
         emoji="🎭",
         style=discord.ButtonStyle.primary
@@ -982,4 +1034,3 @@ class ChampionRecord(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ChampionRecord(bot))
-
