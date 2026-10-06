@@ -117,30 +117,27 @@ async def save_self_champion_and_reply(
 
 class SelfChampionRecordModal(discord.ui.Modal):
 
-    def __init__(self, match_id, player, source_message=None, source_view=None):
-        super().__init__(title=f"{match_id}번 경기 · 내 챔피언")
+    def __init__(
+        self,
+        match_id,
+        player,
+        actual_position,
+        source_message=None,
+        source_view=None
+    ):
+        super().__init__(title=f"{match_id}번 경기 · 챔피언 직접 입력")
         self.match_id = int(match_id)
         self.player = player
+        self.actual_position = actual_position
         self.source_message = source_message
         self.source_view = source_view
         self.champion = discord.ui.TextInput(
-            label=(
-                f"{str(player.get('team') or '').upper()} · "
-                f"{str(player.get('position') or '미정').upper()}"
-            ),
-            placeholder="내가 사용한 챔피언 이름",
+            label=f"실제 {actual_position} 포지션 · 챔피언 이름",
+            placeholder="예: 아리",
             required=True,
             max_length=30
         )
         self.add_item(self.champion)
-        self.actual_position = discord.ui.TextInput(
-            label="실제로 플레이한 포지션",
-            placeholder="TOP / JUNGLE / MID / ADC / SUPPORT",
-            default=str(player.get("position") or "").upper(),
-            required=True,
-            max_length=10
-        )
-        self.add_item(self.actual_position)
 
     async def on_submit(self, interaction):
         if str(interaction.user.id) != str(self.player["discord_id"]):
@@ -163,7 +160,7 @@ class SelfChampionRecordModal(discord.ui.Modal):
             champion,
             self.source_message,
             self.source_view,
-            str(self.actual_position.value).strip().upper()
+            self.actual_position
         )
 
 
@@ -171,17 +168,22 @@ class ActualPositionSelect(discord.ui.Select):
 
     def __init__(self, parent_view):
         self.parent_view = parent_view
-        assigned = str(parent_view.player.get("position") or "").upper()
+        position_labels = {
+            "TOP": "TOP (탑)",
+            "JUNGLE": "JUNGLE (정글)",
+            "MID": "MID (미드)",
+            "ADC": "ADC (원딜)",
+            "SUPPORT": "SUPPORT (서폿)"
+        }
         options = [
             discord.SelectOption(
-                label=position,
+                label=position_labels[position],
                 value=position,
-                default=(position == assigned)
             )
             for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
         ]
         super().__init__(
-            placeholder="실제로 플레이한 포지션",
+            placeholder="1단계 · 실제 플레이 라인을 먼저 선택",
             min_values=1,
             max_values=1,
             options=options,
@@ -196,10 +198,14 @@ class ActualPositionSelect(discord.ui.Select):
             )
             return
         self.parent_view.actual_position = self.values[0]
-        await interaction.response.send_message(
-            f"🔄 실제 포지션을 **{self.values[0]}**으로 선택했습니다.\n"
-            "이제 아래에서 사용한 챔피언을 선택해주세요.",
-            ephemeral=True
+        self.placeholder = f"실제 플레이 라인: {self.values[0]} · 눌러서 변경"
+        self.parent_view.enable_champion_choices()
+        await interaction.response.edit_message(
+            content=(
+                f"✅ 실제 플레이 라인: **{self.values[0]}**\n"
+                "2단계: 아래 챔피언 목록에서 고르거나 초록색 직접 입력 버튼을 누르세요."
+            ),
+            view=self.parent_view
         )
 
 
@@ -225,17 +231,24 @@ class QuickChampionSelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="최근·모스트 챔피언에서 선택",
+            placeholder="2단계 · 추천 챔피언에서 선택",
             min_values=1,
             max_values=1,
             options=options,
-            row=1
+            row=2
         )
 
     async def callback(self, interaction):
         if str(interaction.user.id) != str(self.parent_view.player["discord_id"]):
             await interaction.response.send_message(
                 "❌ 자신의 챔피언만 등록할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        if self.parent_view.actual_position is None:
+            await interaction.response.send_message(
+                "먼저 실제로 플레이한 라인을 선택해주세요.",
                 ephemeral=True
             )
             return
@@ -268,16 +281,26 @@ class QuickChampionChoiceView(discord.ui.View):
         self.player = player
         self.source_message = source_message
         self.source_view = source_view
-        self.actual_position = str(player.get("position") or "").upper()
-        self.add_item(ActualPositionSelect(self))
+        self.actual_position = None
+        self.position_select = ActualPositionSelect(self)
+        self.add_item(self.position_select)
+        self.champion_select = None
         if suggestions:
-            self.add_item(QuickChampionSelect(self, suggestions))
+            self.champion_select = QuickChampionSelect(self, suggestions)
+            self.champion_select.disabled = True
+            self.add_item(self.champion_select)
+        self.open_manual_modal.disabled = True
+
+    def enable_champion_choices(self):
+        if self.champion_select is not None:
+            self.champion_select.disabled = False
+        self.open_manual_modal.disabled = False
 
     @discord.ui.button(
-        label="목록에 없음 · 직접 입력",
+        label="챔피언 직접 입력 (목록에 없는 경우)",
         emoji="⌨️",
-        style=discord.ButtonStyle.secondary,
-        row=2
+        style=discord.ButtonStyle.success,
+        row=1
     )
     async def open_manual_modal(self, interaction, button):
         if str(interaction.user.id) != str(self.player["discord_id"]):
@@ -287,10 +310,19 @@ class QuickChampionChoiceView(discord.ui.View):
             )
             return
 
+        if self.actual_position is None:
+            await interaction.response.send_message(
+                "먼저 위에서 **실제 플레이 라인**을 선택해주세요. "
+                "라인을 선택하면 이 버튼이 활성화됩니다.",
+                ephemeral=True
+            )
+            return
+
         await interaction.response.send_modal(
             SelfChampionRecordModal(
                 self.match_id,
                 self.player,
+                self.actual_position,
                 self.source_message,
                 self.source_view
             )
@@ -783,17 +815,14 @@ class ChampionRecordView(discord.ui.View):
             self.match_id
         )
 
-        if suggestions:
-            prompt = (
-                "🎭 사용한 챔피언을 선택하세요.\n"
-                "라인이 바뀌었다면 먼저 실제 포지션을 바꾸고, "
-                "목록에 없다면 `직접 입력`을 눌러주세요."
-            )
-        else:
-            prompt = (
-                "🎭 저장된 추천 챔피언이 없습니다.\n"
-                "실제 포지션을 확인한 뒤 `직접 입력`을 눌러주세요."
-            )
+        prompt = (
+            "🎭 **1단계: 실제로 플레이한 라인을 먼저 선택하세요.**\n"
+            "프로필에 등록된 라인이 자동 적용되지 않습니다.\n"
+            "라인을 고른 뒤 챔피언 목록을 선택하거나, 초록색 "
+            "**챔피언 직접 입력** 버튼을 누르면 됩니다."
+        )
+        if not suggestions:
+            prompt += "\n저장된 추천 챔피언이 없어 직접 입력을 이용해주세요."
 
         await interaction.followup.send(
             prompt,
