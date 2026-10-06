@@ -60,7 +60,12 @@ class Match(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def send_champion_reminder(self, match_id, channel):
+    async def send_champion_reminder(
+        self,
+        match_id,
+        channel,
+        champion_record_view=None
+    ):
         await asyncio.sleep(CHAMPION_REMINDER_DELAY_SECONDS)
         rows = get_match_champion_status(match_id)
         missing_ids = [
@@ -79,6 +84,8 @@ class Match(commands.Cog):
                 + "\n각자 결과 메시지의 `내 챔피언 입력`을 눌러주세요. "
                 "남은 칸은 참가자가 `미입력자만 입력` 버튼으로 채울 수 있습니다."
             )
+            if champion_record_view is not None:
+                await champion_record_view.move_to_bottom()
         except (discord.Forbidden, discord.HTTPException):
             logger.warning("챔피언 미입력 안내 전송 실패 | 경기=%s", match_id)
 
@@ -882,6 +889,8 @@ class Match(commands.Cog):
             room=room if match_control_view is not None else None,
             match_control_view=match_control_view
         )
+        if match_control_view is not None:
+            match_control_view.champion_record_view = champion_record_view
         result_output_message, used_fallback = (
             await join_cog.send_output_message(
                 room=room,
@@ -904,7 +913,8 @@ class Match(commands.Cog):
             asyncio.create_task(
                 self.send_champion_reminder(
                     match_id,
-                    result_output_message.channel
+                    result_output_message.channel,
+                    champion_record_view
                 )
             )
 

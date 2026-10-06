@@ -50,6 +50,58 @@ async def resolve_champion_or_reply(interaction, raw_name):
     return champion
 
 
+async def finish_champion_entry_ui(
+    interaction,
+    match_id,
+    source_message=None,
+    source_view=None
+):
+    """완료 안내 후 BO3 다음 세트 조작창을 다시 채널 하단에 올립니다."""
+    progress = get_match_champion_progress(match_id)
+    total = int(progress.get("total_count") or 0)
+    completed = int(progress.get("completed_count") or 0)
+    if total == 0 or completed < total:
+        return False
+
+    if source_message is not None and source_view is not None:
+        for item in source_view.children:
+            if item is not source_view.reopen_result_button:
+                item.disabled = True
+        try:
+            await source_message.edit(view=source_view)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            logger.info("챔피언 입력 완료 버튼 갱신 실패 | 경기=%s", match_id)
+
+    try:
+        await interaction.channel.send(
+            f"✅ **{match_id}번 경기** 참가자 {total}명의 "
+            "챔피언 기록이 모두 완료되었습니다."
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        logger.warning("챔피언 입력 완료 안내 전송 실패 | 경기=%s", match_id)
+
+    if (
+        source_view is not None
+        and source_view.control_message is not None
+        and source_view.control_message_view is not None
+        and source_view.join_cog is not None
+        and source_view.room is not None
+    ):
+        from views.join_view import refresh_match_controls_at_bottom
+
+        message, view = await refresh_match_controls_at_bottom(
+            source_view.join_cog,
+            source_view.room,
+            source_view.control_message,
+            source_view.control_message_view,
+            stage="next_set"
+        )
+        source_view.control_message = message
+        source_view.control_message_view = view
+
+    return True
+
+
 async def save_self_champion_and_reply(
     interaction,
     match_id,
@@ -95,22 +147,12 @@ async def save_self_champion_and_reply(
     )
 
     if total > 0 and completed >= total and not progress["updated"]:
-        if source_message is not None and source_view is not None:
-            for item in source_view.children:
-                item.disabled = True
-
-            try:
-                await source_message.edit(view=source_view)
-            except (discord.Forbidden, discord.HTTPException):
-                logger.warning("챔피언 입력 완료 버튼 비활성화 실패 | 경기=%s", match_id)
-
-        try:
-            await interaction.channel.send(
-                f"✅ **{match_id}번 경기** 참가자 {total}명의 "
-                "챔피언 기록이 모두 완료되었습니다."
-            )
-        except (discord.Forbidden, discord.HTTPException):
-            logger.warning("챔피언 입력 완료 안내 전송 실패 | 경기=%s", match_id)
+        await finish_champion_entry_ui(
+            interaction,
+            match_id,
+            source_message,
+            source_view
+        )
 
     return progress
 
@@ -341,11 +383,18 @@ def get_both_team_players(match_id):
 
 class CombinedChampionRecordModal(discord.ui.Modal):
 
-    def __init__(self, match_id, red_players, blue_players):
+    def __init__(
+        self,
+        match_id,
+        red_players,
+        blue_players,
+        champion_record_view=None
+    ):
         super().__init__(title=f"{match_id}번 경기 · 양 팀 챔피언")
         self.match_id = int(match_id)
         self.red_players = red_players
         self.blue_players = blue_players
+        self.champion_record_view = champion_record_view
         self.champion_inputs = []
 
         for red_player, blue_player in zip(red_players, blue_players):
@@ -542,12 +591,28 @@ class CombinedChampionRecordModal(discord.ui.Modal):
                     self.match_id
                 )
 
+        if self.champion_record_view is not None:
+            await finish_champion_entry_ui(
+                interaction,
+                self.match_id,
+                self.champion_record_view.result_message,
+                self.champion_record_view
+            )
+
 
 class MissingChampionRecordModal(discord.ui.Modal):
 
-    def __init__(self, match_id, missing_players):
+    def __init__(
+        self,
+        match_id,
+        missing_players,
+        source_view=None,
+        source_message=None
+    ):
         super().__init__(title=f"{match_id}번 경기 · 미입력자 챔피언")
         self.match_id = int(match_id)
+        self.source_view = source_view
+        self.source_message = source_message
         # Discord 모달은 최대 5개 입력 항목을 허용합니다. 남은 인원이
         # 더 많으면 저장 후 다시 열어 다음 인원을 입력할 수 있습니다.
         self.players = missing_players[:5]
@@ -708,15 +773,29 @@ class MissingChampionRecordModal(discord.ui.Modal):
             if saved_lines else ""
         )
         await interaction.followup.send(summary, ephemeral=True)
+        if saved_lines:
+            await finish_champion_entry_ui(
+                interaction,
+                self.match_id,
+                self.source_message,
+                self.source_view
+            )
 
 
 class CombinedChampionModalLauncherView(discord.ui.View):
 
-    def __init__(self, match_id, red_players, blue_players):
+    def __init__(
+        self,
+        match_id,
+        red_players,
+        blue_players,
+        champion_record_view=None
+    ):
         super().__init__(timeout=3 * 60)
         self.match_id = int(match_id)
         self.red_players = red_players
         self.blue_players = blue_players
+        self.champion_record_view = champion_record_view
 
     @discord.ui.button(
         label="양 팀 챔피언 입력창 열기",
@@ -732,7 +811,8 @@ class CombinedChampionModalLauncherView(discord.ui.View):
             CombinedChampionRecordModal(
                 self.match_id,
                 self.red_players,
-                self.blue_players
+                self.blue_players,
+                self.champion_record_view
             )
         )
 
@@ -771,7 +851,16 @@ class CombinedChampionModalLauncherView(discord.ui.View):
             return
 
         await interaction.response.send_modal(
-            MissingChampionRecordModal(self.match_id, missing_players)
+            MissingChampionRecordModal(
+                self.match_id,
+                missing_players,
+                self.champion_record_view,
+                (
+                    self.champion_record_view.result_message
+                    if self.champion_record_view is not None
+                    else interaction.message
+                )
+            )
         )
 
 
@@ -783,9 +872,59 @@ class ChampionRecordView(discord.ui.View):
         self.room = room
         self.match_control_view = match_control_view
         self.result_message = None
+        self.join_cog = None
+        self.control_message = None
+        self.control_message_view = None
         self.reopen_result_button.disabled = (
             room is None or match_control_view is None
         )
+
+    async def move_to_bottom(self):
+        """현재 챔피언 입력창을 최신 메시지로 옮겨 스크롤을 줄입니다."""
+        old_message = self.result_message
+        if old_message is None:
+            return False
+
+        original_content = old_message.content or None
+        original_embeds = [
+            discord.Embed.from_dict(embed.to_dict())
+            for embed in old_message.embeds
+        ]
+
+        try:
+            await old_message.edit(
+                content="↘️ 최신 챔피언 입력창이 아래에 있습니다.",
+                embeds=[],
+                view=None
+            )
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            logger.info("이전 챔피언 입력창 비활성화 실패 | 경기=%s", self.match_id)
+
+        send_kwargs = {
+            "view": self,
+            "allowed_mentions": discord.AllowedMentions.none()
+        }
+        if original_content is not None:
+            send_kwargs["content"] = original_content
+        if original_embeds:
+            send_kwargs["embeds"] = original_embeds
+
+        try:
+            new_message = await old_message.channel.send(**send_kwargs)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.exception("챔피언 입력창을 하단으로 옮기지 못함 | 경기=%s", self.match_id)
+            try:
+                await old_message.edit(
+                    content=original_content,
+                    embeds=original_embeds,
+                    view=self
+                )
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
+            return False
+
+        self.result_message = new_message
+        return True
 
     @discord.ui.button(
         label="내 챔피언 입력",
@@ -878,7 +1017,12 @@ class ChampionRecordView(discord.ui.View):
             return
 
         await interaction.response.send_modal(
-            MissingChampionRecordModal(self.match_id, missing_players)
+            MissingChampionRecordModal(
+                self.match_id,
+                missing_players,
+                self,
+                self.result_message or interaction.message
+            )
         )
 
     @discord.ui.button(
@@ -909,7 +1053,8 @@ class ChampionRecordView(discord.ui.View):
             view=CombinedChampionModalLauncherView(
                 self.match_id,
                 teams[0],
-                teams[1]
+                teams[1],
+                self
             ),
             ephemeral=True
         )
