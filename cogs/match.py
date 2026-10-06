@@ -37,6 +37,8 @@ from storage.sqlite_db import (
     commit_transaction,
     rollback_transaction,
     get_match_champion_status,
+    get_match_champion_progress,
+    get_last_match,
     add_match_balance_prediction
 )
 
@@ -50,6 +52,7 @@ from utils.room_display import format_room_status
 
 logger = logging.getLogger(__name__)
 CHAMPION_REMINDER_DELAY_SECONDS = 5 * 60
+MATCH_RESULT_REMINDER_DELAY_SECONDS = 45 * 60
 
 
 class Match(commands.Cog):
@@ -77,6 +80,131 @@ class Match(commands.Cog):
             )
         except (discord.Forbidden, discord.HTTPException):
             logger.warning("챔피언 미입력 안내 전송 실패 | 경기=%s", match_id)
+
+    async def send_match_result_reminder(
+        self,
+        join_cog,
+        room,
+        teams_reference,
+        channel
+    ):
+        """장시간 결과 미등록 상태면 종료 버튼을 다시 안내합니다."""
+        await asyncio.sleep(MATCH_RESULT_REMINDER_DELAY_SECONDS)
+        if (
+            channel is None
+            or not room.match_in_progress
+            or room.current_teams is not teams_reference
+        ):
+            return
+
+        try:
+            await channel.send(
+                f"⏰ **{room.room_name} 경기 결과 안내**\n"
+                "게임이 끝났다면 아래 버튼을 눌러 승리팀 결과를 등록해주세요.",
+                view=MatchFinishButtonView(self, join_cog, room)
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "경기 결과 미등록 알림 전송 실패 | 방=%s",
+                room.room_id
+            )
+
+    async def send_winner_select(self, interaction, room):
+        """/경기결과와 경기 종료 버튼이 함께 사용하는 승리팀 선택창입니다."""
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        async def select_winner(button_interaction, winner):
+            await self.process_match_result(
+                button_interaction,
+                winner,
+                room
+            )
+
+        async with room.operation_lock:
+            if room.current_teams is None:
+                await interaction.response.send_message(
+                    "❌ 먼저 팀을 생성해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            if not room.match_in_progress:
+                await interaction.response.send_message(
+                    "❌ 현재 진행 중인 경기가 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            current_winner_view = room.current_winner_select_view
+            if current_winner_view is not None and not current_winner_view.finished:
+                await interaction.response.send_message(
+                    "❌ 이미 승리팀 선택창이 열려 있습니다.\n"
+                    "가장 최근 선택창을 사용하거나 30초 만료 후 다시 시도해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            view = WinnerSelectView(
+                join_cog=join_cog,
+                callback=select_winner
+            )
+
+        embed = discord.Embed(
+            title=f"🏆 {room.room_name} · 승리팀 선택",
+            description=(
+                f"방 번호: **{room.room_id}**\n\n"
+                "이번 경기에서 승리한 팀을 선택해주세요.\n\n"
+                "🔴 **레드팀 승리**\n"
+                "🔵 **블루팀 승리**\n\n"
+                "⏱️ 선택 시간: **30초**"
+            )
+        )
+
+        try:
+            output_message, used_fallback = await join_cog.send_output_message(
+                room=room,
+                fallback_channel=interaction.channel,
+                embed=embed,
+                view=view
+            )
+        except Exception:
+            async with room.operation_lock:
+                if room.current_winner_select_view is view:
+                    room.current_winner_select_view = None
+                view.finished = True
+                view.stop()
+            raise
+
+        view.message = output_message
+        if output_message is None:
+            async with room.operation_lock:
+                if room.current_winner_select_view is view:
+                    room.current_winner_select_view = None
+                view.finished = True
+                view.stop()
+            confirmation = (
+                "❌ 승리팀 선택창을 전송하지 못했습니다. 경기 상태는 변경하지 않았습니다. "
+                "봇의 모집 채널 권한을 확인해주세요."
+            )
+        elif used_fallback:
+            confirmation = "⚠️ 모집 채널을 찾지 못해 현재 채널에 승리팀 선택창을 표시했습니다."
+        elif output_message.channel.id == interaction.channel_id:
+            confirmation = "✅ 승리팀 선택창을 표시했습니다."
+        else:
+            confirmation = (
+                "✅ 승리팀 선택창을 모집 채널에 표시했습니다.\n"
+                f"진행 채널: <#{output_message.channel.id}>"
+            )
+
+        await interaction.followup.send(confirmation, ephemeral=True)
+
 
     @discord.app_commands.command(
         name="경기결과",
@@ -107,134 +235,7 @@ class Match(commands.Cog):
             return
 
         room = join_cog.active_room
-
-        async def select_winner(
-            button_interaction: discord.Interaction,
-            winner: str
-        ):
-            await self.process_match_result(
-                button_interaction,
-                winner,
-                room
-            )
-
-        async with room.operation_lock:
-            if room.current_teams is None:
-                await interaction.response.send_message(
-                    "❌ 먼저 팀을 생성해주세요.",
-                    ephemeral=True
-                )
-                return
-
-            if not room.match_in_progress:
-                await interaction.response.send_message(
-                    "❌ 현재 진행 중인 경기가 없습니다.",
-                    ephemeral=True
-                )
-                return
-
-            current_winner_view = (
-                room.current_winner_select_view
-            )
-            if (
-                current_winner_view is not None
-                and not current_winner_view.finished
-            ):
-                await interaction.response.send_message(
-                    "❌ 이미 승리팀 선택창이 열려 있습니다.\n"
-                    "가장 최근 선택창을 사용하거나 "
-                    "30초 만료 후 다시 시도해주세요.",
-                    ephemeral=True
-                )
-                return
-
-            await interaction.response.defer(
-                ephemeral=True
-            )
-
-            # 생성자가 현재 선택창을 설정하므로 같은 방의
-            # 다른 /경기결과 요청보다 먼저 선택창을 예약합니다.
-            view = WinnerSelectView(
-                join_cog=join_cog,
-                callback=select_winner
-            )
-
-        embed = discord.Embed(
-            title=(
-                f"🏆 {room.room_name} · "
-                "승리팀 선택"
-            ),
-            description=(
-                f"방 번호: **{room.room_id}**\n\n"
-                "이번 경기에서 승리한 팀을 선택해주세요.\n\n"
-                "🔴 **레드팀 승리**\n"
-                "🔵 **블루팀 승리**\n\n"
-                "⏱️ 선택 시간: **30초**"
-            )
-        )
-
-        try:
-            output_message, used_fallback = (
-                await join_cog.send_output_message(
-                    room=room,
-                    fallback_channel=interaction.channel,
-                    embed=embed,
-                    view=view
-                )
-            )
-        except Exception:
-            async with room.operation_lock:
-                if room.current_winner_select_view is view:
-                    room.current_winner_select_view = None
-                view.finished = True
-                view.stop()
-            raise
-
-        view.message = output_message
-
-        if output_message is None:
-            async with room.operation_lock:
-                if room.current_winner_select_view is view:
-                    room.current_winner_select_view = None
-                view.finished = True
-                view.stop()
-
-            confirmation_message = (
-                "❌ 승리팀 선택창을 전송하지 못했습니다.\n"
-                "경기 상태는 변경하지 않았습니다.\n"
-                "현재 모집 채널에서 꼬붕봇의 "
-                "`채널 보기`, `메시지 보내기`, "
-                "`링크 첨부` 권한을 확인한 뒤 "
-                "`/경기결과`를 다시 실행해주세요."
-            )
-
-        elif used_fallback:
-            confirmation_message = (
-                "⚠️ 저장된 모집 채널을 찾을 수 없어 "
-                "현재 명령 채널에 승리팀 선택창을 "
-                "표시했습니다."
-            )
-
-        elif (
-            output_message.channel.id
-            == interaction.channel_id
-        ):
-            confirmation_message = (
-                "✅ 승리팀 선택창을 현재 채널에 표시했습니다."
-            )
-
-        else:
-            confirmation_message = (
-                "✅ 승리팀 선택창을 해당 내전 모집 채널에 "
-                "표시했습니다.\n"
-                f"진행 채널: "
-                f"<#{output_message.channel.id}>"
-            )
-
-        await interaction.followup.send(
-            confirmation_message,
-            ephemeral=True
-        )
+        await self.send_winner_select(interaction, room)
 
 
     async def process_match_result(
@@ -843,11 +844,12 @@ class Match(commands.Cog):
             f"{chr(10).join(loser_changes)}"
             f"{placement_message}"
             f"{series_message}\n\n"
-            f"🖼️ **챔피언 기록 (선택)**\n"
-            "참가자는 `내 챔피언 입력`으로 자기 챔피언만 등록하세요.\n"
+            f"🖼️ **챔피언 기록 (필수)**\n"
+            "모든 참가자는 `내 챔피언 입력` 버튼으로 사용 챔피언을 등록해주세요.\n"
             "관리자는 `입력 현황`에서 누락자만 확인하면 됩니다.\n"
-            f"필요할 때만 `/챔피언기록 경기번호:{match_id}`로 "
-            "양 팀을 일괄 입력하세요."
+            f"미입력 상태가 5분 이상 이어지면 알림을 보냅니다.\n"
+            f"필요하면 `/챔피언기록 경기번호:{match_id}`에서 "
+            "미입력자만 입력할 수 있습니다."
         )
 
         recruitment_channel = self.bot.get_channel(
@@ -1507,6 +1509,32 @@ class Match(commands.Cog):
                 )
                 return
 
+            if MATCH_MODE == "bo3" and room.series_game > 0:
+                previous_match = get_last_match(room.room_id)
+                if previous_match is not None:
+                    champion_progress = get_match_champion_progress(
+                        previous_match["id"]
+                    )
+                    if (
+                        champion_progress["total_count"] > 0
+                        and champion_progress["completed_count"]
+                            < champion_progress["total_count"]
+                    ):
+                        missing = (
+                            champion_progress["total_count"]
+                            - champion_progress["completed_count"]
+                        )
+                        await interaction.response.send_message(
+                            f"⏳ 이전 세트 경기번호 **{previous_match['id']}**의 "
+                            f"챔피언 입력이 **{missing}명** 남았습니다.\n"
+                            "모두 입력한 뒤 다음 세트를 시작해주세요. "
+                            "접속하지 못한 선수는 관리자가 "
+                            f"`/챔피언기록 경기번호:{previous_match['id']}`에서 "
+                            "미입력자 기록을 입력할 수 있습니다.",
+                            ephemeral=True
+                        )
+                        return
+
             await interaction.response.defer(
                 ephemeral=True
             )
@@ -1523,11 +1551,23 @@ class Match(commands.Cog):
                     f"🎮 **{room.room_name} · 경기가 "
                     "시작되었습니다!**\n"
                     f"{format_room_status(room)}\n\n"
-                    f"경기 종료 후 <#{room.channel_id}>에서 "
-                    "`/경기결과`를 입력해주세요."
-                )
+                    "게임이 끝나면 아래 **게임 종료 · 결과 입력** 버튼을 눌러주세요.\n"
+                    "참가자 누구나 버튼을 눌러 승리팀 선택창을 열 수 있습니다.\n"
+                    "승리팀 선택은 관리자/내전진행자가 하고, 이후 모두 챔피언을 입력해주세요."
+                ),
+                view=MatchFinishButtonView(self, join_cog, room)
             )
         )
+
+        if output_message is not None:
+            asyncio.create_task(
+                self.send_match_result_reminder(
+                    join_cog,
+                    room,
+                    room.current_teams,
+                    output_message.channel
+                )
+            )
 
         if output_message is None:
             confirmation_message = (
@@ -1566,6 +1606,56 @@ class Match(commands.Cog):
             ephemeral=True
         )
 
+
+
+class MatchFinishButtonView(discord.ui.View):
+    """경기 시작 공지에서 참가자가 결과 입력 절차를 바로 시작합니다."""
+
+    def __init__(self, match_cog, join_cog, room):
+        super().__init__(timeout=6 * 60 * 60)
+        self.match_cog = match_cog
+        self.join_cog = join_cog
+        self.room = room
+        self.teams_reference = room.current_teams
+
+    @discord.ui.button(
+        label="게임 종료 · 결과 입력",
+        emoji="🏁",
+        style=discord.ButtonStyle.primary
+    )
+    async def finish_match(self, interaction, button):
+        if not self.join_cog.activate_room(self.room):
+            await interaction.response.send_message(
+                "❌ 연결된 내전 방을 찾지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if self.room.current_teams is not self.teams_reference:
+            await interaction.response.send_message(
+                "❌ 팀이 변경되어 이 경기 종료 버튼은 만료되었습니다.",
+                ephemeral=True
+            )
+            return
+
+        team_ids = {
+            str(user_id)
+            for team in (self.room.current_teams or {}).values()
+            if isinstance(team, dict)
+            for user_id in team.values()
+        }
+        if not is_admin(interaction) and str(interaction.user.id) not in team_ids:
+            await send_admin_only_message(interaction)
+            return
+
+        if not self.room.match_in_progress:
+            await interaction.response.send_message(
+                "❌ 현재 진행 중인 경기가 없습니다.",
+                ephemeral=True
+            )
+            return
+
+        await self.match_cog.send_winner_select(interaction, self.room)
 
 
 async def setup(bot):
