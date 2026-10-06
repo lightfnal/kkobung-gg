@@ -243,7 +243,8 @@ class Match(commands.Cog):
         self,
         interaction: discord.Interaction,
         winner: str,
-        room
+        room,
+        match_control_view=None
     ):
 
         join_cog = get_join_cog(
@@ -265,7 +266,8 @@ class Match(commands.Cog):
                 interaction,
                 winner,
                 room,
-                join_cog
+                join_cog,
+                match_control_view
             )
 
     async def _process_match_result_locked(
@@ -273,7 +275,8 @@ class Match(commands.Cog):
         interaction: discord.Interaction,
         winner: str,
         room,
-        join_cog
+        join_cog,
+        match_control_view=None
     ):
 
         if not join_cog.activate_room(
@@ -874,14 +877,22 @@ class Match(commands.Cog):
             ):
                 recruitment_channel = None
 
+        champion_record_view = ChampionRecordView(
+            match_id,
+            room=room if match_control_view is not None else None,
+            match_control_view=match_control_view
+        )
         result_output_message, used_fallback = (
             await join_cog.send_output_message(
                 room=room,
                 fallback_channel=recruitment_channel,
                 content=result_message,
-                view=ChampionRecordView(match_id)
+                view=champion_record_view
             )
         )
+
+        if result_output_message is not None:
+            champion_record_view.result_message = result_output_message
 
         if result_output_message is None:
             logger.warning(

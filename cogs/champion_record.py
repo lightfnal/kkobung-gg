@@ -745,9 +745,15 @@ class CombinedChampionModalLauncherView(discord.ui.View):
 
 class ChampionRecordView(discord.ui.View):
 
-    def __init__(self, match_id):
+    def __init__(self, match_id, room=None, match_control_view=None):
         super().__init__(timeout=24 * 60 * 60)
         self.match_id = int(match_id)
+        self.room = room
+        self.match_control_view = match_control_view
+        self.result_message = None
+        self.reopen_result_button.disabled = (
+            room is None or match_control_view is None
+        )
 
     @discord.ui.button(
         label="내 챔피언 입력",
@@ -918,6 +924,45 @@ class ChampionRecordView(discord.ui.View):
             f"📋 **{self.match_id}번 경기 입력 현황 "
             f"({completed}/{len(rows)}명)**\n" + "\n".join(lines),
             ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="잘못 등록했어요 · 승리팀 다시 선택",
+        emoji="↩️",
+        style=discord.ButtonStyle.danger,
+        row=1
+    )
+    async def reopen_result_button(self, interaction, button):
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        if (
+            self.room is None
+            or self.match_control_view is None
+            or self.match_control_view.team_message is None
+        ):
+            await interaction.response.send_message(
+                "❌ 이 경기의 원래 팀 메시지 정보를 찾을 수 없습니다. "
+                "현재 방에서 `/경기취소`로 결과를 취소한 뒤 다시 진행해주세요.",
+                ephemeral=True
+            )
+            return
+
+        admin_cog = interaction.client.get_cog("AdminMatch")
+        if admin_cog is None:
+            await interaction.response.send_message(
+                "❌ 경기 관리 기능을 불러오지 못했습니다. 관리자에게 알려주세요.",
+                ephemeral=True
+            )
+            return
+
+        await admin_cog.reopen_match_result(
+            interaction,
+            self.match_id,
+            self.room,
+            self.match_control_view,
+            self.result_message
         )
 
 

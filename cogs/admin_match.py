@@ -1,4 +1,5 @@
 import logging
+import copy
 from typing import Literal, Optional
 
 import discord
@@ -22,10 +23,12 @@ from storage.sqlite_db import (
 )
 
 from utils.cog_helper import get_join_cog
-from views.join_view import JoinView
+from views.join_view import JoinView, MatchControlView
 from utils.permissions import (
     is_admin,
-    send_admin_only_message
+    send_admin_only_message,
+    is_match_operator,
+    send_match_operator_only_message
 )
 
 
@@ -458,10 +461,45 @@ class AdminMatch(commands.Cog):
                 room
             )
 
+    async def reopen_match_result(
+        self,
+        interaction,
+        match_id,
+        room,
+        control_view,
+        result_message
+    ):
+        """취소 후 같은 세트의 레드/블루 승리 버튼을 다시 엽니다."""
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        async with room.operation_lock:
+            await self._cancel_match_locked(
+                interaction,
+                room,
+                reopen_context={
+                    "control_view": control_view,
+                    "team_message": control_view.team_message,
+                    "result_message": result_message
+                },
+                expected_match_id=match_id
+            )
+
     async def _cancel_match_locked(
         self,
         interaction: discord.Interaction,
-        room
+        room,
+        reopen_context=None,
+        expected_match_id=None
     ):
         join_cog = get_join_cog(self.bot)
 
@@ -505,6 +543,17 @@ class AdminMatch(commands.Cog):
         if last_match is None:
             await interaction.response.send_message(
                 "❌ 취소할 경기 기록이 없습니다.",
+                ephemeral=True
+            )
+            return
+
+        if (
+            expected_match_id is not None
+            and int(last_match["id"]) != int(expected_match_id)
+        ):
+            await interaction.response.send_message(
+                "❌ 이 결과 뒤에 다른 경기가 저장되어 다시 열 수 없습니다. "
+                "레이팅을 안전하게 복구하려면 최신 결과부터 차례로 취소해주세요.",
                 ephemeral=True
             )
             return
@@ -658,6 +707,59 @@ class AdminMatch(commands.Cog):
 
             join_cog.reload_profiles()
 
+            reopen_warning = ""
+            if reopen_context is not None:
+                control_view = reopen_context["control_view"]
+                room.players = copy.deepcopy(
+                    control_view.players_snapshot
+                )
+                room.current_teams = copy.deepcopy(
+                    control_view.teams_snapshot
+                )
+                room.series_score = dict(
+                    control_view.series_score_snapshot
+                )
+                room.series_game = control_view.series_game_snapshot
+                room.match_in_progress = True
+                room.mvp_vote_in_progress = False
+                join_cog.activate_room(room)
+
+                reopened_view = MatchControlView(join_cog)
+                reopened_view.team_message = reopen_context["team_message"]
+                try:
+                    await reopen_context["team_message"].edit(
+                        view=reopened_view
+                    )
+                except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                    logger.exception(
+                        "승리팀 재선택 버튼을 원래 메시지에 복구하지 못함 | 방=%s",
+                        room.room_id
+                    )
+                    reopen_warning = (
+                        "\n⚠️ 원래 팀 메시지에 버튼을 다시 붙이지 못했습니다. "
+                        "경기 상태는 복구했으니 관리자에게 알려주세요."
+                    )
+
+                result_message = reopen_context.get("result_message")
+                if result_message is not None:
+                    try:
+                        await result_message.edit(
+                            content=(
+                                f"↩️ **경기 #{match_id} 결과가 취소되었습니다.**\n"
+                                "승리팀을 다시 선택할 수 있도록 원래 팀 안내 메시지의 "
+                                "버튼을 열었습니다."
+                            ),
+                            embed=None,
+                            view=None
+                        )
+                    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                        logger.info(
+                            "취소된 결과 카드의 챔피언 입력 버튼 제거 실패 | 경기=%s",
+                            match_id
+                        )
+
+                join_cog.save_rooms_state()
+
             logger.warning(
                 "경기 결과 취소 완료 | 방=%s | DB경기번호=%s | "
                 "시리즈ID=%s | 경기ID=%s",
@@ -677,6 +779,12 @@ class AdminMatch(commands.Cog):
                         f"취소된 경기: **#{match_id}**\n\n"
                         "전체 및 시즌 레이팅, Hidden MMR, "
                         "배치 경기 수, 승패, 연승·연패 기록이 복구되었습니다."
+                        + (
+                            "\n해당 세트의 승리팀 선택을 다시 열었습니다. "
+                            "원래 팀 안내 메시지에서 레드팀 또는 블루팀 승리를 선택해주세요."
+                            if reopen_context is not None else ""
+                        )
+                        + reopen_warning
                     )
                 )
             )
