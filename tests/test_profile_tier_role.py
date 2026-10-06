@@ -7,9 +7,23 @@ from cogs.profile import (
     get_member_role_tier,
     get_role_adjusted_hidden_mmr
 )
+from utils.positions import normalize_position
 
 
 class TestProfileTierRole(unittest.TestCase):
+
+    def test_korean_position_names_normalize_to_matchmaking_values(self):
+        self.assertEqual(normalize_position("탑"), "TOP")
+        self.assertEqual(normalize_position("정글"), "JUNGLE")
+        self.assertEqual(normalize_position("미드"), "MID")
+        self.assertEqual(normalize_position("원딜"), "ADC")
+        self.assertEqual(normalize_position("서폿"), "SUPPORT")
+
+    def test_profile_nickname_uses_sup_abbreviation(self):
+        nickname = build_profile_nickname(
+            "Player#KR1", "다이아", "SUPPORT", "TOP"
+        )
+        self.assertTrue(nickname.endswith(" / SUP TOP"))
 
     def test_discord_tier_role_overrides_unranked_display(self):
         member = SimpleNamespace(
