@@ -23,7 +23,10 @@ from storage.sqlite_db import (
 )
 
 from utils.cog_helper import get_join_cog
-from views.join_view import JoinView, MatchControlView
+from views.join_view import (
+    JoinView,
+    refresh_match_controls_at_bottom
+)
 from utils.permissions import (
     is_admin,
     send_admin_only_message,
@@ -722,13 +725,16 @@ class AdminMatch(commands.Cog):
                 room.series_game = control_view.series_game_snapshot
                 room.match_in_progress = True
                 room.mvp_vote_in_progress = False
+                control_view.teams_reference = room.current_teams
                 join_cog.activate_room(room)
 
-                reopened_view = MatchControlView(join_cog)
-                reopened_view.team_message = reopen_context["team_message"]
                 try:
-                    await reopen_context["team_message"].edit(
-                        view=reopened_view
+                    await refresh_match_controls_at_bottom(
+                        join_cog,
+                        room,
+                        reopen_context["team_message"],
+                        control_view,
+                        stage="reselect"
                     )
                 except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                     logger.exception(
