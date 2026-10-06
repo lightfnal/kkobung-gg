@@ -539,8 +539,17 @@ class MissingChampionRecordModal(discord.ui.Modal):
             self.add_item(field)
 
     async def on_submit(self, interaction):
-        if not is_match_operator(interaction):
-            await send_match_operator_only_message(interaction)
+        if (
+            not is_match_operator(interaction)
+            and get_match_player_for_champion(
+                self.match_id,
+                interaction.user.id
+            ) is None
+        ):
+            await interaction.response.send_message(
+                "❌ 이 경기 참가자만 미입력자의 챔피언을 입력할 수 있습니다.",
+                ephemeral=True
+            )
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -793,36 +802,48 @@ class ChampionRecordView(discord.ui.View):
         )
 
     @discord.ui.button(
-        label="참가자 1명이 10명 입력",
-        emoji="🎭",
+        label="미입력자 입력 (최대 5명)",
+        emoji="📝",
         style=discord.ButtonStyle.primary
     )
-    async def open_participant_bulk_modal(self, interaction, button):
+    async def open_missing_players_modal(self, interaction, button):
         participant = get_match_player_for_champion(
             self.match_id,
             interaction.user.id
         )
-        if participant is None:
+        if participant is None and not is_match_operator(interaction):
             await interaction.response.send_message(
-                "❌ 이 경기 참가자만 양 팀 챔피언을 입력할 수 있습니다.",
+                "❌ 이 경기 참가자만 미입력자의 챔피언을 입력할 수 있습니다.",
                 ephemeral=True
             )
             return
 
-        teams = get_both_team_players(self.match_id)
-        if teams is None:
+        try:
+            missing_players = [
+                row for row in get_match_champion_status(self.match_id)
+                if not row.get("champion_name")
+            ]
+        except Exception as error:
+            logger.exception(
+                "미입력자 챔피언 입력 준비 실패 | 경기=%s",
+                self.match_id
+            )
             await interaction.response.send_message(
-                "❌ 경기 참가자 10명을 찾지 못했습니다.",
+                "❌ 입력 현황을 불러오지 못했습니다. "
+                f"오류 종류: `{type(error).__name__}`",
+                ephemeral=True
+            )
+            return
+
+        if not missing_players:
+            await interaction.response.send_message(
+                "✅ 모든 참가자가 챔피언을 입력했습니다.",
                 ephemeral=True
             )
             return
 
         await interaction.response.send_modal(
-            CombinedChampionRecordModal(
-                self.match_id,
-                teams[0],
-                teams[1]
-            )
+            MissingChampionRecordModal(self.match_id, missing_players)
         )
 
     @discord.ui.button(
