@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 import random
 import discord
@@ -162,6 +163,15 @@ class MatchControlView(discord.ui.View):
             join_cog.active_room
         )
         self.teams_reference = self.room.current_teams
+        self.team_message = None
+        self.players_snapshot = copy.deepcopy(
+            getattr(self.room, "players", {})
+        )
+        self.teams_snapshot = copy.deepcopy(self.room.current_teams)
+        self.series_score_snapshot = dict(
+            getattr(self.room, "series_score", {"red": 0, "blue": 0})
+        )
+        self.series_game_snapshot = getattr(self.room, "series_game", 0)
         self._result_lock = asyncio.Lock()
 
         # 한 장의 팀 안내 메시지에서 시작과 결과 등록을 모두 처리합니다.
@@ -232,6 +242,7 @@ class MatchControlView(discord.ui.View):
         self.join_cog.activate_room(
             self.room
         )
+        self.team_message = interaction.message
 
         async with self.room.operation_lock:
             if self.room.current_teams is None:
@@ -281,6 +292,16 @@ class MatchControlView(discord.ui.View):
                         )
                         return
 
+            # 다음 세트 결과를 되돌릴 때 이 시점의 팀/참가자/시리즈 점수를 복원합니다.
+            self.players_snapshot = copy.deepcopy(
+                getattr(self.room, "players", {})
+            )
+            self.teams_snapshot = copy.deepcopy(self.room.current_teams)
+            self.series_score_snapshot = dict(
+                getattr(self.room, "series_score", {"red": 0, "blue": 0})
+            )
+            self.series_game_snapshot = getattr(self.room, "series_game", 0)
+
             self.room.match_in_progress = True
 
             self.join_cog.save_rooms_state()
@@ -300,15 +321,16 @@ class MatchControlView(discord.ui.View):
             "🔴 레드팀 승리 또는 🔵 블루팀 승리 버튼을 한 번 눌러주세요."
         )
 
-    async def _report_winner(self, interaction, winner):
+    async def _report_winner(self, interaction, winner, response_deferred=False):
         if self._result_lock.locked():
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "⏳ 결과를 이미 처리하고 있습니다. 잠시만 기다려주세요.",
                 ephemeral=True
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not response_deferred:
+            await interaction.response.defer(ephemeral=True, thinking=True)
         async with self._result_lock:
             if not self.room.match_in_progress:
                 await interaction.followup.send(
@@ -328,8 +350,9 @@ class MatchControlView(discord.ui.View):
             self.start_button.disabled = True
             self.red_button.disabled = True
             self.blue_button.disabled = True
+            team_message = self.team_message or interaction.message
             try:
-                await interaction.message.edit(view=self)
+                await team_message.edit(view=self)
             except discord.HTTPException:
                 pass
 
@@ -337,7 +360,8 @@ class MatchControlView(discord.ui.View):
                 await match_cog.process_match_result(
                     interaction,
                     winner,
-                    self.room
+                    self.room,
+                    match_control_view=self
                 )
             except Exception:
                 logger.exception(
@@ -349,7 +373,7 @@ class MatchControlView(discord.ui.View):
                 self.red_button.disabled = False
                 self.blue_button.disabled = False
                 try:
-                    await interaction.message.edit(view=self)
+                    await team_message.edit(view=self)
                 except discord.HTTPException:
                     pass
                 await interaction.followup.send(
@@ -366,7 +390,7 @@ class MatchControlView(discord.ui.View):
                 self.red_button.disabled = False
                 self.blue_button.disabled = False
                 try:
-                    await interaction.message.edit(view=self)
+                    await team_message.edit(view=self)
                 except discord.HTTPException:
                     pass
                 return
@@ -385,7 +409,7 @@ class MatchControlView(discord.ui.View):
                 self.blue_button.disabled = True
 
             try:
-                await interaction.message.edit(view=self)
+                await team_message.edit(view=self)
             except discord.HTTPException:
                 pass
 
@@ -401,7 +425,12 @@ class MatchControlView(discord.ui.View):
         custom_id="match_result_red_button"
     )
     async def red_button(self, interaction, button):
-        await self._report_winner(interaction, "red")
+        self.team_message = interaction.message
+        await interaction.response.send_message(
+            "🔴 **레드팀 승리로 등록할까요?**",
+            view=WinnerConfirmView(self, "red", interaction.user.id),
+            ephemeral=True
+        )
 
     @discord.ui.button(
         label="🔵 블루팀 승리",
@@ -409,7 +438,52 @@ class MatchControlView(discord.ui.View):
         custom_id="match_result_blue_button"
     )
     async def blue_button(self, interaction, button):
-        await self._report_winner(interaction, "blue")
+        self.team_message = interaction.message
+        await interaction.response.send_message(
+            "🔵 **블루팀 승리로 등록할까요?**",
+            view=WinnerConfirmView(self, "blue", interaction.user.id),
+            ephemeral=True
+        )
+
+
+class WinnerConfirmView(discord.ui.View):
+    """승리팀 오입력을 줄이기 위한 본인 확인 단계."""
+
+    def __init__(self, match_control_view, winner, actor_id):
+        super().__init__(timeout=60)
+        self.match_control_view = match_control_view
+        self.winner = winner
+        self.actor_id = int(actor_id)
+
+    async def interaction_check(self, interaction):
+        if int(interaction.user.id) != self.actor_id:
+            await interaction.response.send_message(
+                "❌ 승리팀을 선택한 사람만 확인할 수 있습니다.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="결과 등록", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction, button):
+        self.stop()
+        await interaction.response.edit_message(
+            content="결과를 저장하고 있습니다…",
+            view=None
+        )
+        await self.match_control_view._report_winner(
+            interaction,
+            self.winner,
+            response_deferred=True
+        )
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        self.stop()
+        await interaction.response.edit_message(
+            content="승리팀 선택을 취소했습니다. 원래 경기 메시지에서 다시 선택할 수 있습니다.",
+            view=None
+        )
 
 
 def _season_profiles_for_players(join_cog, players):
