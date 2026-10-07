@@ -1805,11 +1805,13 @@ class Join(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
+        # Discord 상호작용은 약 3초 안에 최초 응답이 필요하므로
+        # 권한 검사보다 먼저 응답을 예약합니다.
+        await interaction.response.defer(thinking=True)
+
         if not is_admin(interaction):
             await send_admin_only_message(interaction)
             return
-
-        await interaction.response.defer(thinking=True)
 
         # ContextVar 기본 방에 의존하지 않고, 이 명령을 실행한
         # 채널에 연결된 방 객체를 직접 사용합니다.
