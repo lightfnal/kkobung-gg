@@ -321,7 +321,7 @@ class EndSeriesConfirmView(discord.ui.View):
                 control_view=self.control_view,
                 source_message=self.source_message
             )
-        except Exception:
+        except Exception as error:
             logger.exception(
                 "내전 종료 처리 실패 | 방=%s",
                 self.room.room_id
@@ -330,7 +330,8 @@ class EndSeriesConfirmView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         "❌ 내전 종료 처리 중 오류가 발생했습니다. "
-                        "경기 기록은 별도로 확인이 필요합니다. 관리자에게 알려주세요."
+                        f"오류 종류: `{type(error).__name__}`. "
+                        "관리자에게 이 오류 종류와 Render 로그를 전달해주세요."
                     )
                 )
             except discord.HTTPException:
@@ -1016,13 +1017,29 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        profiles = _season_profiles_for_players(
-            self.join_cog,
-            player_ids
-        )
-        errors = validate_team_profiles(player_ids, profiles)
+
+        # 프로필/시즌 정보를 동기 DB에서 읽으므로 먼저 버튼 상호작용을
+        # 확인합니다. 이 조회가 Discord의 3초 응답 제한을 넘으면 버튼이
+        # 실패한 것처럼 보이고 Unknown interaction 오류가 발생합니다.
+        await interaction.response.defer()
+        try:
+            profiles = _season_profiles_for_players(
+                self.join_cog,
+                player_ids
+            )
+            errors = validate_team_profiles(player_ids, profiles)
+        except Exception:
+            logger.exception(
+                "캡틴 드래프트 참가자 프로필 조회 실패 | 방=%s",
+                self.room.room_id
+            )
+            await interaction.followup.send(
+                "❌ 참가자 프로필을 확인하지 못했습니다. 잠시 후 다시 눌러주세요.",
+                ephemeral=True
+            )
+            return
         if errors:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 참가자 프로필의 포지션 정보를 확인해주세요.\n"
                 + "\n".join(f"• {error}" for error in errors),
                 ephemeral=True
@@ -1036,18 +1053,24 @@ class TeamModeView(discord.ui.View):
         self.recruit_view.team_generating = True
         self.recruit_view._captain_setup_view = setup_view
         try:
-            await interaction.response.edit_message(
+            setup_view.message = await interaction.edit_original_response(
                 content=(
                     "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
                     "캡틴도 각자 한 팀에 포함됩니다."
                 ),
                 view=setup_view
             )
-            setup_view.message = interaction.message
         except discord.HTTPException:
             self.recruit_view._captain_setup_view = None
             self.recruit_view.team_generating = False
-            raise
+            logger.exception(
+                "캡틴 드래프트 선택창 전송 실패 | 방=%s",
+                self.room.room_id
+            )
+            await interaction.followup.send(
+                "❌ 캡틴 선택창을 표시하지 못했습니다. 모집 메시지를 새로고침한 뒤 다시 눌러주세요.",
+                ephemeral=True
+            )
 
     @discord.ui.button(
         label="경매 내전",
@@ -2635,12 +2658,12 @@ class CaptainDraftView(discord.ui.View):
 
 class JoinView(discord.ui.View):
 
-    def __init__(self, join_cog, room=None):
+    def __init__(self, join_cog):
         # timeout=None이면 봇이 켜져 있는 동안 버튼이 만료되지 않습니다.
         super().__init__(timeout=None)
 
         self.join_cog = join_cog
-        self.room = room or join_cog.active_room
+        self.room = join_cog.active_room
         self.recruit_closed = False
         self.message = None
 
@@ -2649,30 +2672,20 @@ class JoinView(discord.ui.View):
         self._captain_setup_view = None
         self._auction_setup_view = None
 
-        if len(self.room.players) < self.room.player_limit:
+        if len(self.join_cog.players) < self.room.player_limit:
             self.make_teams_button.disabled = True
 
     async def interaction_check(
         self,
         interaction: discord.Interaction
     ) -> bool:
-        room = self.join_cog.select_room_for_interaction(interaction)
-        if room is None:
-            if not await self.join_cog.require_room(interaction):
-                return False
-
-        # 다른 방의 모집창이 이 채널에 표시된 경우 버튼을 차단합니다.
-        room = self.join_cog.active_room
-        if str(room.room_id) != str(self.room.room_id):
-            await interaction.response.send_message(
-                "❌ 이 모집창은 다른 내전 방에 연결되어 있습니다.\n"
-                "관리자가 해당 방에서 모집창을 다시 생성해주세요.",
-                ephemeral=True
-            )
+        if not await self.join_cog.require_room(
+            interaction
+        ):
             return False
-
+        
         # 현재 모집창이 아니면 오래된 버튼으로 판단
-        if room.current_recruit_view is not self:
+        if self.join_cog.current_recruit_view is not self:
             await interaction.response.send_message(
                 "❌ 만료된 내전 모집창입니다.\n"
                 "가장 최근에 생성된 모집창을 이용해주세요.",
@@ -2685,7 +2698,7 @@ class JoinView(discord.ui.View):
     def create_embed(self):
         """현재 참가자 정보를 모집 메시지로 만듭니다."""
 
-        players = self.room.players
+        players = self.join_cog.players
         waiting_players = self.room.waiting_players
 
         self.make_teams_button.disabled = (
@@ -2799,34 +2812,11 @@ class JoinView(discord.ui.View):
                     f"`{main}/{sub}`"
                 )
 
-            # Discord limits each embed field value to 1,024 characters.
-            # Split long rosters into multiple fields before sending.
-            participant_chunks = []
-            current_chunk = []
-            current_length = 0
-            for participant_line in participant_list:
-                line_length = len(participant_line)
-                added_length = line_length + (1 if current_chunk else 0)
-                if current_chunk and current_length + added_length > 1000:
-                    participant_chunks.append(current_chunk)
-                    current_chunk = []
-                    current_length = 0
-                    added_length = line_length
-                current_chunk.append(participant_line)
-                current_length += added_length
-
-            if current_chunk:
-                participant_chunks.append(current_chunk)
-
-            for chunk_index, chunk in enumerate(participant_chunks, start=1):
-                field_name = "📋 참가자 명단"
-                if len(participant_chunks) > 1:
-                    field_name += f" ({chunk_index}/{len(participant_chunks)})"
-                embed.add_field(
-                    name=field_name,
-                    value="\n".join(chunk),
-                    inline=False
-                )
+            embed.add_field(
+                name="📋 참가자 명단",
+                value="\n".join(participant_list),
+                inline=False
+            )
         else:
             embed.add_field(
                 name="📋 참가자 명단",
@@ -3759,30 +3749,27 @@ class JoinView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-        # 버튼 상호작용도 만료되기 전에 즉시 확인 응답을 보냅니다.
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True
-        )
 
         if not is_admin(interaction):
             await send_admin_only_message(
                 interaction
             )
             return
-
+        
         if self.team_generating:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "⏳ 이미 팀 생성 중입니다.",
                 ephemeral=True
             )
             return
 
         self.team_generating = True
-        self.team_generation_user = interaction.user.id
+        self.team_generation_user = (
+            interaction.user.id
+        )
 
         try:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "팀 편성 방식을 선택해주세요.",
                 view=TeamModeView(self),
                 ephemeral=True
@@ -3794,12 +3781,23 @@ class JoinView(discord.ui.View):
                 error
             )
 
+            message = (
+                "❌ 팀 생성 중 오류가 발생했습니다.\n"
+                "잠시 후 다시 시도해주세요."
+            )
+
             try:
-                await interaction.followup.send(
-                    "❌ 팀 생성 중 오류가 발생했습니다.\n"
-                    "잠시 후 다시 시도해주세요.",
-                    ephemeral=True
-                )
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        message,
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        message,
+                        ephemeral=True
+                    )
+
             except discord.HTTPException:
                 pass
 
