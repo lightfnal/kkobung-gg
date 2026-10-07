@@ -29,14 +29,21 @@ def get_tournament(tournament_id):
 
 def delete_tournament(tournament_id):
     """Delete a cup and its bracket while preserving ordinary match history."""
-    conn.execute("BEGIN IMMEDIATE")
+    # This module shares one SQLite connection with the rest of the bot. Other
+    # commands can already have an open transaction on it, so use a savepoint
+    # instead of BEGIN IMMEDIATE (which fails when a transaction is active).
+    had_open_transaction = conn.in_transaction
+    savepoint = "delete_mini_cup"
+    conn.execute(f"SAVEPOINT {savepoint}")
     try:
         tournament = conn.execute(
             "SELECT id FROM tournaments WHERE id = ?",
             (int(tournament_id),)
         ).fetchone()
         if tournament is None:
-            conn.commit()
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+            if not had_open_transaction:
+                conn.commit()
             return False
 
         active_fixture = conn.execute(
@@ -63,10 +70,15 @@ def delete_tournament(tournament_id):
             "DELETE FROM tournaments WHERE id = ?",
             (int(tournament_id),)
         )
-        conn.commit()
+        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+        if not had_open_transaction:
+            conn.commit()
         return True
     except Exception:
-        conn.rollback()
+        conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+        if not had_open_transaction:
+            conn.rollback()
         raise
 
 
