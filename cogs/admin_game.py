@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import math
 import os
 import time
@@ -40,6 +42,9 @@ from storage.sqlite_db import (
     get_operations_events
 )
 from storage.schema_migrations import CURRENT_SCHEMA_VERSION
+
+
+logger = logging.getLogger(__name__)
 
 
 def format_duration(total_seconds):
@@ -481,7 +486,11 @@ class AdminGame(commands.Cog):
 
         room = join_cog.active_room
 
-        if room.match_in_progress or room.match_transaction_active:
+        if (
+            room.match_in_progress
+            or room.match_transaction_active
+            or room.pending_match_token is not None
+        ):
             await interaction.response.send_message(
                 "❌ 경기 진행 또는 결과 저장 중에는 내전을 종료할 수 없습니다.",
                 ephemeral=True
@@ -513,18 +522,44 @@ class AdminGame(commands.Cog):
     ):
         join_cog = get_join_cog(self.bot)
         if join_cog is None:
-            await interaction.followup.send("내전 관리 기능을 불러오지 못했습니다.", ephemeral=True)
+            await interaction.edit_original_response(
+                content="❌ 내전 관리 기능을 불러오지 못했습니다."
+            )
+            return
+
+        # Do not let an end request sit behind a stuck match/result operation.
+        # The user has already confirmed; report the conflict immediately.
+        if room.operation_lock.locked():
+            await interaction.edit_original_response(
+                content=(
+                    "⏳ 이 방에서 다른 경기 작업이 아직 처리 중입니다. "
+                    "내전은 종료되지 않았습니다. 잠시 후 다시 눌러주세요."
+                )
+            )
+            return
+        if room.pending_match_token is not None:
+            await interaction.edit_original_response(
+                content=(
+                    "⏳ 직전 경기 결과 저장이 아직 정리되지 않았습니다. "
+                    "기록을 확인한 뒤 다시 종료해주세요."
+                )
+            )
             return
 
         async with room.operation_lock:
-            if room.match_in_progress or room.match_transaction_active:
-                await interaction.followup.send(
-                    "❌ 경기 진행 또는 결과 저장 중이라 종료하지 않았습니다.",
-                    ephemeral=True
+            if (
+                room.match_in_progress
+                or room.match_transaction_active
+                or room.pending_match_token is not None
+            ):
+                await interaction.edit_original_response(
+                    content="❌ 경기 진행 또는 결과 저장 중이라 종료하지 않았습니다."
                 )
                 return
             if room.series_game <= 0 or room.current_teams is None:
-                await interaction.followup.send("❌ 종료할 진행 중인 시리즈가 없습니다.", ephemeral=True)
+                await interaction.edit_original_response(
+                    content="❌ 종료할 진행 중인 시리즈가 없습니다."
+                )
                 return
 
             last_match = get_last_match(room.room_id)
@@ -543,11 +578,21 @@ class AdminGame(commands.Cog):
                 for team in (room.current_teams or {}).values()
                 for user_id in (team or {}).values()
             )
-            voice = await join_cog.move_members_to_voice_channel(
-                guild=interaction.guild,
-                user_ids=participant_ids,
-                channel_id=room.waiting_voice_channel_id
-            )
+            try:
+                voice = await asyncio.wait_for(
+                    join_cog.move_members_to_voice_channel(
+                        guild=interaction.guild,
+                        user_ids=participant_ids,
+                        channel_id=room.waiting_voice_channel_id
+                    ),
+                    timeout=15
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "내전 종료 중 음성채널 이동 시간 초과 | 방=%s",
+                    room.room_id
+                )
+                voice = {"moved": 0, "failed": len(participant_ids)}
 
             tournament_notice = ""
             tournament_id = room.tournament_id
@@ -574,15 +619,29 @@ class AdminGame(commands.Cog):
                 for item in recruit_view.children:
                     if isinstance(item, discord.ui.Button):
                         item.disabled = True
-                if recruit_view.message:
-                    try:
-                        await recruit_view.message.edit(embed=recruit_view.create_embed(), view=recruit_view)
-                    except discord.HTTPException:
-                        pass
 
             room.reset_game()
             room.ended_series_snapshot = snapshot
             join_cog.save_rooms_state()
+
+            if recruit_view and recruit_view.message:
+                try:
+                    await recruit_view.message.edit(
+                        embed=recruit_view.create_embed(),
+                        view=recruit_view
+                    )
+                except discord.HTTPException:
+                    logger.exception("내전 종료 후 모집 버튼 갱신 실패")
+
+            # The room is now ended and persisted. Remove the old controls
+            # before attempting any channel announcement that might be slow.
+            if control_view is not None:
+                control_view.stop()
+            if source_message is not None:
+                try:
+                    await source_message.edit(view=None)
+                except discord.HTTPException:
+                    logger.exception("내전 종료 후 이전 경기 버튼 제거 실패")
 
             score = snapshot["series_score"]
             content = (
@@ -602,37 +661,42 @@ class AdminGame(commands.Cog):
             )
             if output_message is None:
                 try:
-                    output_message = await interaction.followup.send(
+                    output_message = await interaction.edit_original_response(
                         "⚠️ 공용 채널에 올리지 못해 이 메시지에 종료 및 복구 버튼을 표시합니다.",
                         view=SeriesRecoveryView(self.bot),
-                        ephemeral=True,
-                        wait=True
                     )
                 except discord.HTTPException:
                     output_message = None
                 if output_message is None:
                     join_cog.save_rooms_state()
-                    await interaction.followup.send(
-                        "⚠️ 내전은 종료했지만 복구 버튼 메시지를 보내지 못했습니다. 종료 상태는 저장되어 있습니다.",
-                        ephemeral=True
-                    )
+                    try:
+                        await interaction.edit_original_response(
+                            content=(
+                                "⚠️ 내전은 종료했고 상태도 저장했습니다. "
+                                "복구 안내 메시지를 보내지 못했으니 관리자에게 알려주세요."
+                            ),
+                            view=None
+                        )
+                    except discord.HTTPException:
+                        pass
                     return
 
             snapshot["recovery_message_id"] = str(output_message.id)
             room.ended_series_snapshot = snapshot
             join_cog.save_rooms_state()
 
-            if control_view is not None:
-                control_view.stop()
-            if source_message is not None:
-                try:
-                    await source_message.edit(view=None)
-                except discord.HTTPException:
-                    pass
-            await interaction.followup.send(
-                f"✅ 내전을 종료했습니다. 세트 결과는 보존했습니다. 종료 안내는 <#{output_message.channel.id}>에 등록했습니다.",
-                ephemeral=True
-            )
+            try:
+                await interaction.edit_original_response(
+                    content=(
+                        f"✅ 내전을 종료했습니다. 세트 결과는 보존했습니다. "
+                        f"종료 안내: <#{output_message.channel.id}>"
+                    )
+                )
+            except discord.HTTPException:
+                logger.info(
+                    "내전 종료 완료 안내 갱신 생략(상호작용 만료) | 방=%s",
+                    room.room_id
+                )
 
 
 
