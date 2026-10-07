@@ -28,6 +28,9 @@ class InhouseRoom:
     guild_id: int | None = None
     channel_id: int | None = None
 
+    # 일반 내전은 10명, 20인 경매 모집을 선택하면 20명입니다.
+    player_limit: int = 10
+
     # 팀 생성 이후의 진행 정보를 출력할 공용 채널
     output_channel_id: int | None = None
 
@@ -145,6 +148,7 @@ class InhouseRoom:
         }
 
         self.series_game = 0
+        self.player_limit = 10
         self.ended_series_snapshot = None
         self.last_team_signature = None
         if not keep_recruit_view:
@@ -173,6 +177,7 @@ class InhouseRoom:
             "room_name": self.room_name,
             "guild_id": self.guild_id,
             "channel_id": self.channel_id,
+            "player_limit": self.player_limit,
             "output_channel_id": (
                 self.output_channel_id
             ),
@@ -246,6 +251,9 @@ class InhouseRoom:
             ),
             channel_id=data.get(
                 "channel_id"
+            ),
+            player_limit=(
+                20 if _safe_int(data.get("player_limit", 10), 10) == 20 else 10
             ),
             output_channel_id=data.get(
                 "output_channel_id"

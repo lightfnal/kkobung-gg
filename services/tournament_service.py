@@ -80,6 +80,77 @@ def register_team(tournament_id, team_name, captain_id, roster_ids):
         raise ValueError("이 미니컵에 이미 등록된 참가자가 포함되어 있습니다.") from error
 
 
+def create_auction_bracket(guild_id, name, created_by, teams):
+    """Create a complete four-team cup atomically from auction rosters."""
+    if len(teams) != 4:
+        raise ValueError("4팀 경매 대진표에는 정확히 4팀이 필요합니다.")
+    seen_players = set()
+    normalized = []
+    for index, team in enumerate(teams, start=1):
+        roster = [str(user_id) for user_id in team.get("roster", [])]
+        captain_id = str(team.get("captain_id", ""))
+        team_name = str(team.get("team_name", f"경매팀 {index}")).strip()
+        if len(roster) != 5 or len(set(roster)) != 5:
+            raise ValueError(f"{team_name} 로스터는 서로 다른 5명이어야 합니다.")
+        if captain_id not in roster:
+            raise ValueError(f"{team_name} 캡틴이 팀 로스터에 없습니다.")
+        if not team_name:
+            raise ValueError("팀 이름이 비어 있습니다.")
+        if seen_players.intersection(roster):
+            raise ValueError("경매 팀 사이에 중복 참가자가 있습니다.")
+        seen_players.update(roster)
+        normalized.append((team_name, captain_id, roster))
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        cursor = conn.execute(
+            "INSERT INTO tournaments (guild_id, name, created_by) VALUES (?, ?, ?)",
+            (str(guild_id), str(name).strip(), str(created_by))
+        )
+        tournament_id = int(cursor.lastrowid)
+        team_ids = []
+        for seed, (team_name, captain_id, roster) in enumerate(normalized, start=1):
+            cursor = conn.execute(
+                """
+                INSERT INTO tournament_teams (
+                    tournament_id, team_name, captain_id,
+                    top_id, jungle_id, mid_id, adc_id, support_id, seed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (tournament_id, team_name, captain_id, *roster, seed)
+            )
+            team_ids.append(int(cursor.lastrowid))
+        conn.executemany(
+            """
+            INSERT INTO tournament_fixtures (
+                tournament_id, fixture_no, round_no,
+                red_team_id, blue_team_id, status
+            ) VALUES (?, ?, 1, ?, ?, 'ready')
+            """,
+            (
+                (tournament_id, 1, team_ids[0], team_ids[3]),
+                (tournament_id, 2, team_ids[1], team_ids[2]),
+            )
+        )
+        conn.execute(
+            """
+            INSERT INTO tournament_fixtures (
+                tournament_id, fixture_no, round_no, status
+            ) VALUES (?, 3, 2, 'waiting')
+            """,
+            (tournament_id,)
+        )
+        conn.execute(
+            "UPDATE tournaments SET status = 'in_progress' WHERE id = ?",
+            (tournament_id,)
+        )
+        conn.commit()
+        return tournament_id
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def create_bracket(tournament_id):
     tournament = get_tournament(tournament_id)
     if tournament is None:
