@@ -321,7 +321,7 @@ class EndSeriesConfirmView(discord.ui.View):
                 control_view=self.control_view,
                 source_message=self.source_message
             )
-        except Exception:
+        except Exception as error:
             logger.exception(
                 "내전 종료 처리 실패 | 방=%s",
                 self.room.room_id
@@ -330,7 +330,8 @@ class EndSeriesConfirmView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         "❌ 내전 종료 처리 중 오류가 발생했습니다. "
-                        "경기 기록은 별도로 확인이 필요합니다. 관리자에게 알려주세요."
+                        f"오류 종류: `{type(error).__name__}`. "
+                        "관리자에게 이 오류 종류와 Render 로그를 전달해주세요."
                     )
                 )
             except discord.HTTPException:
