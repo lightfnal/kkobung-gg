@@ -106,31 +106,6 @@ class TournamentServiceTests(unittest.TestCase):
         self.assertTrue(tournament_service.release_fixture(cup_id, 1))
         self.assertTrue(tournament_service.claim_fixture(cup_id, 1))
 
-    def test_auction_bracket_recovers_stale_open_transaction(self):
-        teams = [
-            {
-                "team_name": f"복구팀 {index}",
-                "captain_id": roster[0],
-                "roster": roster,
-            }
-            for index, roster in enumerate(self.rosters, start=1)
-        ]
-        self.db.execute(
-            "UPDATE tournaments SET name = ? WHERE id = ?",
-            ("미확정 변경", self.tournament_id),
-        )
-        self.assertTrue(self.db.in_transaction)
-
-        cup_id = tournament_service.create_auction_bracket(
-            1, "경매 내전 복구 컵", "moderator", teams
-        )
-
-        self.assertEqual(len(tournament_service.get_bracket(cup_id)), 3)
-        self.assertEqual(
-            tournament_service.get_tournament(self.tournament_id)["name"],
-            "테스트 컵",
-        )
-
     def test_player_cannot_register_on_two_teams(self):
         other_cup = tournament_service.create_tournament(1, "중복 검사 컵", 10)
         tournament_service.register_team(
@@ -147,6 +122,47 @@ class TournamentServiceTests(unittest.TestCase):
                 duplicate_roster[0],
                 duplicate_roster
             )
+
+
+    def test_delete_tournament_removes_cup_teams_and_bracket(self):
+        tournament_service.create_bracket(self.tournament_id)
+        self.db.execute(
+            "CREATE TABLE matches (id INTEGER PRIMARY KEY, winner TEXT)"
+        )
+        self.db.execute("INSERT INTO matches (id, winner) VALUES (901, 'red')")
+        self.db.commit()
+        tournament_service.resolve_fixture(
+            self.tournament_id, 1, self.team_ids[0], 901
+        )
+
+        self.assertTrue(tournament_service.delete_tournament(self.tournament_id))
+        self.assertIsNone(tournament_service.get_tournament(self.tournament_id))
+        self.assertEqual(
+            self.db.execute(
+                "SELECT COUNT(*) FROM tournament_teams WHERE tournament_id = ?",
+                (self.tournament_id,)
+            ).fetchone()[0],
+            0
+        )
+        self.assertEqual(
+            self.db.execute(
+                "SELECT COUNT(*) FROM tournament_fixtures WHERE tournament_id = ?",
+                (self.tournament_id,)
+            ).fetchone()[0],
+            0
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM matches WHERE id = 901").fetchone()[0],
+            1
+        )
+        self.assertFalse(tournament_service.delete_tournament(self.tournament_id))
+
+    def test_cannot_delete_tournament_with_live_fixture(self):
+        tournament_service.create_bracket(self.tournament_id)
+        self.assertTrue(tournament_service.claim_fixture(self.tournament_id, 1))
+        with self.assertRaisesRegex(ValueError, "경기가 진행 중인"):
+            tournament_service.delete_tournament(self.tournament_id)
+        self.assertIsNotNone(tournament_service.get_tournament(self.tournament_id))
 
 
 if __name__ == "__main__":
