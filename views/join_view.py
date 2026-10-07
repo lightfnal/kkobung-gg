@@ -22,7 +22,13 @@ from services.team_balancer import (
     create_team_signature,
     POSITIONS
 )
-from services.tournament_service import release_fixture
+from services.tournament_service import (
+    claim_fixture,
+    get_fixture,
+    reopen_fixture,
+    release_fixture,
+    resolve_fixture,
+)
 from storage.sqlite_db import (
     get_active_season,
     get_season_player_stats,
@@ -63,6 +69,10 @@ async def refresh_match_controls_at_bottom(
     previous_view.start_button.disabled = room.match_in_progress
     previous_view.red_button.disabled = not room.match_in_progress
     previous_view.blue_button.disabled = not room.match_in_progress
+    if hasattr(previous_view, "end_series_button"):
+        previous_view.end_series_button.disabled = (
+            room.match_in_progress or room.series_game <= 0
+        )
 
     try:
         await source_message.edit(view=previous_view)
@@ -241,6 +251,219 @@ class ExpiredInhouseView(discord.ui.View):
         )
 
 
+class EndSeriesConfirmView(discord.ui.View):
+    """Requires an explicit second press before clearing an active series."""
+
+    def __init__(
+        self,
+        bot,
+        room,
+        requester_id,
+        control_view=None,
+        source_message=None
+    ):
+        super().__init__(timeout=90)
+        self.bot = bot
+        self.room = room
+        self.requester_id = str(requester_id)
+        self.control_view = control_view
+        self.source_message = source_message
+
+    async def interaction_check(self, interaction):
+        if str(interaction.user.id) != self.requester_id:
+            await interaction.response.send_message(
+                "❌ 종료 확인을 요청한 사람만 누를 수 있습니다.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(
+        label="🛑 내전 종료 확인",
+        style=discord.ButtonStyle.danger,
+        row=0
+    )
+    async def confirm_button(self, interaction, button):
+        await interaction.response.edit_message(
+            content="내전을 종료하고 결과 기록을 보존하는 중입니다…",
+            view=None
+        )
+        game_cog = self.bot.get_cog("AdminGame")
+        if game_cog is None:
+            await interaction.followup.send(
+                "❌ 내전 종료 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+        await game_cog.confirm_end_series(
+            interaction,
+            self.room,
+            control_view=self.control_view,
+            source_message=self.source_message
+        )
+        self.stop()
+
+    @discord.ui.button(
+        label="계속 진행",
+        style=discord.ButtonStyle.secondary,
+        row=0
+    )
+    async def cancel_button(self, interaction, button):
+        self.stop()
+        await interaction.response.edit_message(
+            content="✅ 내전을 계속 진행합니다.",
+            view=None
+        )
+
+
+class SeriesRecoveryView(discord.ui.View):
+    """Persistent operator-only button to restore a manually ended series."""
+
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @discord.ui.button(
+        label="↩️ 내전 이어서 진행",
+        style=discord.ButtonStyle.primary,
+        custom_id="inhouse_series_recovery",
+        row=0
+    )
+    async def recover_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        join_cog = self.bot.get_cog("Join")
+        if join_cog is None or not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        async with room.operation_lock:
+            snapshot = room.ended_series_snapshot
+            if (
+                not isinstance(snapshot, dict)
+                or str(snapshot.get("recovery_message_id"))
+                    != str(getattr(interaction.message, "id", ""))
+            ):
+                await interaction.response.send_message(
+                    "❌ 이 복구 버튼은 이미 사용됐거나 최신 종료 기록이 아닙니다.",
+                    ephemeral=True
+                )
+                return
+            if (
+                room.current_teams is not None
+                or room.players
+                or room.match_in_progress
+                or room.match_transaction_active
+            ):
+                await interaction.response.send_message(
+                    "❌ 방에 새 참가자나 경기가 생겨 복구할 수 없습니다. 현재 방을 먼저 정리해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            tournament_id = snapshot.get("tournament_id")
+            fixture_no = snapshot.get("tournament_fixture_no")
+            if tournament_id and fixture_no:
+                fixture = get_fixture(tournament_id, fixture_no)
+                if fixture is None:
+                    await interaction.response.send_message(
+                        "❌ 미니컵 대진 정보를 찾지 못해 복구할 수 없습니다.",
+                        ephemeral=True
+                    )
+                    return
+                if fixture["status"] == "completed":
+                    reopen_fixture(tournament_id, fixture_no)
+                    fixture = get_fixture(tournament_id, fixture_no)
+                if fixture["status"] == "ready":
+                    if not claim_fixture(tournament_id, fixture_no):
+                        await interaction.response.send_message(
+                            "❌ 다른 진행자가 대진을 불러왔습니다. 대진표를 확인해주세요.",
+                            ephemeral=True
+                        )
+                        return
+                elif fixture["status"] != "in_progress":
+                    await interaction.response.send_message(
+                        "❌ 현재 대진 상태에서 경기를 복구할 수 없습니다.",
+                        ephemeral=True
+                    )
+                    return
+
+            join_cog.activate_room(room)
+            room.players = copy.deepcopy(snapshot.get("players", {}))
+            room.current_teams = copy.deepcopy(snapshot.get("current_teams"))
+            room.series_score = dict(snapshot.get("series_score", {"red": 0, "blue": 0}))
+            room.series_game = int(snapshot.get("series_game", 0))
+            room.tournament_id = tournament_id
+            room.tournament_fixture_no = fixture_no
+            room.ended_series_snapshot = None
+            room.match_in_progress = False
+            room.last_team_signature = None
+            join_cog.save_rooms_state()
+
+            score = room.series_score
+            next_set = room.series_game + 1
+            embed = discord.Embed(
+                title=f"↩️ {room.room_name} · 내전 복구",
+                description=(
+                    f"종료 전 상태로 복구했습니다. 이미 저장된 {room.series_game}세트 결과는 유지됩니다.\n"
+                    f"현재 점수: 🔴 레드 **{score['red']}** : **{score['blue']}** 블루 🔵\n"
+                    f"다음은 **{next_set}세트**입니다. 아래 경기 시작 버튼을 눌러주세요."
+                )
+            )
+            for side, label in (("red", "🔴 레드팀"), ("blue", "🔵 블루팀")):
+                assignment = room.current_teams.get(side, {})
+                lines = [
+                    f"**{position}** — <@{user_id}>"
+                    for position, user_id in assignment.items()
+                ]
+                embed.add_field(name=label, value="\n".join(lines) or "-", inline=True)
+            add_match_button_instructions(embed)
+            output_message, _ = await join_cog.send_output_message(
+                room=room,
+                fallback_channel=interaction.channel,
+                embed=embed,
+                view=MatchControlView(join_cog)
+            )
+            if output_message is None:
+                # Restore the recoverable state if the fresh controls could not be posted.
+                room.reset_game()
+                room.ended_series_snapshot = snapshot
+                if tournament_id and fixture_no:
+                    red_score = int(snapshot["series_score"].get("red", 0))
+                    blue_score = int(snapshot["series_score"].get("blue", 0))
+                    if red_score == blue_score:
+                        release_fixture(tournament_id, fixture_no)
+                    else:
+                        side = "red" if red_score > blue_score else "blue"
+                        fixture = get_fixture(tournament_id, fixture_no)
+                        if fixture is not None:
+                            resolve_fixture(
+                                tournament_id,
+                                fixture_no,
+                                fixture[f"{side}_team_id"],
+                                snapshot.get("last_match_id") or 0
+                            )
+                join_cog.save_rooms_state()
+                await interaction.response.send_message(
+                    "❌ 복구 버튼은 눌렀지만 경기 조작 메시지를 올리지 못했습니다. 종료 상태를 유지했습니다.",
+                    ephemeral=True
+                )
+                return
+
+            try:
+                await interaction.response.edit_message(
+                    content="✅ 복구를 완료했습니다. 새 경기 조작 메시지를 확인해주세요.",
+                    view=None
+                )
+            except discord.HTTPException:
+                pass
+            await interaction.followup.send(
+                f"✅ {room.room_name}을 {next_set}세트부터 이어서 진행합니다.",
+                ephemeral=True
+            )
+
+
 class MatchControlView(discord.ui.View):
 
     def __init__(self, join_cog):
@@ -275,6 +498,11 @@ class MatchControlView(discord.ui.View):
         self.start_button.disabled = self.room.match_in_progress
         self.red_button.disabled = not self.room.match_in_progress
         self.blue_button.disabled = not self.room.match_in_progress
+        self.end_series_button.disabled = (
+            self.room.match_in_progress or self.room.series_game <= 0
+        )
+        if self.room.series_game <= 0:
+            self.remove_item(self.end_series_button)
 
     async def interaction_check(
         self,
@@ -363,7 +591,7 @@ class MatchControlView(discord.ui.View):
                 )
                 return
 
-            if MATCH_MODE == "bo3" and self.room.series_game > 0:
+            if MATCH_MODE != "single" and self.room.series_game > 0:
                 previous_match = get_last_match(self.room.room_id)
                 if previous_match is not None:
                     progress = get_match_champion_progress(
@@ -402,12 +630,14 @@ class MatchControlView(discord.ui.View):
             )
 
             self.room.match_in_progress = True
+            self.room.ended_series_snapshot = None
 
             self.join_cog.save_rooms_state()
 
             self.start_button.disabled = True
             self.red_button.disabled = False
             self.blue_button.disabled = False
+            self.end_series_button.disabled = True
 
         await interaction.response.edit_message(
             view=self
@@ -478,6 +708,7 @@ class MatchControlView(discord.ui.View):
                 self.start_button.disabled = True
                 self.red_button.disabled = False
                 self.blue_button.disabled = False
+                self.end_series_button.disabled = True
                 try:
                     await team_message.edit(view=self)
                 except discord.HTTPException:
@@ -502,17 +733,18 @@ class MatchControlView(discord.ui.View):
                 return
 
             if self.room.current_teams is None:
-                # 단판 종료 또는 BO3 종료
+                # 단판 종료 또는 BO5 종료
                 self.start_button.disabled = True
                 self.red_button.disabled = True
                 self.blue_button.disabled = True
+                self.end_series_button.disabled = True
                 self.stop()
                 try:
                     await team_message.edit(view=self)
                 except discord.HTTPException:
                     pass
             else:
-                # BO3 다음 세트 조작창을 채널 맨 아래에 새로 올립니다.
+                # BO5 다음 세트 조작창을 채널 맨 아래에 새로 올립니다.
                 self.teams_reference = self.room.current_teams
                 self.start_button.disabled = False
                 self.red_button.disabled = True
@@ -561,6 +793,38 @@ class MatchControlView(discord.ui.View):
         await interaction.response.send_message(
             "🔵 **블루팀 승리로 등록할까요?**",
             view=WinnerConfirmView(self, "blue", interaction.user.id),
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="🛑 내전 종료",
+        style=discord.ButtonStyle.secondary,
+        row=1
+    )
+    async def end_series_button(self, interaction, button):
+        if self.room.series_game <= 0:
+            await interaction.response.send_message(
+                "❌ 최소 한 세트 결과를 등록한 뒤 내전을 종료할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+        if self.room.match_in_progress:
+            await interaction.response.send_message(
+                "❌ 경기 중에는 내전을 종료할 수 없습니다. 먼저 세트 결과를 등록해주세요.",
+                ephemeral=True
+            )
+            return
+        score = self.room.series_score
+        await interaction.response.send_message(
+            f"현재 점수는 🔴 레드 **{score['red']} : {score['blue']}** 블루입니다.\n"
+            "이 세트까지 저장된 결과를 남기고 내전을 종료할까요?",
+            view=EndSeriesConfirmView(
+                self.join_cog.bot,
+                self.room,
+                interaction.user.id,
+                control_view=self,
+                source_message=interaction.message
+            ),
             ephemeral=True
         )
 
