@@ -59,6 +59,10 @@ class InhouseRoom:
     current_teams: dict | None = None
     current_balance_prediction: dict | None = None
 
+    # 현재 내전이 미니컵 대진에서 불러온 경기인지 표시합니다.
+    tournament_id: int | None = None
+    tournament_fixture_no: int | None = None
+
     match_in_progress: bool = False
 
     series_score: dict = field(
@@ -140,6 +144,8 @@ class InhouseRoom:
         self.recruit_start_time = None
         self.current_teams = None
         self.current_balance_prediction = None
+        self.tournament_id = None
+        self.tournament_fixture_no = None
         self.match_in_progress = False
 
         self.series_score = {
@@ -199,6 +205,8 @@ class InhouseRoom:
             "recruit_start_time": self.recruit_start_time,
             "current_teams": self.current_teams,
             "current_balance_prediction": self.current_balance_prediction,
+            "tournament_id": self.tournament_id,
+            "tournament_fixture_no": self.tournament_fixture_no,
             "match_in_progress": (
                 self.match_in_progress
             ),
@@ -269,6 +277,16 @@ class InhouseRoom:
             ),
             blue_voice_channel_id=data.get(
                 "blue_voice_channel_id"
+            ),
+            tournament_id=(
+                _safe_int(data.get("tournament_id"), default=None)
+                if data.get("tournament_id") is not None
+                else None
+            ),
+            tournament_fixture_no=(
+                _safe_int(data.get("tournament_fixture_no"), default=None)
+                if data.get("tournament_fixture_no") is not None
+                else None
             )
         )
 
