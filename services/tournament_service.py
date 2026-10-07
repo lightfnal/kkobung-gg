@@ -5,6 +5,15 @@ import sqlite3
 from storage.sqlite_db import conn
 
 
+def _begin_immediate_transaction():
+    """Start a write transaction and clear an abandoned connection transaction."""
+    if conn.in_transaction:
+        # The shared sqlite connection can retain a transaction after another
+        # operation exits exceptionally. Clear it before starting this atomic write.
+        conn.rollback()
+    conn.execute("BEGIN IMMEDIATE")
+
+
 POSITIONS = ("top", "jungle", "mid", "adc", "support")
 
 
@@ -101,7 +110,7 @@ def create_auction_bracket(guild_id, name, created_by, teams):
         seen_players.update(roster)
         normalized.append((team_name, captain_id, roster))
 
-    conn.execute("BEGIN IMMEDIATE")
+    _begin_immediate_transaction()
     try:
         cursor = conn.execute(
             "INSERT INTO tournaments (guild_id, name, created_by) VALUES (?, ?, ?)",
@@ -168,7 +177,7 @@ def create_bracket(tournament_id):
         raise ValueError(f"대진표를 만들려면 4팀이 필요합니다. 현재 {len(teams)}팀입니다.")
 
     ids = [int(team["id"]) for team in teams]
-    conn.execute("BEGIN IMMEDIATE")
+    _begin_immediate_transaction()
     try:
         conn.execute(
             "UPDATE tournament_teams SET seed = NULL WHERE tournament_id = ?",
@@ -280,7 +289,7 @@ def release_fixture(tournament_id, fixture_no):
 
 def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
     """Resolve a series fixture once and place its winner in the final slot."""
-    conn.execute("BEGIN IMMEDIATE")
+    _begin_immediate_transaction()
     try:
         fixture = conn.execute(
             """
@@ -342,7 +351,7 @@ def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
 
 def reopen_fixture(tournament_id, fixture_no):
     """Undo bracket advancement when an operator reopens a recorded result."""
-    conn.execute("BEGIN IMMEDIATE")
+    _begin_immediate_transaction()
     try:
         fixture = conn.execute(
             """
