@@ -2790,11 +2790,33 @@ class JoinView(discord.ui.View):
                     f"`{main}/{sub}`"
                 )
 
-            embed.add_field(
-                name="📋 참가자 명단",
-                value="\n".join(participant_list),
-                inline=False
-            )
+            # Discord limits each embed field to 1,024 characters. A 20-player
+            # auction roster can exceed that, which made /내전모집 fail when
+            # rebuilding the recruitment message after a restart.
+            chunks = []
+            current_chunk = []
+            current_length = 0
+            for line in participant_list:
+                line_length = len(line) + (1 if current_chunk else 0)
+                if current_chunk and current_length + line_length > 950:
+                    chunks.append(current_chunk)
+                    current_chunk = []
+                    current_length = 0
+                    line_length = len(line)
+                current_chunk.append(line)
+                current_length += line_length
+            if current_chunk:
+                chunks.append(current_chunk)
+
+            for chunk_index, chunk in enumerate(chunks, start=1):
+                field_name = "📋 참가자 명단"
+                if len(chunks) > 1:
+                    field_name += f" · {chunk_index}/{len(chunks)}"
+                embed.add_field(
+                    name=field_name,
+                    value="\n".join(chunk),
+                    inline=False
+                )
         else:
             embed.add_field(
                 name="📋 참가자 명단",
