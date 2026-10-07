@@ -1,11 +1,13 @@
 import asyncio
 import copy
 import logging
+import os
 import random
 import discord
 
 from config import (
     MAX_PLAYERS,
+    MAX_AUCTION_PLAYERS,
     MAX_WAITING_PLAYERS,
     MATCH_MODE
 )
@@ -24,6 +26,7 @@ from services.team_balancer import (
 )
 from services.tournament_service import (
     claim_fixture,
+    create_auction_bracket,
     get_fixture,
     reopen_fixture,
     release_fixture,
@@ -44,6 +47,12 @@ AUCTION_TEAM_BUDGET = 1000
 AUCTION_MIN_BID = 50
 AUCTION_BID_STEP = 50
 AUCTION_LOT_SECONDS = 10
+AUCTION_SIDES = (
+    ("red", "🔴 레드팀"),
+    ("blue", "🔵 블루팀"),
+    ("green", "🟢 그린팀"),
+    ("yellow", "🟡 옐로팀"),
+)
 
 
 def add_match_button_instructions(embed):
@@ -177,7 +186,7 @@ async def announce_recruitment_join(join_view, user_id, waiting=False):
 
     participant_count = len(room.players)
     waiting_count = len(room.waiting_players)
-    status = f"참가자 {participant_count}/{MAX_PLAYERS}명"
+    status = f"참가자 {participant_count}/{room.player_limit}명"
     if waiting or waiting_count:
         status += f" · 대기자 {waiting_count}/{MAX_WAITING_PLAYERS}명"
     registration_type = "대기 등록" if waiting else "참가 등록"
@@ -218,6 +227,7 @@ class ExpiredInhouseView(discord.ui.View):
         ("참가", "inhouse_join"),
         ("참가취소", "inhouse_cancel"),
         ("명단 확인", "inhouse_list"),
+        ("인원 선택", "inhouse_capacity"),
         ("팀 생성", "inhouse_make_teams"),
         ("모집 종료", "inhouse_close"),
         ("모집 초기화", "inhouse_reset"),
@@ -904,6 +914,8 @@ class TeamModeView(discord.ui.View):
         self.recruit_view = recruit_view
         self.join_cog = recruit_view.join_cog
         self.room = recruit_view.room
+        self.balanced_button.disabled = self.room.player_limit != MAX_PLAYERS
+        self.captain_button.disabled = self.room.player_limit != MAX_PLAYERS
 
     async def interaction_check(self, interaction):
         if not is_admin(interaction):
@@ -929,6 +941,12 @@ class TeamModeView(discord.ui.View):
         style=discord.ButtonStyle.primary
     )
     async def balanced_button(self, interaction, button):
+        if self.room.player_limit != MAX_PLAYERS:
+            await interaction.response.send_message(
+                "❌ 자동 편성은 10인 내전에서만 사용할 수 있습니다. 20인은 4팀 경매로 진행해주세요.",
+                ephemeral=True
+            )
+            return
         if self.recruit_view.team_generating:
             await interaction.response.send_message(
                 "⏳ 이미 팀 편성 또는 드래프트가 진행 중입니다.",
@@ -958,7 +976,7 @@ class TeamModeView(discord.ui.View):
             )
             return
         player_ids = list(self.room.players.keys())
-        if len(player_ids) != MAX_PLAYERS:
+        if self.room.player_limit != MAX_PLAYERS or len(player_ids) != MAX_PLAYERS:
             await interaction.response.send_message(
                 f"❌ 참가자가 {MAX_PLAYERS}명 모여야 드래프트를 시작할 수 있습니다.",
                 ephemeral=True
@@ -1010,9 +1028,10 @@ class TeamModeView(discord.ui.View):
             )
             return
         player_ids = list(self.room.players.keys())
-        if len(player_ids) != MAX_PLAYERS:
+        expected_count = self.room.player_limit
+        if len(player_ids) != expected_count:
             await interaction.response.send_message(
-                f"❌ 참가자가 {MAX_PLAYERS}명 모여야 경매를 시작할 수 있습니다.",
+                f"❌ 참가자가 {expected_count}명 모여야 경매를 시작할 수 있습니다.",
                 ephemeral=True
             )
             return
@@ -1037,9 +1056,10 @@ class TeamModeView(discord.ui.View):
         self.recruit_view.team_generating = True
         self.recruit_view._auction_setup_view = setup_view
         try:
+            captain_count = 4 if expected_count == MAX_AUCTION_PLAYERS else 2
             await interaction.response.edit_message(
                 content=(
-                    "🔨 경매 내전 준비: 캡틴 2명을 선택하고 시작을 눌러주세요.\n"
+                    f"🔨 {expected_count}인 경매 준비: 캡틴 {captain_count}명을 선택하고 시작을 눌러주세요.\n"
                     f"팀별 예산은 {AUCTION_TEAM_BUDGET}포인트이며, "
                     f"선수 시작가는 {AUCTION_MIN_BID}포인트입니다."
                 ),
@@ -1050,7 +1070,6 @@ class TeamModeView(discord.ui.View):
             self.recruit_view._auction_setup_view = None
             self.recruit_view.team_generating = False
             raise
-
 
 class CaptainSelection(discord.ui.Select):
     def __init__(self, setup_view):
@@ -1064,9 +1083,9 @@ class CaptainSelection(discord.ui.Select):
                 value=user_id
             ))
         super().__init__(
-            placeholder="캡틴 2명을 선택하세요",
-            min_values=2,
-            max_values=2,
+            placeholder=f"캡틴 {setup_view.captain_count}명을 선택하세요",
+            min_values=setup_view.captain_count,
+            max_values=setup_view.captain_count,
             options=options
         )
 
@@ -1076,13 +1095,13 @@ class CaptainSelection(discord.ui.Select):
             return
         self.setup_view.selected_captains = list(self.values)
         await interaction.response.send_message(
-            "✅ 캡틴 2명이 선택되었습니다. 아래 시작 버튼을 눌러주세요.",
+            f"✅ 캡틴 {len(self.values)}명이 선택되었습니다. 아래 시작 버튼을 눌러주세요.",
             ephemeral=True
         )
 
 
 class AuctionSetupView(discord.ui.View):
-    """경매 시작 전에 관리자가 두 캡틴을 지정합니다."""
+    """경매 시작 전에 관리자가 경매 규모에 맞는 캡틴을 지정합니다."""
 
     def __init__(self, recruit_view, player_ids, profiles):
         super().__init__(timeout=180)
@@ -1091,6 +1110,7 @@ class AuctionSetupView(discord.ui.View):
         self.room = recruit_view.room
         self.player_ids = list(player_ids)
         self.profiles = profiles
+        self.captain_count = 4 if self.room.player_limit == MAX_AUCTION_PLAYERS else 2
         self.selected_captains = []
         self.message = None
         self.started = False
@@ -1143,9 +1163,9 @@ class AuctionSetupView(discord.ui.View):
             )
             await self._rollback_start()
             return
-        if len(self.selected_captains) != 2:
+        if len(self.selected_captains) != self.captain_count:
             await interaction.response.send_message(
-                "❌ 먼저 캡틴 2명을 선택해주세요.",
+                f"❌ 먼저 캡틴 {self.captain_count}명을 선택해주세요.",
                 ephemeral=True
             )
             return
@@ -1200,8 +1220,7 @@ class AuctionSetupView(discord.ui.View):
             self.recruit_view,
             self.player_ids,
             self.profiles,
-            red_captain=self.selected_captains[0],
-            blue_captain=self.selected_captains[1]
+            captains=self.selected_captains
         )
         try:
             message, _ = await self.join_cog.send_output_message(
@@ -1268,6 +1287,87 @@ class AuctionSetupView(discord.ui.View):
             await self._rollback_start()
 
 
+class PlayerLimitView(discord.ui.View):
+    """관리자가 모집 정원을 10명 또는 20명으로 선택합니다."""
+
+    def __init__(self, recruit_view):
+        super().__init__(timeout=60)
+        self.recruit_view = recruit_view
+        self.room = recruit_view.room
+        self.join_cog = recruit_view.join_cog
+
+    async def interaction_check(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return False
+        if not self.join_cog.activate_room(self.room):
+            await interaction.response.send_message(
+                "❌ 연결된 내전 방을 찾지 못했습니다.",
+                ephemeral=True
+            )
+            return False
+        if self.join_cog.current_recruit_view is not self.recruit_view:
+            await interaction.response.send_message(
+                "❌ 이 모집창은 이미 만료되었습니다.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def _select_limit(self, interaction, limit):
+        room = self.room
+        async with room.operation_lock:
+            if (
+                self.recruit_view.recruit_closed
+                or room.current_teams is not None
+                or room.match_in_progress
+                or room.mvp_vote_in_progress
+                or room.match_transaction_active
+                or self.recruit_view.team_generating
+            ):
+                await interaction.response.send_message(
+                    "❌ 모집 중이고 팀/경기가 없는 상태에서만 정원을 바꿀 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+            if len(room.players) > limit:
+                await interaction.response.send_message(
+                    f"❌ 현재 참가자가 {len(room.players)}명이라 "
+                    f"{limit}인 정원으로 바꿀 수 없습니다. 참가자를 줄인 뒤 다시 시도해주세요.",
+                    ephemeral=True
+                )
+                return
+            if limit not in (MAX_PLAYERS, MAX_AUCTION_PLAYERS):
+                await interaction.response.send_message(
+                    "❌ 지원하지 않는 모집 정원입니다.",
+                    ephemeral=True
+                )
+                return
+
+            room.player_limit = limit
+            self.join_cog.save_rooms_state()
+            await interaction.response.edit_message(
+                content=(
+                    f"✅ 모집 정원을 **{limit}명**으로 설정했습니다.\n"
+                    + (
+                        "20명은 캡틴 4명, 팀별 5명씩 경매로 4팀을 편성합니다."
+                        if limit == MAX_AUCTION_PLAYERS
+                        else "10명은 기존 5대5 내전과 2팀 경매를 사용할 수 있습니다."
+                    )
+                ),
+                view=None
+            )
+            await self.recruit_view.restore_recruitment_controls()
+
+    @discord.ui.button(label="10명 · 일반 내전", style=discord.ButtonStyle.secondary)
+    async def ten_players(self, interaction, button):
+        await self._select_limit(interaction, MAX_PLAYERS)
+
+    @discord.ui.button(label="20명 · 4팀 경매", style=discord.ButtonStyle.primary)
+    async def twenty_players(self, interaction, button):
+        await self._select_limit(interaction, MAX_AUCTION_PLAYERS)
+
+
 class AuctionBidButton(discord.ui.Button):
     def __init__(self, auction_view, side, lot_index):
         self.auction_view = auction_view
@@ -1278,7 +1378,7 @@ class AuctionBidButton(discord.ui.Button):
             if auction_view.current_bid == 0
             else auction_view.current_bid + AUCTION_BID_STEP
         )
-        team_name = "레드" if side == "red" else "블루"
+        team_name = dict(auction_view.side_labels).get(side, side).split()[-1]
         label = f"{team_name} {bid}점 입찰"
         super().__init__(label=label, style=discord.ButtonStyle.primary)
 
@@ -1304,15 +1404,14 @@ class AuctionRetryButton(discord.ui.Button):
 
 
 class AuctionView(discord.ui.View):
-    """두 캡틴이 가상 포인트로 선수 8명을 영입하는 경매입니다."""
+    """2인 또는 4인 캡틴 경매로 2팀·4팀 로스터를 편성합니다."""
 
     def __init__(
         self,
         recruit_view,
         player_ids,
         profiles,
-        red_captain,
-        blue_captain
+        captains
     ):
         super().__init__(timeout=86400)
         self.recruit_view = recruit_view
@@ -1320,17 +1419,23 @@ class AuctionView(discord.ui.View):
         self.room = recruit_view.room
         self.player_ids = list(player_ids)
         self.profiles = profiles
-        self.captains = {"red": red_captain, "blue": blue_captain}
-        self.teams = {"red": [red_captain], "blue": [blue_captain]}
-        self.budgets = {
-            "red": AUCTION_TEAM_BUDGET,
-            "blue": AUCTION_TEAM_BUDGET
+        self.side_labels = AUCTION_SIDES[:len(captains)]
+        self.captains = {
+            side: str(captain_id)
+            for (side, _), captain_id in zip(self.side_labels, captains)
         }
-        self.spent = {"red": 0, "blue": 0}
-        self.purchase_prices = {red_captain: 0, blue_captain: 0}
+        self.teams = {
+            side: [str(captain_id)]
+            for side, captain_id in self.captains.items()
+        }
+        self.budgets = {side: AUCTION_TEAM_BUDGET for side in self.teams}
+        self.spent = {side: 0 for side in self.teams}
+        self.purchase_prices = {str(captain_id): 0 for captain_id in captains}
+        self.tournament_id = None
+        captain_ids = set(self.captains.values())
         self.lots = [
             user_id for user_id in self.player_ids
-            if user_id not in (red_captain, blue_captain)
+            if user_id not in captain_ids
         ]
         random.shuffle(self.lots)
         self.unsold_players = []
@@ -1349,8 +1454,8 @@ class AuctionView(discord.ui.View):
     def _refresh_controls(self):
         self.clear_items()
         if self.lot_index < len(self.lots) and not self._finished:
-            self.add_item(AuctionBidButton(self, "red", self._lot_token))
-            self.add_item(AuctionBidButton(self, "blue", self._lot_token))
+            for side, _ in self.side_labels:
+                self.add_item(AuctionBidButton(self, side, self._lot_token))
             cancel = discord.ui.Button(
                 label="경매 취소",
                 emoji="⏹️",
@@ -1390,7 +1495,7 @@ class AuctionView(discord.ui.View):
             else:
                 bidding_text = (
                     f"현재 최고 입찰: **{self.current_bid}점** · "
-                    f"{'🔴 레드팀' if self.current_bidder == 'red' else '🔵 블루팀'}\n"
+                    f"{dict(self.side_labels).get(self.current_bidder, self.current_bidder)}\n"
                     f"다음 입찰: **{next_bid}점**"
                 )
             auction_description = (
@@ -1421,10 +1526,11 @@ class AuctionView(discord.ui.View):
                 f"팀별 예산 **{AUCTION_TEAM_BUDGET}포인트** · "
                 f"입찰 단위 **{AUCTION_BID_STEP}포인트**\n"
                 "경매 포인트는 시즌 레이팅과 별도로 사용됩니다.\n"
-                "캡틴은 팀에 자동 포함되며, 예산은 나머지 4명 영입에 사용합니다."
+                f"캡틴은 팀에 자동 포함되며, 예산은 나머지 4명 영입에 사용합니다. "
+                f"현재 {len(self.teams)}팀 · {len(self.player_ids)}명 경매입니다."
             )
         )
-        for side, label in (("red", "🔴 레드팀"), ("blue", "🔵 블루팀")):
+        for side, label in self.side_labels:
             roster = self.teams[side]
             roster_lines = [
                 f"<@{user_id}>" + (
@@ -1491,8 +1597,9 @@ class AuctionView(discord.ui.View):
                 return
             captain_id = self.captains[side]
             if str(interaction.user.id) != captain_id and not is_admin(interaction):
+                team_label = dict(self.side_labels).get(side, side)
                 await interaction.followup.send(
-                    f"❌ {'레드팀' if side == 'red' else '블루팀'} 캡틴만 입찰할 수 있습니다.",
+                    f"❌ {team_label} 캡틴만 입찰할 수 있습니다.",
                     ephemeral=True
                 )
                 return
@@ -1558,7 +1665,7 @@ class AuctionView(discord.ui.View):
         if self.current_bidder is not None:
             winner = self.current_bidder
             price = self.current_bid
-            award_note = f"낙찰: {'레드팀' if winner == 'red' else '블루팀'} · {price}점"
+            award_note = f"낙찰: {dict(self.side_labels).get(winner, winner)} · {price}점"
             self.teams[winner].append(player_id)
             self.budgets[winner] -= price
             self.spent[winner] += price
@@ -1687,18 +1794,40 @@ class AuctionView(discord.ui.View):
             timer_task.cancel()
 
         try:
-            red_assignment, _ = assign_positions(self.teams["red"], self.profiles)
-            blue_assignment, _ = assign_positions(self.teams["blue"], self.profiles)
-            self.join_cog.activate_room(self.room)
-            self.room.current_teams = {
-                "red": red_assignment,
-                "blue": blue_assignment
+            assignments = {
+                side: assign_positions(self.teams[side], self.profiles)[0]
+                for side, _ in self.side_labels
             }
-            self.room.current_balance_prediction = None
-            self.join_cog.last_team_signature = create_team_signature(
-                self.teams["red"],
-                self.teams["blue"]
-            )
+            self.join_cog.activate_room(self.room)
+            if len(assignments) == 2:
+                self.room.current_teams = {
+                    "red": assignments["red"],
+                    "blue": assignments["blue"]
+                }
+                self.room.current_balance_prediction = None
+                self.join_cog.last_team_signature = create_team_signature(
+                    self.teams["red"], self.teams["blue"]
+                )
+            else:
+                team_rows = []
+                for (side, label), assignment in zip(self.side_labels, assignments.values()):
+                    roster = [assignment[position] for position in POSITIONS]
+                    team_rows.append({
+                        "team_name": f"{self.room.room_name} {label.split()[-1]}",
+                        "captain_id": self.captains[side],
+                        "roster": roster,
+                    })
+                self.tournament_id = create_auction_bracket(
+                    self.room.guild_id or getattr(getattr(self.message, "guild", None), "id", 0),
+                    f"{self.room.room_name} 경매컵",
+                    self.captains[self.side_labels[0][0]],
+                    team_rows,
+                )
+                # 경매 인원 20명을 경기방 참가자로 남겨두면
+                # 10명씩 불러오는 준결승을 시작할 수 없으므로 컵 로스터에 보관하고 방을 비웁니다.
+                self.room.reset_game(keep_recruit_view=True)
+                self.room.player_limit = MAX_PLAYERS
+                self.join_cog.last_team_signature = None
             self.join_cog.save_rooms_state()
         except Exception:
             logger.exception("경매 팀 배정/저장 실패 | 방=%s", self.room.room_id)
@@ -1726,27 +1855,38 @@ class AuctionView(discord.ui.View):
             except discord.HTTPException:
                 logger.exception("경매 완료 후 모집창 갱신 실패")
 
-        red_rating = sum(
-            int(self.profiles.get(user_id, {}).get("rating", 1000))
-            for user_id in self.teams["red"]
-        )
-        blue_rating = sum(
-            int(self.profiles.get(user_id, {}).get("rating", 1000))
-            for user_id in self.teams["blue"]
-        )
-        embed = discord.Embed(
-            title=f"✅ {self.room.room_name} · 경매 팀 편성 완료",
-            description=(
+        totals = {
+            side: sum(
+                int(self.profiles.get(user_id, {}).get("rating", 1000))
+                for user_id in self.teams[side]
+            )
+            for side, _ in self.side_labels
+        }
+        if len(assignments) == 2:
+            description = (
                 f"{format_room_status(self.room)}\n\n"
-                f"팀 레이팅 차이: **{abs(red_rating - blue_rating)}점**\n"
+                f"팀 레이팅 차이: **{abs(totals['red'] - totals['blue'])}점**\n"
                 f"경매 지출: 레드 **{self.spent['red']}점**, "
                 f"블루 **{self.spent['blue']}점**"
             )
+        else:
+            site_base = os.getenv(
+                "PUBLIC_SITE_URL", "https://kkobung-web.onrender.com"
+            ).rstrip("/")
+            description = (
+                f"20명 경매로 **4팀 편성**을 완료했습니다.\n"
+                f"대회 번호: **{self.tournament_id}** · 각 대진은 BO5입니다.\n\n"
+                "준결승 2경기 후 결승으로 진행합니다.\n"
+                f"첫 준결승을 시작하려면 `/미니컵경기불러오기 대회번호:{self.tournament_id} 경기:1번 준결승`을 실행하세요.\n"
+                f"대진표: {site_base}/tournament/{self.tournament_id}"
+            )
+        embed = discord.Embed(
+            title=f"✅ {self.room.room_name} · 경매 팀 편성 완료",
+            description=description
         )
-        for side, assignment, total, label in (
-            ("red", red_assignment, red_rating, "🔴 레드팀"),
-            ("blue", blue_assignment, blue_rating, "🔵 블루팀")
-        ):
+        for side, label in self.side_labels:
+            assignment = assignments[side]
+            total = totals[side]
             lines = []
             for position in POSITIONS:
                 user_id = assignment[position]
@@ -1761,26 +1901,27 @@ class AuctionView(discord.ui.View):
             embed.add_field(
                 name=f"{label} · {total}점",
                 value="\n".join(lines),
-                inline=True
+                inline=len(assignments) == 2
             )
 
-        guild = getattr(self.message, "guild", None)
-        await self.join_cog.move_members_to_voice_channel(
-            guild=guild,
-            user_ids=blue_assignment.values(),
-            channel_id=self.room.blue_voice_channel_id
-        )
-        await self.join_cog.move_members_to_voice_channel(
-            guild=guild,
-            user_ids=red_assignment.values(),
-            channel_id=self.room.red_voice_channel_id
-        )
-        add_match_button_instructions(embed)
+        if len(assignments) == 2:
+            guild = getattr(self.message, "guild", None)
+            await self.join_cog.move_members_to_voice_channel(
+                guild=guild,
+                user_ids=assignments["blue"].values(),
+                channel_id=self.room.blue_voice_channel_id
+            )
+            await self.join_cog.move_members_to_voice_channel(
+                guild=guild,
+                user_ids=assignments["red"].values(),
+                channel_id=self.room.red_voice_channel_id
+            )
+            add_match_button_instructions(embed)
         result_message, _ = await self.join_cog.send_output_message(
             room=self.room,
             fallback_channel=getattr(self.message, "channel", None),
             embed=embed,
-            view=MatchControlView(self.join_cog)
+            view=MatchControlView(self.join_cog) if len(assignments) == 2 else None
         )
         if self.message is not None:
             try:
@@ -2474,7 +2615,7 @@ class JoinView(discord.ui.View):
         self._captain_setup_view = None
         self._auction_setup_view = None
 
-        if len(self.join_cog.players) < MAX_PLAYERS:
+        if len(self.join_cog.players) < self.room.player_limit:
             self.make_teams_button.disabled = True
 
     async def interaction_check(
@@ -2504,14 +2645,14 @@ class JoinView(discord.ui.View):
         waiting_players = self.room.waiting_players
 
         self.make_teams_button.disabled = (
-            len(players) < MAX_PLAYERS
+            len(players) < self.room.player_limit
         )
 
         if self.recruit_closed:
             title = "🔒 내전 모집 종료"
             description = (
                 "모집이 종료되었습니다.\n\n"
-                f"👥 현재 참가자: **{len(players)}/{MAX_PLAYERS}명**\n"
+                f"👥 현재 참가자: **{len(players)}/{self.room.player_limit}명**\n"
                 f"🕒 현재 대기자: "
                 f"**{len(waiting_players)}/{MAX_WAITING_PLAYERS}명**"
             )
@@ -2519,7 +2660,7 @@ class JoinView(discord.ui.View):
             title = "🎮 내전 참가 모집"
             description = (
                 "아래 버튼을 눌러 내전에 참가하세요.\n\n"
-                f"👥 현재 참가자: **{len(players)}/{MAX_PLAYERS}명**\n"
+                f"👥 현재 참가자: **{len(players)}/{self.room.player_limit}명**\n"
                 f"🕒 현재 대기자: "
                 f"**{len(waiting_players)}/{MAX_WAITING_PLAYERS}명**"
             )
@@ -2530,7 +2671,7 @@ class JoinView(discord.ui.View):
         )
 
         if self.room.recruit_start_mode == "when_full":
-            start_notice = "🚀 **시작 안내:** 10명 모이면 바로 시작"
+            start_notice = f"🚀 **시작 안내:** {self.room.player_limit}명 모이면 바로 시작"
         elif self.room.recruit_start_mode == "scheduled":
             start_notice = (
                 "⏰ **시작 예정:** "
@@ -2746,7 +2887,7 @@ class JoinView(discord.ui.View):
                 )
                 return
 
-            if len(players) >= MAX_PLAYERS:
+            if len(players) >= room.player_limit:
                 if len(room.waiting_players) >= MAX_WAITING_PLAYERS:
                     await interaction.response.send_message(
                         "❌ 참가자와 대기자 모집이 모두 마감되었습니다.",
@@ -2782,7 +2923,7 @@ class JoinView(discord.ui.View):
             self.join_cog.save_rooms_state()
 
             self.make_teams_button.disabled = (
-                len(players) < MAX_PLAYERS
+                len(players) < self.room.player_limit
             )
 
             await interaction.response.edit_message(
@@ -2858,7 +2999,7 @@ class JoinView(discord.ui.View):
             self.join_cog.save_rooms_state()
 
             self.make_teams_button.disabled = (
-                len(players) < MAX_PLAYERS
+                len(players) < self.room.player_limit
             )
 
             await interaction.response.edit_message(
@@ -2932,9 +3073,39 @@ class JoinView(discord.ui.View):
 
         await interaction.response.send_message(
             f"📋 **현재 참가자 "
-            f"({len(player_ids)}/{MAX_PLAYERS}명)**\n\n"
+                f"({len(player_ids)}/{self.room.player_limit}명)**\n\n"
             + "\n".join(participant_list)
             + waiting_text,
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="인원 선택",
+        emoji="👥",
+        style=discord.ButtonStyle.secondary,
+        custom_id="inhouse_capacity",
+        row=1
+    )
+    async def capacity_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if self.recruit_closed:
+            await interaction.response.send_message(
+                "🔒 모집을 다시 연 뒤 인원을 변경해주세요.",
+                ephemeral=True
+            )
+            return
+        if self.team_generating or self._auction_setup_view is not None:
+            await interaction.response.send_message(
+                "⏳ 팀 생성 또는 경매 준비 중에는 정원을 변경할 수 없습니다.",
+                ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            "모집 인원을 선택해주세요.\n"
+            "20명은 캡틴 4명과 팀별 5명으로 구성되는 4팀 경매입니다.",
+            view=PlayerLimitView(self),
             ephemeral=True
         )
 
@@ -2992,14 +3163,14 @@ class JoinView(discord.ui.View):
 
         players = list(self.join_cog.players.keys())
 
-        if len(players) != MAX_PLAYERS:
+        if len(players) != room.player_limit:
 
             # 팀 생성 완료
             
 
             await interaction.response.send_message(
-                f"❌ 아직 {MAX_PLAYERS}명이 모이지 않았습니다.\n"
-                f"현재 {len(players)}/{MAX_PLAYERS}명입니다.",
+                f"❌ 아직 {room.player_limit}명이 모이지 않았습니다.\n"
+                f"현재 {len(players)}/{room.player_limit}명입니다.",
                 ephemeral=True
             )
             return
@@ -3600,7 +3771,7 @@ class JoinView(discord.ui.View):
                 if isinstance(item, discord.ui.Button):
                     item.disabled = False
                     if item.custom_id == "inhouse_make_teams":
-                        item.disabled = len(self.room.players) < MAX_PLAYERS
+                        item.disabled = len(self.room.players) < self.room.player_limit
                     if item.custom_id == "inhouse_close":
                         item.label = "모집 종료"
                         item.emoji = "🔒"
@@ -3656,7 +3827,7 @@ class JoinView(discord.ui.View):
 
                     if item.custom_id == "inhouse_make_teams":
                         item.disabled = (
-                            len(room.players) < MAX_PLAYERS
+                            len(room.players) < room.player_limit
                         )
                     else:
                         item.disabled = False
