@@ -33,6 +33,7 @@ from utils.permissions import (
     is_match_operator,
     send_match_operator_only_message
 )
+from services.tournament_service import reopen_fixture
 
 
 logger = logging.getLogger(__name__)
@@ -723,6 +724,28 @@ class AdminMatch(commands.Cog):
                     control_view.series_score_snapshot
                 )
                 room.series_game = control_view.series_game_snapshot
+                room.tournament_id = getattr(
+                    control_view, "tournament_id_snapshot", None
+                )
+                room.tournament_fixture_no = getattr(
+                    control_view, "tournament_fixture_no_snapshot", None
+                )
+                if room.tournament_id and room.tournament_fixture_no:
+                    try:
+                        reopen_fixture(
+                            room.tournament_id,
+                            room.tournament_fixture_no
+                        )
+                    except Exception:
+                        logger.exception(
+                            "결과 취소 후 미니컵 대진표 되돌리기 실패 | 대회=%s | 경기=%s",
+                            room.tournament_id,
+                            room.tournament_fixture_no
+                        )
+                        reopen_warning += (
+                            "\n⚠️ 대진표 되돌리기에도 실패했습니다. "
+                            "대회 상태를 확인해주세요."
+                        )
                 room.match_in_progress = True
                 room.mvp_vote_in_progress = False
                 control_view.teams_reference = room.current_teams

@@ -16,6 +16,7 @@ from utils.permissions import (
 )
 
 from utils.cog_helper import get_join_cog
+from services.tournament_service import release_fixture
 from config import (
     BOT_NAME,
     VERSION
@@ -540,6 +541,8 @@ class AdminGame(commands.Cog):
             )
 
         recruit_view = room.current_recruit_view
+        if room.tournament_id and room.tournament_fixture_no:
+            release_fixture(room.tournament_id, room.tournament_fixture_no)
         room.reset_game()
 
         if recruit_view:

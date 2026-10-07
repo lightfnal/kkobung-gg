@@ -44,6 +44,7 @@ from storage.sqlite_db import (
 
 from services.player_service import PlayerService
 from services.rating_service import RatingService
+from services.tournament_service import get_fixture, resolve_fixture
 
 from utils.rating import get_rating_tier
 from utils.room_display import format_room_status
@@ -784,6 +785,39 @@ class Match(commands.Cog):
                 or join_cog.series_score["blue"] >= 2
             )
 
+        tournament_notice = ""
+        tournament_id = getattr(room, "tournament_id", None)
+        fixture_no = getattr(room, "tournament_fixture_no", None)
+        if series_finished and tournament_id and fixture_no:
+            try:
+                fixture = get_fixture(tournament_id, fixture_no)
+                winning_team_id = (
+                    fixture[f"{winner}_team_id"]
+                    if fixture is not None else None
+                )
+                if winning_team_id is not None:
+                    advanced = resolve_fixture(
+                        tournament_id,
+                        fixture_no,
+                        winning_team_id,
+                        match_id
+                    )
+                    if advanced:
+                        tournament_notice = (
+                            f"\n\n🏆 **미니컵 대진표 반영 완료** · "
+                            f"대회 `{tournament_id}` {fixture_no}번 경기"
+                        )
+            except Exception:
+                logger.exception(
+                    "미니컵 대진표 승자 반영 실패 | 대회=%s | 경기=%s",
+                    tournament_id,
+                    fixture_no
+                )
+                tournament_notice = (
+                    "\n\n⚠️ 경기 기록은 저장됐지만 미니컵 대진표 반영에 실패했습니다. "
+                    "진행자가 `/미니컵조회`로 상태를 확인해주세요."
+                )
+
         red_score = join_cog.series_score["red"]
         blue_score = join_cog.series_score["blue"]
 
@@ -854,7 +888,8 @@ class Match(commands.Cog):
             f"📉 **패배팀 레이팅 변화**\n"
             f"{chr(10).join(loser_changes)}"
             f"{placement_message}"
-            f"{series_message}\n\n"
+            f"{series_message}"
+            f"{tournament_notice}\n\n"
             f"🖼️ **챔피언 기록 (필수)**\n"
             "각자 `내 챔피언 입력`을 눌러 본인 챔피언을 등록해주세요.\n"
             "안 누른 참가자가 있으면 다른 참가자가 `미입력자만 입력`을 눌러 "
@@ -985,6 +1020,8 @@ class Match(commands.Cog):
                 "blue": 0
             }
             join_cog.series_game = 0
+            room.tournament_id = None
+            room.tournament_fixture_no = None
 
         join_cog.save_rooms_state()
 
