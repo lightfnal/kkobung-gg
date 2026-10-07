@@ -626,8 +626,8 @@ class AdminGame(commands.Cog):
                 for user_id in team.values()
             )
             recruit_view = room.current_recruit_view
-            tournament_id = room.tournament_id
-            fixture_no = room.tournament_fixture_no
+            tournament_id = getattr(room, "tournament_id", None)
+            fixture_no = getattr(room, "tournament_fixture_no", None)
             tournament_released = True
             if tournament_id and fixture_no:
                 try:
@@ -832,8 +832,10 @@ class AdminGame(commands.Cog):
                 "current_teams": copy.deepcopy(room.current_teams),
                 "series_score": dict(room.series_score),
                 "series_game": int(room.series_game),
-                "tournament_id": room.tournament_id,
-                "tournament_fixture_no": room.tournament_fixture_no,
+                "tournament_id": getattr(room, "tournament_id", None),
+                "tournament_fixture_no": getattr(
+                    room, "tournament_fixture_no", None
+                ),
                 "last_match_id": int(last_match["id"]) if last_match else None,
             }
             participant_ids = set(map(str, room.players.keys()))
@@ -865,8 +867,8 @@ class AdminGame(commands.Cog):
                 voice = {"moved": 0, "failed": len(participant_ids)}
 
             tournament_notice = ""
-            tournament_id = room.tournament_id
-            fixture_no = room.tournament_fixture_no
+            tournament_id = getattr(room, "tournament_id", None)
+            fixture_no = getattr(room, "tournament_fixture_no", None)
             if tournament_id and fixture_no:
                 try:
                     red_score = int(room.series_score.get("red", 0))
