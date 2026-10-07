@@ -562,7 +562,17 @@ class AdminGame(commands.Cog):
                 )
                 return
 
-            last_match = get_last_match(room.room_id)
+            # The latest match id is only needed to update a mini-cup fixture.
+            # A locked/temporarily unavailable SQLite DB must not prevent the
+            # inhouse itself from being ended and its state from being saved.
+            try:
+                last_match = get_last_match(room.room_id)
+            except Exception:
+                logger.exception(
+                    "내전 종료 중 최근 경기 조회 실패 | 방=%s",
+                    room.room_id
+                )
+                last_match = None
             snapshot = {
                 "players": copy.deepcopy(room.players),
                 "current_teams": copy.deepcopy(room.current_teams),
@@ -593,25 +603,39 @@ class AdminGame(commands.Cog):
                     room.room_id
                 )
                 voice = {"moved": 0, "failed": len(participant_ids)}
+            except Exception:
+                logger.exception(
+                    "내전 종료 중 음성채널 이동 실패 | 방=%s",
+                    room.room_id
+                )
+                voice = {"moved": 0, "failed": len(participant_ids)}
 
             tournament_notice = ""
             tournament_id = room.tournament_id
             fixture_no = room.tournament_fixture_no
             if tournament_id and fixture_no:
-                red_score = int(room.series_score.get("red", 0))
-                blue_score = int(room.series_score.get("blue", 0))
-                if red_score == blue_score:
-                    release_fixture(tournament_id, fixture_no)
-                    tournament_notice = "\n미니컵 대진은 다시 진행할 수 있도록 대기 상태로 두었습니다."
-                else:
-                    side = "red" if red_score > blue_score else "blue"
-                    fixture = get_fixture(tournament_id, fixture_no)
-                    if fixture and last_match:
-                        resolve_fixture(
-                            tournament_id, fixture_no,
-                            fixture[f"{side}_team_id"], int(last_match["id"])
-                        )
-                        tournament_notice = "\n미니컵 대진표에 현재 시리즈 승자를 반영했습니다."
+                try:
+                    red_score = int(room.series_score.get("red", 0))
+                    blue_score = int(room.series_score.get("blue", 0))
+                    if red_score == blue_score:
+                        release_fixture(tournament_id, fixture_no)
+                        tournament_notice = "\n미니컵 대진은 다시 진행할 수 있도록 대기 상태로 두었습니다."
+                    else:
+                        side = "red" if red_score > blue_score else "blue"
+                        fixture = get_fixture(tournament_id, fixture_no)
+                        if fixture and last_match:
+                            resolve_fixture(
+                                tournament_id, fixture_no,
+                                fixture[f"{side}_team_id"], int(last_match["id"])
+                            )
+                            tournament_notice = "\n미니컵 대진표에 현재 시리즈 승자를 반영했습니다."
+                except Exception:
+                    logger.exception(
+                        "내전 종료 중 미니컵 대진 반영 실패 | 방=%s | 대진=%s",
+                        room.room_id,
+                        fixture_no
+                    )
+                    tournament_notice = "\n⚠️ 미니컵 대진표 갱신은 실패했습니다. 운영자가 대진 상태를 확인해주세요."
 
             recruit_view = room.current_recruit_view
             if recruit_view:
@@ -622,7 +646,15 @@ class AdminGame(commands.Cog):
 
             room.reset_game()
             room.ended_series_snapshot = snapshot
-            join_cog.save_rooms_state()
+            state_saved = True
+            try:
+                join_cog.save_rooms_state()
+            except Exception:
+                state_saved = False
+                logger.exception(
+                    "내전 종료 상태 저장 실패 | 방=%s",
+                    room.room_id
+                )
 
             if recruit_view and recruit_view.message:
                 try:
@@ -630,7 +662,7 @@ class AdminGame(commands.Cog):
                         embed=recruit_view.create_embed(),
                         view=recruit_view
                     )
-                except discord.HTTPException:
+                except Exception:
                     logger.exception("내전 종료 후 모집 버튼 갱신 실패")
 
             # The room is now ended and persisted. Remove the old controls
@@ -640,7 +672,7 @@ class AdminGame(commands.Cog):
             if source_message is not None:
                 try:
                     await source_message.edit(view=None)
-                except discord.HTTPException:
+                except Exception:
                     logger.exception("내전 종료 후 이전 경기 버튼 제거 실패")
 
             score = snapshot["series_score"]
@@ -653,6 +685,11 @@ class AdminGame(commands.Cog):
                 f"{tournament_notice}\n"
                 f"🔊 대기 음성채널 복귀: {voice.get('moved', 0)}명 이동"
             )
+            if not state_saved:
+                content += (
+                    "\n⚠️ 종료 상태를 파일에 저장하지 못했습니다. "
+                    "봇을 재시작하지 말고 운영자가 상태를 확인해주세요."
+                )
             try:
                 output_message, _ = await join_cog.send_output_message(
                     room=room,
@@ -675,15 +712,31 @@ class AdminGame(commands.Cog):
                         ),
                         view=SeriesRecoveryView(self.bot),
                     )
-                except discord.HTTPException:
+                except Exception:
+                    logger.exception(
+                        "내전 종료 복구 안내 대체 응답 실패 | 방=%s",
+                        room.room_id
+                    )
                     output_message = None
                 if output_message is None:
-                    join_cog.save_rooms_state()
+                    try:
+                        join_cog.save_rooms_state()
+                    except Exception:
+                        state_saved = False
+                        logger.exception(
+                            "내전 종료 상태 재저장 실패 | 방=%s",
+                            room.room_id
+                        )
                     try:
                         await interaction.edit_original_response(
                             content=(
-                                "⚠️ 내전은 종료했고 상태도 저장했습니다. "
-                                "복구 안내 메시지를 보내지 못했으니 관리자에게 알려주세요."
+                                "⚠️ 종료 안내를 띄우지 못했습니다. "
+                                + (
+                                    "내전 종료 상태는 저장되었습니다. "
+                                    if state_saved
+                                    else "내전 종료 상태 저장도 실패했습니다. "
+                                )
+                                + "관리자에게 알려주세요."
                             ),
                             view=None
                         )
@@ -693,7 +746,21 @@ class AdminGame(commands.Cog):
 
             snapshot["recovery_message_id"] = str(output_message.id)
             room.ended_series_snapshot = snapshot
-            join_cog.save_rooms_state()
+            try:
+                join_cog.save_rooms_state()
+            except Exception:
+                logger.exception(
+                    "내전 종료 복구 버튼 정보 저장 실패 | 방=%s",
+                    room.room_id
+                )
+                content += (
+                    "\n⚠️ 복구 버튼 연결 정보를 저장하지 못했습니다. "
+                    "봇 재시작 전 운영자 확인이 필요합니다."
+                )
+                try:
+                    await output_message.edit(content=content)
+                except Exception:
+                    logger.exception("복구 저장 실패 안내 갱신 실패")
 
             try:
                 await interaction.edit_original_response(
@@ -702,7 +769,7 @@ class AdminGame(commands.Cog):
                         f"종료 안내: <#{output_message.channel.id}>"
                     )
                 )
-            except discord.HTTPException:
+            except Exception:
                 logger.info(
                     "내전 종료 완료 안내 갱신 생략(상호작용 만료) | 방=%s",
                     room.room_id
