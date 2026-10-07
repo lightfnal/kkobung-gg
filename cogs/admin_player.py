@@ -39,7 +39,7 @@ class AdminPlayer(commands.Cog):
 
     @discord.app_commands.command(
         name="테스트참가자생성",
-        description="테스트용 참가자 10명을 생성합니다."
+        description="현재 방 정원까지 테스트 참가자를 생성합니다."
     )
     async def create_test_players(
         self,
@@ -136,6 +136,19 @@ class AdminPlayer(commands.Cog):
             + (room_number - 1) * 10
         )
 
+        # Preserve the original IDs for the first ten test accounts so
+        # existing rooms and saved profiles continue to work. Extra test
+        # accounts use a separate, non-overlapping range for 20-player rooms.
+        extra_test_id_start = (
+            900000000000001000
+            + (room_number - 1) * 10
+        )
+
+        def test_user_id(index):
+            if index < 10:
+                return str(test_id_start + index)
+            return str(extra_test_id_start + index - 10)
+
         test_players = [
             ("테스트탑", "TOP", "JUNGLE"),
             ("테스트정글", "JUNGLE", "TOP"),
@@ -146,7 +159,17 @@ class AdminPlayer(commands.Cog):
             ("테스트7", "JUNGLE", "MID"),
             ("테스트8", "MID", "ADC"),
             ("테스트9", "ADC", "TOP"),
-            ("테스트10", "SUPPORT", "MID")
+            ("테스트10", "SUPPORT", "MID"),
+            ("테스트탑11", "TOP", "MID"),
+            ("테스트정글12", "JUNGLE", "SUPPORT"),
+            ("테스트미드13", "MID", "TOP"),
+            ("테스트원딜14", "ADC", "MID"),
+            ("테스트서폿15", "SUPPORT", "JUNGLE"),
+            ("테스트16", "TOP", "SUPPORT"),
+            ("테스트17", "JUNGLE", "ADC"),
+            ("테스트18", "MID", "JUNGLE"),
+            ("테스트19", "ADC", "SUPPORT"),
+            ("테스트20", "SUPPORT", "TOP")
         ]
 
         available_slots = max(
@@ -159,9 +182,7 @@ class AdminPlayer(commands.Cog):
         for index in range(
             len(test_players)
         ):
-            user_id = str(
-                test_id_start + index
-            )
+            user_id = test_user_id(index)
 
             # 이미 이 방에 있는 테스트 참가자는
             # 인원 증가 없이 프로필만 갱신합니다.
@@ -191,9 +212,7 @@ class AdminPlayer(commands.Cog):
         # 고정 테스트 ID가 다른 내전 방에 참가 중인지
         # 실제 생성 전에 모두 확인합니다.
         for index in selected_indexes:
-            user_id = str(
-                test_id_start + index
-            )
+            user_id = test_user_id(index)
 
             other_room = (
                 join_cog.room_manager
@@ -226,9 +245,7 @@ class AdminPlayer(commands.Cog):
                 test_players[index]
             )
 
-            user_id = str(
-                test_id_start + index
-            )
+            user_id = test_user_id(index)
 
             profile = {
                 "discord_nickname": name,
@@ -380,10 +397,19 @@ class AdminPlayer(commands.Cog):
             + (room_number - 1) * 10
         )
 
+        extra_test_id_start = (
+            900000000000001000
+            + (room_number - 1) * 10
+        )
+
         test_ids = [
             str(test_id_start + index)
             for index in range(10)
         ]
+        test_ids.extend(
+            str(extra_test_id_start + index)
+            for index in range(10)
+        )
 
         delete_count = 0
 
