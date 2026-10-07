@@ -134,15 +134,15 @@ class ForceResetConfirmView(discord.ui.View):
         emoji="🧹"
     )
     async def confirm_reset(self, interaction, button):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if interaction.message is not None:
-            try:
-                await interaction.message.edit(
-                    content="내전 상태를 초기화하고 종료하는 중입니다…",
-                    view=None
-                )
-            except discord.HTTPException:
-                logger.exception("내전 초기화 확인창 갱신 실패")
+        # A component interaction should defer an update to its confirmation
+        # message, not create a separate "thinking" response. Stop the view
+        # immediately so its timeout cannot overwrite an in-progress reset.
+        await interaction.response.defer()
+        self.stop()
+        await interaction.edit_original_response(
+            content="내전 상태를 초기화하고 종료하는 중입니다…",
+            view=None
+        )
         game_cog = self.bot.get_cog("AdminGame")
         if game_cog is None:
             await interaction.edit_original_response(
@@ -150,8 +150,18 @@ class ForceResetConfirmView(discord.ui.View):
                 view=None
             )
             return
-        await game_cog.force_reset_room(interaction, self.room)
-        self.stop()
+        try:
+            await game_cog.force_reset_room(interaction, self.room)
+        except Exception:
+            logger.exception(
+                "내전 초기화 종료 확인 처리 실패 | 방=%s | 사용자=%s",
+                self.room.room_id,
+                interaction.user.id
+            )
+            await interaction.edit_original_response(
+                content="❌ 내전 초기화 종료 중 오류가 발생했습니다. Render 로그를 확인해주세요.",
+                view=None
+            )
 
     @discord.ui.button(
         label="취소",
