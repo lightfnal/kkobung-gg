@@ -56,7 +56,7 @@ async def finish_champion_entry_ui(
     source_message=None,
     source_view=None
 ):
-    """완료 안내 후 BO3 다음 세트 조작창을 다시 채널 하단에 올립니다."""
+    """완료 안내 후 BO5 다음 세트 조작창을 다시 채널 하단에 올립니다."""
     progress = get_match_champion_progress(match_id)
     total = int(progress.get("total_count") or 0)
     completed = int(progress.get("completed_count") or 0)

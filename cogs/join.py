@@ -41,7 +41,7 @@ from views.join_view import JoinView
 
 
 def normalize_series_state(series_score, series_game):
-    """BO3 점수와 완료 세트 번호를 안전한 값으로 정규화합니다."""
+    """BO5 점수와 완료 세트 번호를 안전한 값으로 정규화합니다."""
 
     try:
         red_score = int(series_score.get("red", 0))
@@ -51,9 +51,10 @@ def normalize_series_state(series_score, series_game):
         return {"red": 0, "blue": 0}, 0, False
 
     scores_valid = (
-        0 <= red_score <= 2
-        and 0 <= blue_score <= 2
-        and not (red_score == 2 and blue_score == 2)
+        0 <= red_score <= 3
+        and 0 <= blue_score <= 3
+        and not (red_score == 3 and blue_score == 3)
+        and red_score + blue_score <= 5
     )
     if not scores_valid:
         return {"red": 0, "blue": 0}, 0, False
@@ -470,7 +471,7 @@ class Join(commands.Cog):
                     and pending_state_valid
                 ):
                     # SQLite 커밋은 성공했으므로
-                    # 저장 예정이던 BO3 점수를 확정합니다.
+                    # 저장 예정이던 BO5 점수를 확정합니다.
                     room.series_score = pending_score
                     room.series_game = pending_game
 
@@ -1181,7 +1182,7 @@ class Join(commands.Cog):
                     value=(
                         "봇이 종료되기 전에 SQLite에 저장된 "
                         "경기 결과를 확인했습니다.\n"
-                        "해당 결과와 BO3 점수를 정상적으로 "
+                        "해당 결과와 BO5 점수를 정상적으로 "
                         "복구했습니다."
                     ),
                     inline=False
@@ -1218,7 +1219,7 @@ class Join(commands.Cog):
                 )
 
                 embed.add_field(
-                    name="🎮 BO3 진행 상태",
+                    name="🎮 BO5 진행 상태",
                     value=(
                         f"🔴 레드팀 **{red_score}** : "
                         f"**{blue_score}** 🔵 블루팀\n"
@@ -1242,7 +1243,7 @@ class Join(commands.Cog):
                     embed.add_field(
                         name="다음 행동",
                         value=(
-                            "팀 구성과 BO3 점수가 복구되었습니다.\n"
+                            "팀 구성과 BO5 점수가 복구되었습니다.\n"
                             "다음 경기 진행 명령 또는 기존 "
                             "경기 진행 절차를 이용해주세요."
                         ),

@@ -239,7 +239,7 @@ class Tournament(commands.Cog):
             description=(
                 f"**{fixture['red_team_name']}** vs **{fixture['blue_team_name']}**\n"
                 "준결승은 1·2번 경기, 결승은 3번 경기입니다.\n"
-                "기존 내전 버튼으로 BO3 경기를 진행하면 최종 승리팀이 대진표에 자동 반영됩니다."
+                "기존 내전 버튼으로 BO5 경기를 진행하면 최종 승리팀이 대진표에 자동 반영됩니다."
             )
         )
         for side, title in (("red", "🔴 레드팀"), ("blue", "🔵 블루팀")):

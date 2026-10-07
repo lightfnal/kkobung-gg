@@ -414,7 +414,7 @@ class Match(commands.Cog):
         # 이번 경기 결과를 구분하는 고유 토큰입니다.
         result_token = uuid4().hex
 
-        # DB 저장이 성공했을 때 적용할 다음 BO3 상태를
+        # DB 저장이 성공했을 때 적용할 다음 BO5 상태를
         # 현재 상태와 분리하여 미리 계산합니다.
         next_series_score = dict(
             join_cog.series_score
@@ -427,7 +427,7 @@ class Match(commands.Cog):
         )
 
         # SQLite 처리 중 봇이 종료될 경우를 대비해
-        # 다음 BO3 상태와 토큰을 먼저 JSON에 저장합니다.
+        # 다음 BO5 상태와 토큰을 먼저 JSON에 저장합니다.
         room.pending_match_token = (
             result_token
         )
@@ -443,7 +443,7 @@ class Match(commands.Cog):
         join_cog.save_rooms_state()
 
         # 같은 프로세스 안에서 오류가 발생했을 때
-        # 원래 BO3 상태로 되돌리기 위한 메모리 정보입니다.
+        # 원래 BO5 상태로 되돌리기 위한 메모리 정보입니다.
         room.transaction_series_score = dict(
             join_cog.series_score
         )
@@ -458,7 +458,7 @@ class Match(commands.Cog):
         room.match_transaction_active = True
 
         logger.info(
-            "BO3 결과 반영 전 | 방=%s | 완료 세트=%s | red=%s | blue=%s",
+            "BO5 결과 반영 전 | 방=%s | 완료 세트=%s | red=%s | blue=%s",
             room.room_id,
             join_cog.series_game,
             join_cog.series_score["red"],
@@ -731,7 +731,7 @@ class Match(commands.Cog):
         room.match_transaction_committed = True
 
         # SQLite 경기 기록 저장이 성공한 뒤에만
-        # 이번 세트의 BO3 점수를 확정합니다.
+        # 이번 세트의 BO5 점수를 확정합니다.
         join_cog.series_score = dict(
             next_series_score
         )
@@ -740,7 +740,7 @@ class Match(commands.Cog):
             next_series_game
         )
 
-        # DB와 BO3 점수가 모두 확정됐으므로
+        # DB와 BO5 점수가 모두 확정됐으므로
         # 재시작 복구 표식을 제거합니다.
         room.pending_match_token = None
         room.pending_series_score = None
@@ -781,8 +781,9 @@ class Match(commands.Cog):
             series_finished = True
         else:
             series_finished = (
-                join_cog.series_score["red"] >= 2
-                or join_cog.series_score["blue"] >= 2
+                join_cog.series_score["red"] >= 3
+                or join_cog.series_score["blue"] >= 3
+                or join_cog.series_game >= 5
             )
 
         tournament_notice = ""
@@ -860,7 +861,7 @@ class Match(commands.Cog):
 
             if series_finished:
                 series_message = (
-                    f"\n\n🏆 **3판 2선승제 종료**\n"
+                    f"\n\n🏆 **BO5 시리즈 종료 (최대 5세트)**\n"
                     f"🔴 레드팀 {red_score} : "
                     f"{blue_score} 블루팀 🔵\n"
                     f"최종 승리: **{winner_name}**"
@@ -957,7 +958,7 @@ class Match(commands.Cog):
         join_cog.match_in_progress = False
 
         if series_finished:
-            # 단판 종료 또는 BO3에서 2승 달성: 경기 전체 종료
+            # 단판 종료, BO5 3승 달성 또는 5세트 완료: 경기 전체 종료
             match_player_ids = {
                 str(user_id)
                 for team in join_cog.current_teams.values()
@@ -1570,7 +1571,7 @@ class Match(commands.Cog):
                 )
                 return
 
-            if MATCH_MODE == "bo3" and room.series_game > 0:
+            if MATCH_MODE != "single" and room.series_game > 0:
                 previous_match = get_last_match(room.room_id)
                 if previous_match is not None:
                     champion_progress = get_match_champion_progress(

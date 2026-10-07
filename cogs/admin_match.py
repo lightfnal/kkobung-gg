@@ -1260,12 +1260,12 @@ class AdminMatch(commands.Cog):
 
     @discord.app_commands.command(
         name="경기복구",
-        description="누락된 BO3 결과를 선택한 세트부터 정상 처리로 복구합니다."
+        description="누락된 BO5 결과를 선택한 세트부터 정상 처리로 복구합니다."
     )
     async def recover_match(
         self,
         interaction: discord.Interaction,
-        시작세트: Literal["1세트", "2세트", "3세트"]
+        시작세트: Literal["1세트", "2세트", "3세트", "4세트", "5세트"]
     ):
         """선택한 시작 세트부터 기존 정상 경기 처리 경로로 복구합니다."""
         if not is_admin(interaction):
@@ -1337,21 +1337,29 @@ class AdminMatch(commands.Cog):
             )
             return
 
+        # 복구 전용 기본 기록 순서입니다. 저장된 DB 경기와 참가자 검증 후
+        # 선택한 세트부터 정상 경기 결과 처리 경로를 다시 실행합니다.
         all_results = [
             ("1세트", "red"),
             ("2세트", "blue"),
-            ("3세트", "red")
+            ("3세트", "red"),
+            ("4세트", "blue"),
+            ("5세트", "red")
         ]
         start_index = {
             "1세트": 0,
             "2세트": 1,
-            "3세트": 2
+            "3세트": 2,
+            "4세트": 3,
+            "5세트": 4
         }[start_set]
         results_to_apply = all_results[start_index:]
         expected_states = {
             "1세트": ({"red": 0, "blue": 0}, 0),
             "2세트": ({"red": 1, "blue": 0}, 1),
-            "3세트": ({"red": 1, "blue": 1}, 2)
+            "3세트": ({"red": 1, "blue": 1}, 2),
+            "4세트": ({"red": 2, "blue": 1}, 3),
+            "5세트": ({"red": 2, "blue": 2}, 4)
         }
         expected_score, expected_game = expected_states[start_set]
         current_score = dict(room.series_score)
@@ -1442,7 +1450,7 @@ class AdminMatch(commands.Cog):
 
         except Exception:
             logger.exception(
-                "BO3 누락 경기 복구 실패 | 방=%s",
+                "BO5 누락 경기 복구 실패 | 방=%s",
                 room.room_id
             )
 
@@ -1474,7 +1482,7 @@ class AdminMatch(commands.Cog):
         await interaction.followup.send(
             "✅ 경기 복구가 완료되었습니다.\n"
             + "\n".join(completed_lines)
-            + "\n최종 결과: 🔴 레드 2 : 1 블루",
+            + "\n최종 결과: 🔴 레드 3 : 2 블루 (복구 기본 기록 순서 기준)",
             ephemeral=True
         )
 

@@ -1,6 +1,7 @@
 import math
 import os
 import time
+import copy
 
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +17,13 @@ from utils.permissions import (
 )
 
 from utils.cog_helper import get_join_cog
-from services.tournament_service import release_fixture
+from services.tournament_service import (
+    get_fixture,
+    release_fixture,
+    resolve_fixture,
+)
+from storage.sqlite_db import get_last_match
+from views.join_view import EndSeriesConfirmView, SeriesRecoveryView
 from config import (
     BOT_NAME,
     VERSION
@@ -409,7 +416,7 @@ class AdminGame(commands.Cog):
 
     @discord.app_commands.command(
         name="내전종료",
-        description="현재 내전을 종료하고 참가자와 팀을 초기화합니다."
+        description="세트 결과를 보존하며 내전을 종료합니다. 종료 전 확인이 필요합니다."
     )
     async def end_game(
         self,
@@ -474,150 +481,161 @@ class AdminGame(commands.Cog):
 
         room = join_cog.active_room
 
-        await interaction.response.defer(
+        if room.match_in_progress or room.match_transaction_active:
+            await interaction.response.send_message(
+                "❌ 경기 진행 또는 결과 저장 중에는 내전을 종료할 수 없습니다.",
+                ephemeral=True
+            )
+            return
+        if room.series_game <= 0 or room.current_teams is None:
+            await interaction.response.send_message(
+                "❌ 종료할 진행 중인 시리즈가 없습니다. 최소 한 세트 결과를 먼저 등록해주세요.",
+                ephemeral=True
+            )
+            return
+
+        score = room.series_score
+        await interaction.response.send_message(
+            f"현재 점수는 🔴 레드 **{score['red']} : {score['blue']}** 블루입니다.\n"
+            "종료하면 세트별 경기 기록은 보존되고 참가자와 팀 상태만 초기화됩니다.",
+            view=EndSeriesConfirmView(
+                self.bot, room, interaction.user.id
+            ),
             ephemeral=True
         )
 
+    async def confirm_end_series(
+        self,
+        interaction,
+        room,
+        control_view=None,
+        source_message=None
+    ):
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.followup.send("내전 관리 기능을 불러오지 못했습니다.", ephemeral=True)
+            return
 
-        # 참가자 정보를 초기화하기 전에 대기 음성채널로 복귀시킵니다.
-        participant_ids = set(
-            room.players.keys()
-        )
+        async with room.operation_lock:
+            if room.match_in_progress or room.match_transaction_active:
+                await interaction.followup.send(
+                    "❌ 경기 진행 또는 결과 저장 중이라 종료하지 않았습니다.",
+                    ephemeral=True
+                )
+                return
+            if room.series_game <= 0 or room.current_teams is None:
+                await interaction.followup.send("❌ 종료할 진행 중인 시리즈가 없습니다.", ephemeral=True)
+                return
 
-        if room.current_teams is not None:
+            last_match = get_last_match(room.room_id)
+            snapshot = {
+                "players": copy.deepcopy(room.players),
+                "current_teams": copy.deepcopy(room.current_teams),
+                "series_score": dict(room.series_score),
+                "series_game": int(room.series_game),
+                "tournament_id": room.tournament_id,
+                "tournament_fixture_no": room.tournament_fixture_no,
+                "last_match_id": int(last_match["id"]) if last_match else None,
+            }
+            participant_ids = set(map(str, room.players.keys()))
             participant_ids.update(
                 str(user_id)
-                for team
-                in room.current_teams.values()
-                for user_id
-                in team.values()
+                for team in (room.current_teams or {}).values()
+                for user_id in (team or {}).values()
             )
-
-        waiting_voice_result = (
-            await join_cog.move_members_to_voice_channel(
+            voice = await join_cog.move_members_to_voice_channel(
                 guild=interaction.guild,
                 user_ids=participant_ids,
                 channel_id=room.waiting_voice_channel_id
             )
-        )
 
-        waiting_voice_parts = [
-            f"{waiting_voice_result['moved']}명 이동"
-        ]
+            tournament_notice = ""
+            tournament_id = room.tournament_id
+            fixture_no = room.tournament_fixture_no
+            if tournament_id and fixture_no:
+                red_score = int(room.series_score.get("red", 0))
+                blue_score = int(room.series_score.get("blue", 0))
+                if red_score == blue_score:
+                    release_fixture(tournament_id, fixture_no)
+                    tournament_notice = "\n미니컵 대진은 다시 진행할 수 있도록 대기 상태로 두었습니다."
+                else:
+                    side = "red" if red_score > blue_score else "blue"
+                    fixture = get_fixture(tournament_id, fixture_no)
+                    if fixture and last_match:
+                        resolve_fixture(
+                            tournament_id, fixture_no,
+                            fixture[f"{side}_team_id"], int(last_match["id"])
+                        )
+                        tournament_notice = "\n미니컵 대진표에 현재 시리즈 승자를 반영했습니다."
 
-        if waiting_voice_result["already_connected"]:
-            waiting_voice_parts.append(
-                f"{waiting_voice_result['already_connected']}명 "
-                "이미 위치"
+            recruit_view = room.current_recruit_view
+            if recruit_view:
+                recruit_view.recruit_closed = True
+                for item in recruit_view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = True
+                if recruit_view.message:
+                    try:
+                        await recruit_view.message.edit(embed=recruit_view.create_embed(), view=recruit_view)
+                    except discord.HTTPException:
+                        pass
+
+            room.reset_game()
+            room.ended_series_snapshot = snapshot
+            join_cog.save_rooms_state()
+
+            score = snapshot["series_score"]
+            content = (
+                f"✅ **{room.room_name} · 내전이 종료되었습니다.**\n"
+                f"기록된 세트: **{snapshot['series_game']}세트** · "
+                f"현재 점수: 🔴 레드 **{score['red']} : {score['blue']}** 블루\n"
+                "세트별 경기 결과는 저장되어 있습니다.\n"
+                "실수로 종료했다면 관리자 또는 내전진행자가 아래 버튼으로 복구할 수 있습니다."
+                f"{tournament_notice}\n"
+                f"🔊 대기 음성채널 복귀: {voice.get('moved', 0)}명 이동"
             )
-
-        if waiting_voice_result["not_connected"]:
-            waiting_voice_parts.append(
-                f"{waiting_voice_result['not_connected']}명 "
-                "음성 미접속"
-            )
-
-        if waiting_voice_result["failed"]:
-            waiting_voice_parts.append(
-                f"{waiting_voice_result['failed']}명 "
-                "이동 실패"
-            )
-
-        waiting_voice_text = ", ".join(
-            waiting_voice_parts
-        )
-
-        if waiting_voice_result["channel_missing"]:
-            voice_status_message = (
-                "\n\n⚠️ 대기 음성채널이 설정되지 않았거나 "
-                "삭제되어 자동 복귀를 완료하지 못했습니다.\n"
-                f"처리 결과: {waiting_voice_text}"
-            )
-
-        else:
-            voice_status_message = (
-                "\n\n🔊 대기 음성채널 복귀: "
-                f"{waiting_voice_text}"
-            )
-
-        recruit_view = room.current_recruit_view
-        if room.tournament_id and room.tournament_fixture_no:
-            release_fixture(room.tournament_id, room.tournament_fixture_no)
-        room.reset_game()
-
-        if recruit_view:
-            recruit_view.recruit_closed = True
-
-            for item in recruit_view.children:
-                if isinstance(item, discord.ui.Button):
-                    item.disabled = True
-
-            if recruit_view.message:
-                try:
-                    await recruit_view.message.edit(
-                        embed=recruit_view.create_embed(),
-                        view=recruit_view
-                    )
-                except discord.HTTPException:
-                    pass
-
-        join_cog.save_rooms_state()
-
-        output_message, used_fallback = (
-            await join_cog.send_output_message(
+            output_message, _ = await join_cog.send_output_message(
                 room=room,
                 fallback_channel=interaction.channel,
-                content=(
-                    f"✅ **{room.room_name} · 내전이 "
-                    "종료되었습니다.**\n"
-                    f"방 번호: **{room.room_id}**\n\n"
-                    "참가자, 팀, 경기 상태와 시리즈 점수가 "
-                    "모두 초기화되었습니다."
-                    f"{voice_status_message}"
-                )
+                content=content,
+                view=SeriesRecoveryView(self.bot)
             )
-        )
+            if output_message is None:
+                try:
+                    output_message = await interaction.followup.send(
+                        "⚠️ 공용 채널에 올리지 못해 이 메시지에 종료 및 복구 버튼을 표시합니다.",
+                        view=SeriesRecoveryView(self.bot),
+                        ephemeral=True,
+                        wait=True
+                    )
+                except discord.HTTPException:
+                    output_message = None
+                if output_message is None:
+                    join_cog.save_rooms_state()
+                    await interaction.followup.send(
+                        "⚠️ 내전은 종료했지만 복구 버튼 메시지를 보내지 못했습니다. 종료 상태는 저장되어 있습니다.",
+                        ephemeral=True
+                    )
+                    return
 
-        if output_message is None:
-            confirmation_message = (
-                "✅ 내전 상태는 정상적으로 초기화됐습니다.\n"
-                "⚠️ 다만 종료 안내 메시지를 전송하지 "
-                "못했습니다.\n"
-                "공용 진행 채널과 모집 채널에서 꼬붕봇의 "
-                "`채널 보기`와 `메시지 보내기` "
-                "권한을 확인해주세요."
+            snapshot["recovery_message_id"] = str(output_message.id)
+            room.ended_series_snapshot = snapshot
+            join_cog.save_rooms_state()
+
+            if control_view is not None:
+                control_view.stop()
+            if source_message is not None:
+                try:
+                    await source_message.edit(view=None)
+                except discord.HTTPException:
+                    pass
+            await interaction.followup.send(
+                f"✅ 내전을 종료했습니다. 세트 결과는 보존했습니다. 종료 안내는 <#{output_message.channel.id}>에 등록했습니다.",
+                ephemeral=True
             )
-
-        elif used_fallback:
-            confirmation_message = (
-                "✅ 내전 상태를 정상적으로 초기화했습니다.\n"
-                "⚠️ 공용 진행 채널에 접근할 수 없어 "
-                "현재 모집 채널에 종료 안내를 표시했습니다."
-            )
-
-        elif (
-            output_message.channel.id
-            == interaction.channel_id
-        ):
-            confirmation_message = (
-                "✅ 내전을 종료하고 현재 채널에 "
-                "안내를 표시했습니다."
-            )
-
-        else:
-            confirmation_message = (
-                "✅ 내전을 종료하고 공용 진행 채널에 "
-                "안내를 표시했습니다.\n"
-                f"진행 채널: "
-                f"<#{output_message.channel.id}>"
-            )
-
-        await interaction.followup.send(
-            confirmation_message,
-            ephemeral=True
-        )
 
 
 
 async def setup(bot):
     await bot.add_cog(AdminGame(bot))
+    bot.add_view(SeriesRecoveryView(bot))
