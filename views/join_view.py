@@ -1092,13 +1092,31 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        profiles = _season_profiles_for_players(
-            self.join_cog,
-            player_ids
-        )
+        # Profile lookups hit SQLite. Acknowledge the component before the
+        # synchronous reads so Discord's 3-second interaction deadline cannot
+        # expire while preparing either the 10-player or 20-player auction.
+        self.recruit_view.team_generating = True
+        await interaction.response.defer()
+        try:
+            profiles = _season_profiles_for_players(
+                self.join_cog,
+                player_ids
+            )
+        except Exception:
+            self.recruit_view.team_generating = False
+            logger.exception(
+                "경매 참가자 프로필 조회 실패 | 방=%s",
+                self.room.room_id
+            )
+            await interaction.followup.send(
+                "❌ 참가자 프로필을 확인하지 못했습니다. 잠시 후 다시 눌러주세요.",
+                ephemeral=True
+            )
+            return
         errors = validate_team_profiles(player_ids, profiles)
         if errors:
-            await interaction.response.send_message(
+            self.recruit_view.team_generating = False
+            await interaction.followup.send(
                 "❌ 참가자 프로필의 포지션 정보를 확인해주세요.\n"
                 + "\n".join(f"• {error}" for error in errors),
                 ephemeral=True
@@ -1110,11 +1128,10 @@ class TeamModeView(discord.ui.View):
             player_ids,
             profiles
         )
-        self.recruit_view.team_generating = True
         self.recruit_view._auction_setup_view = setup_view
         try:
             captain_count = 4 if expected_count == MAX_AUCTION_PLAYERS else 2
-            await interaction.response.edit_message(
+            setup_view.message = await interaction.edit_original_response(
                 content=(
                     f"🔨 {expected_count}인 경매 준비: 캡틴 {captain_count}명을 선택하고 시작을 눌러주세요.\n"
                     f"팀별 예산은 {AUCTION_TEAM_BUDGET}포인트이며, "
@@ -1122,11 +1139,17 @@ class TeamModeView(discord.ui.View):
                 ),
                 view=setup_view
             )
-            setup_view.message = interaction.message
         except discord.HTTPException:
             self.recruit_view._auction_setup_view = None
             self.recruit_view.team_generating = False
-            raise
+            logger.exception(
+                "경매 캡틴 선택창 갱신 실패 | 방=%s",
+                self.room.room_id
+            )
+            await interaction.followup.send(
+                "❌ 경매 준비창을 표시하지 못했습니다. 모집 메시지를 새로고침한 뒤 다시 눌러주세요.",
+                ephemeral=True
+            )
 
 class CaptainSelection(discord.ui.Select):
     def __init__(self, setup_view):
