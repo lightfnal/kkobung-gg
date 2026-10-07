@@ -413,11 +413,13 @@ class Room(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         if (
             interaction.guild is None
             or interaction.channel_id is None
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 서버 채널에서만 사용할 수 있습니다.",
                 ephemeral=True
             )
@@ -428,7 +430,7 @@ class Room(commands.Cog):
         )
 
         if join_cog is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 내전 관리 기능을 불러오지 못했습니다.",
                 ephemeral=True
             )
@@ -443,7 +445,7 @@ class Room(commands.Cog):
         )
 
         if room is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 현재 채널에는 연결된 내전 방이 없습니다.\n"
                 "관리자가 `/내전방생성`을 실행해주세요.",
                 ephemeral=True
@@ -474,7 +476,7 @@ class Room(commands.Cog):
             else "설정되지 않음"
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "🏠 **현재 내전 방 정보**\n\n"
             f"방 번호: `{room.room_id}`\n"
             f"방 이름: **{room.room_name}**\n"
