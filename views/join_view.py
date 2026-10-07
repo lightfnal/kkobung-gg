@@ -22,6 +22,7 @@ from services.team_balancer import (
     create_team_signature,
     POSITIONS
 )
+from services.tournament_service import release_fixture
 from storage.sqlite_db import (
     get_active_season,
     get_season_player_stats,
@@ -261,6 +262,10 @@ class MatchControlView(discord.ui.View):
             getattr(self.room, "series_score", {"red": 0, "blue": 0})
         )
         self.series_game_snapshot = getattr(self.room, "series_game", 0)
+        self.tournament_id_snapshot = getattr(self.room, "tournament_id", None)
+        self.tournament_fixture_no_snapshot = getattr(
+            self.room, "tournament_fixture_no", None
+        )
         self.champion_record_view = None
         self._result_lock = asyncio.Lock()
 
@@ -391,6 +396,10 @@ class MatchControlView(discord.ui.View):
                 getattr(self.room, "series_score", {"red": 0, "blue": 0})
             )
             self.series_game_snapshot = getattr(self.room, "series_game", 0)
+            self.tournament_id_snapshot = getattr(self.room, "tournament_id", None)
+            self.tournament_fixture_no_snapshot = getattr(
+                self.room, "tournament_fixture_no", None
+            )
 
             self.room.match_in_progress = True
 
@@ -3441,6 +3450,8 @@ class JoinView(discord.ui.View):
         room = self.join_cog.active_room
 
         async with room.operation_lock:
+            if room.tournament_id and room.tournament_fixture_no:
+                release_fixture(room.tournament_id, room.tournament_fixture_no)
             room.reset_game(keep_recruit_view=True)
 
             self.join_cog.save_rooms_state()
