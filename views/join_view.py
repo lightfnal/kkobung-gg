@@ -321,7 +321,7 @@ class EndSeriesConfirmView(discord.ui.View):
                 control_view=self.control_view,
                 source_message=self.source_message
             )
-        except Exception as error:
+        except Exception:
             logger.exception(
                 "내전 종료 처리 실패 | 방=%s",
                 self.room.room_id
@@ -330,8 +330,7 @@ class EndSeriesConfirmView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         "❌ 내전 종료 처리 중 오류가 발생했습니다. "
-                        f"오류 종류: `{type(error).__name__}`. "
-                        "관리자에게 이 오류 종류와 Render 로그를 전달해주세요."
+                        "경기 기록은 별도로 확인이 필요합니다. 관리자에게 알려주세요."
                     )
                 )
             except discord.HTTPException:
@@ -2636,12 +2635,12 @@ class CaptainDraftView(discord.ui.View):
 
 class JoinView(discord.ui.View):
 
-    def __init__(self, join_cog):
+    def __init__(self, join_cog, room=None):
         # timeout=None이면 봇이 켜져 있는 동안 버튼이 만료되지 않습니다.
         super().__init__(timeout=None)
 
         self.join_cog = join_cog
-        self.room = join_cog.active_room
+        self.room = room or join_cog.active_room
         self.recruit_closed = False
         self.message = None
 
@@ -2650,20 +2649,30 @@ class JoinView(discord.ui.View):
         self._captain_setup_view = None
         self._auction_setup_view = None
 
-        if len(self.join_cog.players) < self.room.player_limit:
+        if len(self.room.players) < self.room.player_limit:
             self.make_teams_button.disabled = True
 
     async def interaction_check(
         self,
         interaction: discord.Interaction
     ) -> bool:
-        if not await self.join_cog.require_room(
-            interaction
-        ):
+        room = self.join_cog.select_room_for_interaction(interaction)
+        if room is None:
+            if not await self.join_cog.require_room(interaction):
+                return False
+
+        # 다른 방의 모집창이 이 채널에 표시된 경우 버튼을 차단합니다.
+        room = self.join_cog.active_room
+        if str(room.room_id) != str(self.room.room_id):
+            await interaction.response.send_message(
+                "❌ 이 모집창은 다른 내전 방에 연결되어 있습니다.\n"
+                "관리자가 해당 방에서 모집창을 다시 생성해주세요.",
+                ephemeral=True
+            )
             return False
-        
+
         # 현재 모집창이 아니면 오래된 버튼으로 판단
-        if self.join_cog.current_recruit_view is not self:
+        if room.current_recruit_view is not self:
             await interaction.response.send_message(
                 "❌ 만료된 내전 모집창입니다.\n"
                 "가장 최근에 생성된 모집창을 이용해주세요.",
@@ -2676,7 +2685,7 @@ class JoinView(discord.ui.View):
     def create_embed(self):
         """현재 참가자 정보를 모집 메시지로 만듭니다."""
 
-        players = self.join_cog.players
+        players = self.room.players
         waiting_players = self.room.waiting_players
 
         self.make_teams_button.disabled = (
@@ -2790,33 +2799,11 @@ class JoinView(discord.ui.View):
                     f"`{main}/{sub}`"
                 )
 
-            # Discord limits each embed field to 1,024 characters. A 20-player
-            # auction roster can exceed that, which made /내전모집 fail when
-            # rebuilding the recruitment message after a restart.
-            chunks = []
-            current_chunk = []
-            current_length = 0
-            for line in participant_list:
-                line_length = len(line) + (1 if current_chunk else 0)
-                if current_chunk and current_length + line_length > 950:
-                    chunks.append(current_chunk)
-                    current_chunk = []
-                    current_length = 0
-                    line_length = len(line)
-                current_chunk.append(line)
-                current_length += line_length
-            if current_chunk:
-                chunks.append(current_chunk)
-
-            for chunk_index, chunk in enumerate(chunks, start=1):
-                field_name = "📋 참가자 명단"
-                if len(chunks) > 1:
-                    field_name += f" · {chunk_index}/{len(chunks)}"
-                embed.add_field(
-                    name=field_name,
-                    value="\n".join(chunk),
-                    inline=False
-                )
+            embed.add_field(
+                name="📋 참가자 명단",
+                value="\n".join(participant_list),
+                inline=False
+            )
         else:
             embed.add_field(
                 name="📋 참가자 명단",
