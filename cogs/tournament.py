@@ -15,6 +15,7 @@ from services.tournament_service import (
     get_bracket,
     get_fixture,
     get_tournament,
+    delete_tournament,
     claim_fixture,
     release_fixture,
 )
@@ -30,6 +31,82 @@ from views.join_view import MatchControlView, add_match_button_instructions
 logger = logging.getLogger(__name__)
 POSITIONS = ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
 SITE_BASE_URL = os.getenv("PUBLIC_SITE_URL", "https://kkobung-web.onrender.com").rstrip("/")
+
+
+class TournamentDeleteConfirmView(discord.ui.View):
+    """Require a second, operator-only confirmation before deleting a cup."""
+
+    def __init__(self, tournament_id, guild_id, tournament_name):
+        super().__init__(timeout=60)
+        self.tournament_id = int(tournament_id)
+        self.guild_id = str(guild_id)
+        self.tournament_name = str(tournament_name)
+        self.message = None
+
+    @discord.ui.button(label="대회 삭제 확정", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm_delete(self, interaction, button):
+        if str(interaction.guild_id) != self.guild_id:
+            await interaction.response.send_message(
+                "❌ 대회를 만든 서버에서만 삭제할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+        if not is_match_operator(interaction):
+            await send_match_operator_only_message(interaction)
+            return
+
+        # Acknowledge first so the confirmation cannot expire during DB work.
+        await interaction.response.defer()
+        try:
+            deleted = delete_tournament(self.tournament_id)
+        except ValueError as error:
+            await interaction.edit_original_response(
+                content=f"❌ {error}",
+                view=None
+            )
+            self.stop()
+            return
+        except Exception:
+            logger.exception(
+                "미니컵 삭제 실패 | 대회=%s | 서버=%s",
+                self.tournament_id,
+                self.guild_id
+            )
+            await interaction.edit_original_response(
+                content="❌ 미니컵 삭제 중 오류가 발생했습니다. 로그를 확인해주세요.",
+                view=None
+            )
+            self.stop()
+            return
+
+        message = (
+            f"🗑️ **{self.tournament_name}** (대회 #{self.tournament_id})을 삭제했습니다.\n"
+            "대회 명단과 대진만 삭제했으며, 일반 경기 기록은 보존했습니다."
+            if deleted else "이미 삭제되었거나 존재하지 않는 미니컵입니다."
+        )
+        await interaction.edit_original_response(content=message, view=None)
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary, emoji="↩️")
+    async def cancel_delete(self, interaction, button):
+        await interaction.response.edit_message(
+            content="✅ 미니컵 삭제를 취소했습니다.",
+            view=None
+        )
+        self.stop()
+
+    async def on_timeout(self):
+        if self.message is None:
+            return
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(
+                content="⌛ 삭제 확인 시간이 지나 취소되었습니다.",
+                view=self
+            )
+        except discord.HTTPException:
+            pass
 
 
 class Tournament(commands.Cog):
@@ -163,6 +240,46 @@ class Tournament(commands.Cog):
             self._bracket_text(대회번호, tournament["name"], fixtures),
             allowed_mentions=discord.AllowedMentions.none()
         )
+
+    @app_commands.command(
+        name="미니컵삭제",
+        description="테스트 또는 종료된 미니컵과 대진을 삭제합니다."
+    )
+    @app_commands.describe(대회번호="삭제할 미니컵 번호")
+    async def delete_cup(self, interaction: discord.Interaction, 대회번호: int):
+        if not await self._operator_only(interaction):
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ 서버 안에서 사용해주세요.",
+                ephemeral=True
+            )
+            return
+        tournament = get_tournament(대회번호)
+        if tournament is None or str(tournament["guild_id"]) != str(interaction.guild_id):
+            await interaction.response.send_message(
+                "❌ 이 서버의 미니컵을 찾지 못했습니다.",
+                ephemeral=True
+            )
+            return
+
+        team_count = conn.execute(
+            "SELECT COUNT(*) FROM tournament_teams WHERE tournament_id = ?",
+            (int(대회번호),)
+        ).fetchone()[0]
+        view = TournamentDeleteConfirmView(
+            대회번호,
+            interaction.guild_id,
+            tournament["name"]
+        )
+        await interaction.response.send_message(
+            f"⚠️ **{tournament['name']}** (대회 #{대회번호})을 삭제할까요?\n"
+            f"등록 팀: {team_count}팀 · 상태: {tournament['status']}\n"
+            "대회 팀 명단과 대진을 삭제합니다. 일반 경기 기록은 유지됩니다.",
+            view=view,
+            ephemeral=True
+        )
+        view.message = await interaction.original_response()
 
     @app_commands.command(name="미니컵경기불러오기", description="선택한 대진 경기를 현재 내전방에 불러옵니다.")
     @app_commands.describe(
