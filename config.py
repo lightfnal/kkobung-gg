@@ -24,6 +24,7 @@ RIOT_REGION = os.getenv(
 
 
 MAX_PLAYERS = 10
+MAX_AUCTION_PLAYERS = 20
 
 # 내전 방마다 받을 수 있는 대기자 수
 MAX_WAITING_PLAYERS = 10
