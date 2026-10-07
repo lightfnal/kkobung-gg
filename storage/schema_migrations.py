@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 REQUIRED_SCHEMA = {
     "players": {"discord_id", "rating", "hidden_mmr", "placement_games"},
@@ -207,6 +207,74 @@ def create_match_balance_predictions_table(connection):
     )
 
 
+def create_tournament_tables(connection):
+    """Create storage for four-team fixed-roster mini cups."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tournaments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'registration',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tournament_teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL,
+            team_name TEXT NOT NULL,
+            captain_id TEXT NOT NULL,
+            top_id TEXT NOT NULL,
+            jungle_id TEXT NOT NULL,
+            mid_id TEXT NOT NULL,
+            adc_id TEXT NOT NULL,
+            support_id TEXT NOT NULL,
+            seed INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+                ON DELETE CASCADE,
+            UNIQUE (tournament_id, team_name),
+            UNIQUE (tournament_id, top_id),
+            UNIQUE (tournament_id, jungle_id),
+            UNIQUE (tournament_id, mid_id),
+            UNIQUE (tournament_id, adc_id),
+            UNIQUE (tournament_id, support_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tournament_fixtures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL,
+            fixture_no INTEGER NOT NULL,
+            round_no INTEGER NOT NULL,
+            red_team_id INTEGER,
+            blue_team_id INTEGER,
+            winner_team_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            match_id INTEGER,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY (red_team_id) REFERENCES tournament_teams(id),
+            FOREIGN KEY (blue_team_id) REFERENCES tournament_teams(id),
+            FOREIGN KEY (winner_team_id) REFERENCES tournament_teams(id),
+            UNIQUE (tournament_id, fixture_no)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tournament_fixtures_tournament "
+        "ON tournament_fixtures(tournament_id, fixture_no)"
+    )
+
+
 MIGRATIONS = {
     1: validate_current_schema,
     2: create_operations_events_table,
@@ -214,7 +282,8 @@ MIGRATIONS = {
     4: create_match_player_champions_table,
     5: add_actual_position_to_champion_records,
     6: create_player_position_ratings_tables,
-    7: create_match_balance_predictions_table
+    7: create_match_balance_predictions_table,
+    8: create_tournament_tables
 }
 
 

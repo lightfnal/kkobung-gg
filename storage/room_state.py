@@ -31,6 +31,7 @@ class InhouseRoom:
     # 팀 생성 이후의 진행 정보를 출력할 공용 채널
     output_channel_id: int | None = None
 
+
     # 방마다 사용하는 음성채널
     waiting_voice_channel_id: int | None = None
     red_voice_channel_id: int | None = None
@@ -52,6 +53,10 @@ class InhouseRoom:
 
     current_teams: dict | None = None
     current_balance_prediction: dict | None = None
+
+    # 현재 팀이 미니컵 대진표에서 불러온 경기인지 표시합니다.
+    tournament_id: int | None = None
+    tournament_fixture_no: int | None = None
 
     match_in_progress: bool = False
 
@@ -131,6 +136,8 @@ class InhouseRoom:
         self.recruit_start_time = None
         self.current_teams = None
         self.current_balance_prediction = None
+        self.tournament_id = None
+        self.tournament_fixture_no = None
         self.match_in_progress = False
 
         self.series_score = {
@@ -184,6 +191,8 @@ class InhouseRoom:
             "recruit_start_time": self.recruit_start_time,
             "current_teams": self.current_teams,
             "current_balance_prediction": self.current_balance_prediction,
+            "tournament_id": self.tournament_id,
+            "tournament_fixture_no": self.tournament_fixture_no,
             "match_in_progress": (
                 self.match_in_progress
             ),
@@ -249,6 +258,9 @@ class InhouseRoom:
                 "blue_voice_channel_id"
             )
         )
+
+        room.tournament_id = data.get("tournament_id")
+        room.tournament_fixture_no = data.get("tournament_fixture_no")
 
         players = data.get("players", {})
         room.players = dict(players) if isinstance(players, dict) else {}
