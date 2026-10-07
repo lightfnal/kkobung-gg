@@ -38,6 +38,7 @@ from web.routes.stats import router as stats_router
 from web.routes.api_home import router as api_home_router
 from web.routes.api_spectator import router as api_spectator_router
 from web.routes.betting import router as betting_router
+from web.routes.tournament import router as tournament_router
 
 app = FastAPI(
     title="꼬붕.gg",
@@ -108,6 +109,7 @@ app.include_router(
 )
 app.include_router(api_spectator_router)
 app.include_router(betting_router)
+app.include_router(tournament_router)
 
 app.include_router(
     stats_router
