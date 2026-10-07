@@ -208,7 +208,7 @@ def release_fixture(tournament_id, fixture_no):
 
 
 def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
-    """Resolve a BO3 fixture once and place its winner in the final slot."""
+    """Resolve a series fixture once and place its winner in the final slot."""
     conn.execute("BEGIN IMMEDIATE")
     try:
         fixture = conn.execute(

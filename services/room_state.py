@@ -19,7 +19,7 @@ class InhouseRoom:
     내전 방 하나의 상태를 관리합니다.
 
     각 방은 참가자, 팀, 경기 진행 상태,
-    BO3 점수를 독립적으로 가집니다.
+    BO5 시리즈 점수를 독립적으로 가집니다.
     """
 
     room_id: str
@@ -67,6 +67,9 @@ class InhouseRoom:
 
     series_game: int = 0
 
+    # 수동 내전 종료 후 진행자/관리자가 복구할 수 있는 시리즈 상태
+    ended_series_snapshot: dict | None = None
+
     # 재팀 생성 시 직전 팀을 피하기 위해 사용
     last_team_signature: object | None = None
 
@@ -88,7 +91,7 @@ class InhouseRoom:
     transaction_series_game: int | None = None
 
     # 경기 결과 처리 중 봇이 종료된 경우
-    # SQLite 기록과 BO3 점수를 맞추기 위한 영구 복구 정보
+    # SQLite 기록과 BO5 점수를 맞추기 위한 영구 복구 정보
     pending_match_token: str | None = None
     pending_series_score: dict | None = None
     pending_series_game: int | None = None
@@ -142,6 +145,7 @@ class InhouseRoom:
         }
 
         self.series_game = 0
+        self.ended_series_snapshot = None
         self.last_team_signature = None
         if not keep_recruit_view:
             self.current_recruit_view = None
@@ -195,6 +199,7 @@ class InhouseRoom:
             ),
             "series_score": self.series_score,
             "series_game": self.series_game,
+            "ended_series_snapshot": self.ended_series_snapshot,
             # Discord 투표창은 재시작 시 복구할 수 없으므로
             # 파일에는 항상 종료 상태로 저장합니다.
             "mvp_vote_in_progress": False,
@@ -309,6 +314,12 @@ class InhouseRoom:
             "blue": _safe_int(series_score.get("blue", 0))
         }
         room.series_game = _safe_int(data.get("series_game", 0))
+        ended_series_snapshot = data.get("ended_series_snapshot")
+        room.ended_series_snapshot = (
+            dict(ended_series_snapshot)
+            if isinstance(ended_series_snapshot, dict)
+            else None
+        )
 
         # 경기 결과 처리 중 저장된 복구 표식을 불러옵니다.
         pending_match_token = data.get(
