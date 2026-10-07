@@ -653,16 +653,26 @@ class AdminGame(commands.Cog):
                 f"{tournament_notice}\n"
                 f"🔊 대기 음성채널 복귀: {voice.get('moved', 0)}명 이동"
             )
-            output_message, _ = await join_cog.send_output_message(
-                room=room,
-                fallback_channel=interaction.channel,
-                content=content,
-                view=SeriesRecoveryView(self.bot)
-            )
+            try:
+                output_message, _ = await join_cog.send_output_message(
+                    room=room,
+                    fallback_channel=interaction.channel,
+                    content=content,
+                    view=SeriesRecoveryView(self.bot)
+                )
+            except Exception:
+                logger.exception(
+                    "내전 종료 안내 전송 실패 | 방=%s",
+                    room.room_id
+                )
+                output_message = None
             if output_message is None:
                 try:
                     output_message = await interaction.edit_original_response(
-                        "⚠️ 공용 채널에 올리지 못해 이 메시지에 종료 및 복구 버튼을 표시합니다.",
+                        content=(
+                            "⚠️ 공용 채널에 올리지 못해 이 메시지에 "
+                            "종료 및 복구 버튼을 표시합니다."
+                        ),
                         view=SeriesRecoveryView(self.bot),
                     )
                 except discord.HTTPException:
