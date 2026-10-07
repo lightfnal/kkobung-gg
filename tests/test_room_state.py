@@ -51,6 +51,9 @@ class TestInhouseRoom(
             0
         )
 
+        self.assertIsNone(room.tournament_id)
+        self.assertIsNone(room.tournament_fixture_no)
+
     def test_rooms_have_independent_state(self):
         first_room = InhouseRoom(
             room_id="1",
@@ -109,6 +112,19 @@ class TestInhouseRoom(
         self.assertEqual(restored.player_limit, 20)
         restored.reset_game()
         self.assertEqual(restored.player_limit, 10)
+
+    def test_tournament_fixture_link_survives_restart_and_resets_after_game(self):
+        room = InhouseRoom(room_id="1", room_name="내전 1")
+        room.tournament_id = 42
+        room.tournament_fixture_no = 2
+
+        restored = InhouseRoom.from_dict(room.to_dict())
+        self.assertEqual(restored.tournament_id, 42)
+        self.assertEqual(restored.tournament_fixture_no, 2)
+
+        restored.reset_game()
+        self.assertIsNone(restored.tournament_id)
+        self.assertIsNone(restored.tournament_fixture_no)
 
     def test_reset_and_restore_room(self):
         room = InhouseRoom(
