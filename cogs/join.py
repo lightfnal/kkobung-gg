@@ -1809,13 +1809,22 @@ class Join(commands.Cog):
             await send_admin_only_message(interaction)
             return
 
-        if not await self.require_room(
-            interaction
-        ):
+        # ContextVar 기본 방에 의존하지 않고, 이 명령을 실행한
+        # 채널에 연결된 방 객체를 직접 사용합니다.
+        room = self.select_room_for_interaction(interaction)
+        if room is None:
+            await self.require_room(interaction)
             return
 
+        logger.info(
+            "모집창 생성 요청 | 서버=%s | 채널=%s | 방=%s",
+            interaction.guild.id if interaction.guild else None,
+            interaction.channel_id,
+            room.room_id
+        )
+
         # 경기 진행 중에는 모집창 재생성 금지
-        if self.match_in_progress:
+        if room.match_in_progress:
             await interaction.response.send_message(
                 "❌ 현재 경기가 진행 중입니다.\n"
                 "경기 종료 후 모집할 수 있습니다.",
@@ -1824,7 +1833,7 @@ class Join(commands.Cog):
             return
 
         # 팀이 이미 생성됐다면 모집창 재생성 금지
-        if self.current_teams is not None:
+        if room.current_teams is not None:
             await interaction.response.send_message(
                 "❌ 현재 생성된 팀이 있습니다.\n"
                 "내전 종료 후 다시 모집해주세요.",
@@ -1832,10 +1841,18 @@ class Join(commands.Cog):
             )
             return
 
-        # 모집 중이라면 기존 모집창을 삭제하고 맨 아래로 이동
-        if self.current_recruit_view:
+        recruit_view = room.current_recruit_view
+        if (
+            recruit_view is not None
+            and str(recruit_view.room.room_id) != str(room.room_id)
+        ):
+            # 다른 방에 잘못 묶인 오래된 View가 있으면 재사용하지 않습니다.
+            recruit_view = None
+            room.current_recruit_view = None
 
-            old_message = self.current_recruit_view.message
+        # 모집 중이라면 기존 모집창을 삭제하고 맨 아래로 이동
+        if recruit_view is not None:
+            old_message = recruit_view.message
 
             if old_message:
                 try:
@@ -1848,19 +1865,16 @@ class Join(commands.Cog):
                     pass
 
             await interaction.response.send_message(
-                embed=self.current_recruit_view.create_embed(),
-                view=self.current_recruit_view
+                embed=recruit_view.create_embed(),
+                view=recruit_view
             )
 
-            self.current_recruit_view.message = (
-                await interaction.original_response()
-            )
+            recruit_view.message = await interaction.original_response()
             return
 
-        # 모집창이 없다면 새로 생성
-        view = JoinView(self)
-
-        self.current_recruit_view = view
+        # 모집창이 없다면 채널에 연결된 방을 명시해 새로 생성
+        view = JoinView(self, room=room)
+        room.current_recruit_view = view
 
         await interaction.response.send_message(
             embed=view.create_embed(),
