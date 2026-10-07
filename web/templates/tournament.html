@@ -1,39 +1,50 @@
 {% extends "base.html" %}
-
-{% block title %}{{ tournament.name }} · 꼬붕.gg{% endblock %}
-
+{% block title %}{{ tournament.name }} · 미니컵 · 꼬붕.gg{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/tournament.css?v=2">{% endblock %}
 {% block content %}
-<main class="container" style="max-width: 980px; margin: 28px auto; padding: 0 16px;">
-  <section style="background:#1f2430; border:1px solid #343b4b; border-radius:20px; padding:24px; margin-bottom:18px;">
-    <p style="color:#9ba7bd; margin:0 0 8px;">🏆 미니컵 · {{ status_label }}</p>
-    <h1 style="margin:0;">{{ tournament.name }}</h1>
-    <p style="color:#aab2c2; margin-bottom:0;">4개 고정팀 · 준결승 2경기 후 결승 · 각 대진 BO5 (3승 선승제)</p>
+<main class="cup-page">
+  <a class="cup-back-link" href="/tournaments">← 미니컵 목록</a>
+  <section class="cup-hero">
+    <div class="cup-hero-main"><div class="cup-eyebrow"><span class="cup-trophy">🏆</span> 미니컵 <span class="cup-status cup-status-{{ tournament.status }}">{{ status_label }}</span></div><h1>{{ tournament.name }}</h1><p>대회 #{{ tournament.id }} <span class="cup-dot">·</span> 생성 {{ tournament.created_at_display }}{% if tournament.completed_at_display %}<span class="cup-dot">·</span> 종료 {{ tournament.completed_at_display }}{% endif %}</p></div>
+    {% if champion_name %}<div class="cup-champion"><span>🏆 우승 팀</span><strong>{{ champion_name }}</strong></div>{% endif %}
   </section>
-
-  {% if fixtures %}
-  <section style="display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px;">
-    {% for fixture in fixtures %}
-    <article style="background:#1f2430; border:1px solid #343b4b; border-radius:18px; padding:20px;">
-      <div style="display:flex; justify-content:space-between; gap:12px; color:#9ba7bd;">
-        <strong>{{ "결승" if fixture.fixture_no == 3 else fixture.fixture_no|string + "번 준결승" }}</strong>
-        <span>{{ fixture_labels.get(fixture.status, fixture.status) }}</span>
-      </div>
-      <h2 style="font-size:1.15rem; margin:20px 0 12px;">
-        <div style="padding:12px; background:#292f3c; border-radius:10px; {% if fixture.winner_team_name == fixture.red_team_name %}color:#ff7180;{% endif %}">{{ fixture.red_team_name or "진출 팀 대기" }}</div>
-        <div style="text-align:center; color:#8d97aa; font-size:.9rem; padding:8px;">VS</div>
-        <div style="padding:12px; background:#292f3c; border-radius:10px; {% if fixture.winner_team_name == fixture.blue_team_name %}color:#72a7ff;{% endif %}">{{ fixture.blue_team_name or "진출 팀 대기" }}</div>
-      </h2>
-      {% if fixture.winner_team_name %}<p style="margin:0; color:#cbd3e0;">승자: <strong>{{ fixture.winner_team_name }}</strong></p>{% endif %}
-      {% if fixture.match_id %}<a href="/match/{{ fixture.match_id }}" style="display:inline-block; margin-top:12px;">최종 경기 전적 보기 →</a>{% endif %}
-    </article>
-    {% endfor %}
+  <nav class="cup-anchor-nav" aria-label="대회 상세 바로가기"><a href="#bracket">대진표</a><a href="#teams">팀 명단</a>{% if champion_name %}<a href="#bracket">우승 결과</a>{% endif %}</nav>
+  <section class="cup-summary-grid" aria-label="대회 요약">
+    <article class="cup-summary-card"><span>참가 팀</span><strong>{{ teams|length }}<small> / 4팀</small></strong><div class="cup-summary-note">팀별 5명 고정 로스터</div></article>
+    <article class="cup-summary-card"><span>완료 경기</span><strong>{{ completed_fixture_count }}<small> / 3경기</small></strong><div class="cup-summary-note">준결승 2경기 · 결승 1경기</div></article>
+    <article class="cup-summary-card"><span>경기 방식</span><strong>BO5</strong><div class="cup-summary-note">3승 선취 시리즈</div></article>
   </section>
-  {% else %}
-  <section style="background:#1f2430; border:1px solid #343b4b; border-radius:18px; padding:22px;">
-    <h2 style="margin-top:0;">팀 등록 현황 · {{ teams|length }}/4</h2>
-    {% if teams %}<ol>{% for team in teams %}<li style="padding:6px 0;">{{ team.team_name }}</li>{% endfor %}</ol>{% else %}<p>아직 등록된 팀이 없습니다.</p>{% endif %}
-    <p style="color:#9ba7bd; margin-bottom:0;">대진표는 진행자가 4팀 등록 후 생성합니다.</p>
+  {% if champion_name %}<section class="cup-champion-banner"><span>🏆</span><div><small>이번 미니컵 우승</small><strong>{{ champion_name }}</strong></div><span class="cup-confetti">✦</span></section>{% endif %}
+  {% if next_fixture %}
+  <section class="cup-next-match">
+    <div class="cup-next-copy"><span class="cup-section-kicker">{% if next_fixture.status == "in_progress" %}LIVE MATCH{% else %}NEXT MATCH{% endif %}</span><h2>{% if next_fixture.status == "in_progress" %}진행 중인 경기 · {{ next_fixture.round_label }}{% else %}다음 경기 · {{ next_fixture.round_label }}{% endif %}</h2><p>{{ next_fixture.red_team_name or "진출 팀 대기" }} <span>vs</span> {{ next_fixture.blue_team_name or "진출 팀 대기" }}</p></div>
+    {% if next_fixture.status == "ready" %}<div class="cup-command-box"><span>경기 시작 명령어</span><code>/미니컵경기불러오기 대회번호:{{ tournament.id }} 경기:{{ next_fixture.command_option }}</code></div>{% else %}<div class="cup-command-box cup-live-note"><span>현재 경기</span><strong>내전방에서 경기 결과 처리를 기다리고 있습니다.</strong></div>{% endif %}
   </section>
   {% endif %}
+  <section class="cup-section" id="bracket">
+    <div class="cup-section-heading"><div><span class="cup-section-kicker">TOURNAMENT BRACKET</span><h2>대진표</h2></div><span class="cup-progress-label">{{ completed_fixture_count }} / 3 경기 완료</span></div>
+    <div class="cup-progress-track" role="progressbar" aria-label="대회 진행률" aria-valuenow="{{ progress_percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width:{{ progress_percent }}%"></span></div>
+    <div class="cup-bracket-grid">
+      {% for fixture in fixtures %}
+      <article class="cup-match-card cup-match-{{ fixture.status }} {% if fixture.fixture_no == 3 %}cup-final-card{% endif %}">
+        <div class="cup-match-top"><span class="cup-round-label">{% if fixture.fixture_no == 3 %}결승{% else %}{{ fixture.fixture_no }}번 준결승{% endif %}</span><span class="cup-match-status">{{ fixture_labels.get(fixture.status, fixture.status) }}</span></div>
+        <div class="cup-match-team {% if fixture.winner_team_name == fixture.red_team_name and fixture.winner_team_name %}cup-match-winner{% endif %}"><span class="cup-team-mark cup-red-mark">R</span><strong>{{ fixture.red_team_name or "진출 팀 대기" }}</strong>{% if fixture.winner_team_name == fixture.red_team_name and fixture.winner_team_name %}<span class="cup-winner-check">승</span>{% endif %}</div>
+        <div class="cup-match-vs">VS</div>
+        <div class="cup-match-team {% if fixture.winner_team_name == fixture.blue_team_name and fixture.winner_team_name %}cup-match-winner{% endif %}"><span class="cup-team-mark cup-blue-mark">B</span><strong>{{ fixture.blue_team_name or "진출 팀 대기" }}</strong>{% if fixture.winner_team_name == fixture.blue_team_name and fixture.winner_team_name %}<span class="cup-winner-check">승</span>{% endif %}</div>
+        {% if fixture.winner_team_name %}<p class="cup-match-result">승자 <strong>{{ fixture.winner_team_name }}</strong>{% if fixture.match_date %}<span class="cup-match-date"> · {{ fixture.match_date }}</span>{% endif %}</p>{% elif fixture.status == "in_progress" %}<p class="cup-match-result cup-live-result">경기가 진행 중입니다.</p>{% else %}<p class="cup-match-result cup-muted-result">{% if fixture.status == "waiting" %}앞 경기 결과를 기다립니다.{% else %}경기 결과 대기{% endif %}</p>{% endif %}
+        {% if fixture.match_id %}<a class="cup-record-link" href="/match/{{ fixture.match_id }}">최종 경기 전적 보기 →</a>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="cup-section" id="teams">
+    <div class="cup-section-heading"><div><span class="cup-section-kicker">TEAM ROSTERS</span><h2>팀 및 참가자 명단</h2></div><span class="cup-progress-label">{{ teams|length }}개 팀 · {{ teams|length * 5 }}명</span></div>
+    {% if teams %}<div class="cup-team-grid">
+      {% for team in teams %}<article class="cup-roster-card"><header class="cup-roster-header"><div><span class="cup-roster-seed">{% if team.seed %}SEED {{ team.seed }}{% else %}TEAM{% endif %}</span><h3>{{ team.team_name }}</h3></div><span class="cup-roster-count">5 <small>/ 5</small></span></header><ol class="cup-player-list">
+        {% for player in team.players %}<li><span class="cup-position">{{ player.position }}</span>{% if player.player_id %}<a href="/player/{{ player.player_id }}" class="cup-player-name">{{ player.name }}</a>{% else %}<span class="cup-player-name">{{ player.name }}</span>{% endif %}{% if player.is_captain %}<span class="cup-captain-badge">캡틴</span>{% endif %}</li>{% endfor %}
+      </ol></article>{% endfor %}
+    </div>{% else %}<div class="cup-empty-state"><span>👥</span><strong>아직 등록된 팀이 없습니다.</strong><p>팀을 등록하면 대진표와 참가자 명단이 여기에 표시됩니다.</p></div>{% endif %}
+  </section>
+  <section class="cup-info-strip"><span>ℹ️</span><p>각 대진은 5전 3선승제입니다. 결과 입력 후 승리 팀이 다음 라운드로 진출합니다.</p><a href="/tournaments">다른 미니컵 보기 →</a></section>
 </main>
 {% endblock %}

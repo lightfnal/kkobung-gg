@@ -21,6 +21,8 @@
         href="/static/css/style.css?v=13"
     >
 
+    {% block head_extra %}{% endblock %}
+
 </head>
 
 
@@ -66,6 +68,14 @@
             "
         >
             랭킹
+        </a>
+
+
+        <a
+            href="/tournaments"
+            class="nav-link {% if request.url.path.startswith('/tournament') %}nav-active{% endif %}"
+        >
+            미니컵
         </a>
 
 
@@ -222,6 +232,8 @@
             <a href="/ranking">
                 랭킹
             </a>
+
+            <a href="/tournaments">미니컵</a>
 
             <a href="/history">
                 전적

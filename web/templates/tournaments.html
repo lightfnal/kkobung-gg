@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}미니컵 목록 · 꼬붕.gg{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/tournament.css?v=2">{% endblock %}
+{% block content %}
+<main class="cup-page cup-list-page">
+  <section class="cup-hero cup-list-hero">
+    <div class="cup-hero-main"><div class="cup-eyebrow"><span class="cup-trophy">🏆</span> TOURNAMENT HUB</div><h1>미니컵</h1><p>대회 일정과 대진, 참가 팀, 경기 결과를 한곳에서 확인하세요.</p></div>
+    <div class="cup-format-chip"><strong>4팀</strong><span>5명 로스터</span><i>·</i><strong>BO5</strong><span>3승 선취</span></div>
+  </section>
+  <section class="cup-overview" aria-label="대회 현황">
+    <article><span class="cup-overview-icon">🔵</span><div><small>진행 중</small><strong>{{ status_counts.in_progress }}</strong></div></article>
+    <article><span class="cup-overview-icon">🟢</span><div><small>팀 등록 중</small><strong>{{ status_counts.registration }}</strong></div></article>
+    <article><span class="cup-overview-icon">🏁</span><div><small>종료된 대회</small><strong>{{ status_counts.completed }}</strong></div></article>
+  </section>
+  <div class="cup-list-heading"><div><span class="cup-section-kicker">ALL TOURNAMENTS</span><h2>대회 목록</h2></div><span class="cup-progress-label">총 <b id="cup-visible-count">{{ tournaments|length }}</b>개</span></div>
+  <div class="cup-filter-bar" role="group" aria-label="대회 상태 필터">
+    <button type="button" class="cup-filter is-active" data-filter="all">전체 <span>{{ tournaments|length }}</span></button>
+    <button type="button" class="cup-filter" data-filter="in_progress">진행 중 <span>{{ status_counts.in_progress }}</span></button>
+    <button type="button" class="cup-filter" data-filter="registration">모집 중 <span>{{ status_counts.registration }}</span></button>
+    <button type="button" class="cup-filter" data-filter="completed">종료 <span>{{ status_counts.completed }}</span></button>
+  </div>
+  {% if tournaments %}
+  <section class="cup-tournament-list" id="cup-tournament-list">
+    {% for tournament in tournaments %}
+    <a class="cup-tournament-row" data-status="{{ tournament.status }}" href="/tournament/{{ tournament.id }}">
+      <div class="cup-list-icon">🏆</div>
+      <div class="cup-list-main"><div class="cup-list-title"><h3>{{ tournament.name }}</h3><span class="cup-status cup-status-{{ tournament.status }}">{{ tournament.status_label }}</span></div><p>대회 #{{ tournament.id }} <span>·</span> {{ tournament.created_at_display }}{% if tournament.champion_name %}<span>·</span> 우승 <b>{{ tournament.champion_name }}</b>{% endif %}</p></div>
+      <div class="cup-list-stats"><strong>{{ tournament.team_count }}<small>/4팀</small></strong><span>{{ tournament.completed_fixture_count }} / 3경기 완료</span><div class="cup-progress-track"><span style="width:{{ tournament.progress_percent }}%"></span></div></div>
+      <span class="cup-list-arrow">→</span>
+    </a>
+    {% endfor %}
+    <div class="cup-filter-empty" id="cup-filter-empty" hidden>이 상태의 대회가 없습니다.</div>
+  </section>
+  {% else %}
+  <section class="cup-empty-state cup-list-empty"><span>🏆</span><strong>아직 등록된 미니컵이 없습니다.</strong><p>디스코드에서 4팀 미니컵을 개설하면 대회 정보가 여기에 표시됩니다.</p></section>
+  {% endif %}
+  <section class="cup-howto-grid">
+    <article><span>01</span><div><strong>팀 구성</strong><p>4팀과 팀별 5명 로스터를 확인합니다.</p></div></article>
+    <article><span>02</span><div><strong>준결승</strong><p>두 준결승을 진행하고 승리 팀이 결승에 진출합니다.</p></div></article>
+    <article><span>03</span><div><strong>결승 및 우승</strong><p>최종 결과와 우승 팀, 경기 전적이 기록됩니다.</p></div></article>
+  </section>
+</main>
+<script>
+(() => {
+  const buttons = [...document.querySelectorAll('.cup-filter')];
+  const rows = [...document.querySelectorAll('.cup-tournament-row')];
+  const empty = document.getElementById('cup-filter-empty');
+  const count = document.getElementById('cup-visible-count');
+  buttons.forEach(button => button.addEventListener('click', () => {
+    buttons.forEach(item => item.classList.toggle('is-active', item === button));
+    const filter = button.dataset.filter;
+    let visible = 0;
+    rows.forEach(row => {
+      const show = filter === 'all' || row.dataset.status === filter;
+      row.hidden = !show;
+      if (show) visible += 1;
+    });
+    if (count) count.textContent = visible;
+    if (empty) empty.hidden = visible !== 0;
+  }));
+})();
+</script>
+{% endblock %}
