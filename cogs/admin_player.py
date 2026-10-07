@@ -151,7 +151,7 @@ class AdminPlayer(commands.Cog):
 
         available_slots = max(
             0,
-            MAX_PLAYERS - len(active_room.players)
+            active_room.player_limit - len(active_room.players)
         )
 
         selected_indexes = []
@@ -183,7 +183,7 @@ class AdminPlayer(commands.Cog):
         if not selected_indexes:
             await interaction.followup.send(
                 "❌ 현재 내전 방의 참가자가 이미 "
-                f"{MAX_PLAYERS}명입니다.",
+                f"{active_room.player_limit}명입니다.",
                 ephemeral=True
             )
             return
@@ -275,7 +275,7 @@ class AdminPlayer(commands.Cog):
             f"새로 생성: {created_count}명\n"
             f"기존 갱신: {updated_count}명\n"
             f"현재 참가자: "
-            f"{len(join_cog.players)}/{MAX_PLAYERS}명",
+            f"{len(join_cog.players)}/{join_cog.active_room.player_limit}명",
             ephemeral=True
         )
 
@@ -496,7 +496,7 @@ class AdminPlayer(commands.Cog):
             await interaction.followup.send(
                 f"✅ **{player_name}**님을 참가자 명단에서 제거했습니다.\n"
                 f"현재 참가자: "
-                f"{len(room.players)}/{MAX_PLAYERS}명",
+                f"{len(room.players)}/{room.player_limit}명",
                 ephemeral=True
             )
 

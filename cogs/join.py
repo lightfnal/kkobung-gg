@@ -368,9 +368,9 @@ class Join(commands.Cog):
                     duplicate_player_ids
                 )
 
-            if len(room.players) > MAX_PLAYERS:
+            if len(room.players) > room.player_limit:
                 excess_player_ids = list(room.players)[
-                    MAX_PLAYERS:
+                    room.player_limit:
                 ]
 
                 for user_id in excess_player_ids:
@@ -1255,7 +1255,7 @@ class Join(commands.Cog):
                     name="📋 모집 상태 복구",
                     value=(
                         f"저장된 참가자 "
-                        f"**{len(room.players)}/{MAX_PLAYERS}명**을 "
+                        f"**{len(room.players)}/{room.player_limit}명**을 "
                         "복구했습니다."
                     ),
                     inline=False
@@ -1521,7 +1521,7 @@ class Join(commands.Cog):
                 )
                 return
 
-            if len(room.players) >= MAX_PLAYERS:
+            if len(room.players) >= room.player_limit:
                 if len(room.waiting_players) >= MAX_WAITING_PLAYERS:
                     await interaction.response.send_message(
                         "❌ 참가자와 대기자 모집이 모두 마감되었습니다.",

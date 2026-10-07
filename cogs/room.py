@@ -263,7 +263,8 @@ class Room(commands.Cog):
             "✅ 현재 채널에 내전 방을 연결했습니다.\n\n"
             f"방 번호: `{room.room_id}`\n"
             f"방 이름: **{room.room_name}**\n"
-            f"최대 참가자: 10명"
+            f"현재 모집 정원: {room.player_limit}명\n"
+            "모집창의 `인원 선택` 버튼에서 10명 또는 20명을 설정할 수 있습니다."
         )
 
     @discord.app_commands.command(
@@ -393,7 +394,7 @@ class Room(commands.Cog):
             room_messages.append(
                 f"**{room.room_id}. {room.room_name}**\n"
                 f"채널: {channel_text}\n"
-                f"참가자: {len(room.players)}/10명\n"
+                f"참가자: {len(room.players)}/{room.player_limit}명\n"
                 f"상태: {status_text}"
             )
 
@@ -477,7 +478,7 @@ class Room(commands.Cog):
             "🏠 **현재 내전 방 정보**\n\n"
             f"방 번호: `{room.room_id}`\n"
             f"방 이름: **{room.room_name}**\n"
-            f"참가자: {len(room.players)}/10명\n"
+            f"참가자: {len(room.players)}/{room.player_limit}명\n"
             f"현재 세트: {room.series_game}경기 완료\n"
             f"시리즈 점수: "
             f"레드 {room.series_score['red']} : "
