@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tournament.name }} · 꼬붕.gg{% endblock %}
+
+{% block content %}
+<main class="container" style="max-width: 980px; margin: 28px auto; padding: 0 16px;">
+  <section style="background:#1f2430; border:1px solid #343b4b; border-radius:20px; padding:24px; margin-bottom:18px;">
+    <p style="color:#9ba7bd; margin:0 0 8px;">🏆 미니컵 · {{ status_label }}</p>
+    <h1 style="margin:0;">{{ tournament.name }}</h1>
+    <p style="color:#aab2c2; margin-bottom:0;">4개 고정팀 · 준결승 2경기 후 결승 · 각 대진 BO3</p>
+  </section>
+
+  {% if fixtures %}
+  <section style="display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px;">
+    {% for fixture in fixtures %}
+    <article style="background:#1f2430; border:1px solid #343b4b; border-radius:18px; padding:20px;">
+      <div style="display:flex; justify-content:space-between; gap:12px; color:#9ba7bd;">
+        <strong>{{ "결승" if fixture.fixture_no == 3 else fixture.fixture_no|string + "번 준결승" }}</strong>
+        <span>{{ fixture_labels.get(fixture.status, fixture.status) }}</span>
+      </div>
+      <h2 style="font-size:1.15rem; margin:20px 0 12px;">
+        <div style="padding:12px; background:#292f3c; border-radius:10px; {% if fixture.winner_team_name == fixture.red_team_name %}color:#ff7180;{% endif %}">{{ fixture.red_team_name or "진출 팀 대기" }}</div>
+        <div style="text-align:center; color:#8d97aa; font-size:.9rem; padding:8px;">VS</div>
+        <div style="padding:12px; background:#292f3c; border-radius:10px; {% if fixture.winner_team_name == fixture.blue_team_name %}color:#72a7ff;{% endif %}">{{ fixture.blue_team_name or "진출 팀 대기" }}</div>
+      </h2>
+      {% if fixture.winner_team_name %}<p style="margin:0; color:#cbd3e0;">승자: <strong>{{ fixture.winner_team_name }}</strong></p>{% endif %}
+      {% if fixture.match_id %}<a href="/match/{{ fixture.match_id }}" style="display:inline-block; margin-top:12px;">최종 경기 전적 보기 →</a>{% endif %}
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section style="background:#1f2430; border:1px solid #343b4b; border-radius:18px; padding:22px;">
+    <h2 style="margin-top:0;">팀 등록 현황 · {{ teams|length }}/4</h2>
+    {% if teams %}<ol>{% for team in teams %}<li style="padding:6px 0;">{{ team.team_name }}</li>{% endfor %}</ol>{% else %}<p>아직 등록된 팀이 없습니다.</p>{% endif %}
+    <p style="color:#9ba7bd; margin-bottom:0;">대진표는 진행자가 4팀 등록 후 생성합니다.</p>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}
