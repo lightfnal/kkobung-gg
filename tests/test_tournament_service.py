@@ -106,6 +106,31 @@ class TournamentServiceTests(unittest.TestCase):
         self.assertTrue(tournament_service.release_fixture(cup_id, 1))
         self.assertTrue(tournament_service.claim_fixture(cup_id, 1))
 
+    def test_auction_bracket_recovers_stale_open_transaction(self):
+        teams = [
+            {
+                "team_name": f"복구팀 {index}",
+                "captain_id": roster[0],
+                "roster": roster,
+            }
+            for index, roster in enumerate(self.rosters, start=1)
+        ]
+        self.db.execute(
+            "UPDATE tournaments SET name = ? WHERE id = ?",
+            ("미확정 변경", self.tournament_id),
+        )
+        self.assertTrue(self.db.in_transaction)
+
+        cup_id = tournament_service.create_auction_bracket(
+            1, "경매 내전 복구 컵", "moderator", teams
+        )
+
+        self.assertEqual(len(tournament_service.get_bracket(cup_id)), 3)
+        self.assertEqual(
+            tournament_service.get_tournament(self.tournament_id)["name"],
+            "테스트 컵",
+        )
+
     def test_player_cannot_register_on_two_teams(self):
         other_cup = tournament_service.create_tournament(1, "중복 검사 컵", 10)
         tournament_service.register_team(
