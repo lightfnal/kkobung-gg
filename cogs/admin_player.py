@@ -45,6 +45,14 @@ class AdminPlayer(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
+        # A room lock may be held by a concurrent team/recruitment action.
+        # Acknowledge the slash command before waiting so Discord does not
+        # expire the interaction while this command is queued.
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
+        )
+
         if not is_admin(interaction):
             await send_admin_only_message(interaction)
             return
@@ -54,7 +62,7 @@ class AdminPlayer(commands.Cog):
         )
 
         if join_cog is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 내전 관리 기능을 불러오지 못했습니다.",
                 ephemeral=True
             )
@@ -85,7 +93,7 @@ class AdminPlayer(commands.Cog):
         )
 
         if join_cog is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 내전 관리 기능을 불러오지 못했습니다.",
                 ephemeral=True
             )
@@ -104,16 +112,12 @@ class AdminPlayer(commands.Cog):
             or active_room.mvp_vote_in_progress
             or active_room.match_transaction_active
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 팀이 생성됐거나 경기를 처리 중일 때는 "
                 "테스트 참가자를 추가할 수 없습니다.",
                 ephemeral=True
             )
             return
-
-        await interaction.response.defer(
-            ephemeral=True
-        )
 
         try:
             room_number = int(
