@@ -3736,27 +3736,30 @@ class JoinView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        # 버튼 상호작용도 만료되기 전에 즉시 확인 응답을 보냅니다.
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
+        )
 
         if not is_admin(interaction):
             await send_admin_only_message(
                 interaction
             )
             return
-        
+
         if self.team_generating:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "⏳ 이미 팀 생성 중입니다.",
                 ephemeral=True
             )
             return
 
         self.team_generating = True
-        self.team_generation_user = (
-            interaction.user.id
-        )
+        self.team_generation_user = interaction.user.id
 
         try:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "팀 편성 방식을 선택해주세요.",
                 view=TeamModeView(self),
                 ephemeral=True
@@ -3768,23 +3771,12 @@ class JoinView(discord.ui.View):
                 error
             )
 
-            message = (
-                "❌ 팀 생성 중 오류가 발생했습니다.\n"
-                "잠시 후 다시 시도해주세요."
-            )
-
             try:
-                if interaction.response.is_done():
-                    await interaction.followup.send(
-                        message,
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_message(
-                        message,
-                        ephemeral=True
-                    )
-
+                await interaction.followup.send(
+                    "❌ 팀 생성 중 오류가 발생했습니다.\n"
+                    "잠시 후 다시 시도해주세요.",
+                    ephemeral=True
+                )
             except discord.HTTPException:
                 pass
 
