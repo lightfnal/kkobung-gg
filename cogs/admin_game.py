@@ -106,6 +106,79 @@ def describe_datetime(value):
     return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
+class ForceResetConfirmView(discord.ui.View):
+    """Two-step confirmation for clearing an inhouse before a set is saved."""
+
+    def __init__(self, bot, room, requester_id):
+        super().__init__(timeout=90)
+        self.bot = bot
+        self.room = room
+        self.requester_id = str(requester_id)
+        self.message = None
+
+    async def interaction_check(self, interaction):
+        if str(interaction.user.id) != self.requester_id:
+            await interaction.response.send_message(
+                "❌ 초기화 확인을 요청한 사람만 누를 수 있습니다.",
+                ephemeral=True
+            )
+            return False
+        if not (is_admin(interaction) or is_match_operator(interaction)):
+            await send_match_operator_only_message(interaction)
+            return False
+        return True
+
+    @discord.ui.button(
+        label="초기화하고 종료",
+        style=discord.ButtonStyle.danger,
+        emoji="🧹"
+    )
+    async def confirm_reset(self, interaction, button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if interaction.message is not None:
+            try:
+                await interaction.message.edit(
+                    content="내전 상태를 초기화하고 종료하는 중입니다…",
+                    view=None
+                )
+            except discord.HTTPException:
+                logger.exception("내전 초기화 확인창 갱신 실패")
+        game_cog = self.bot.get_cog("AdminGame")
+        if game_cog is None:
+            await interaction.edit_original_response(
+                content="❌ 내전 종료 기능을 불러오지 못했습니다.",
+                view=None
+            )
+            return
+        await game_cog.force_reset_room(interaction, self.room)
+        self.stop()
+
+    @discord.ui.button(
+        label="취소",
+        style=discord.ButtonStyle.secondary,
+        emoji="↩️"
+    )
+    async def cancel_reset(self, interaction, button):
+        await interaction.response.edit_message(
+            content="✅ 초기화하지 않고 내전을 계속 진행합니다.",
+            view=None
+        )
+        self.stop()
+
+    async def on_timeout(self):
+        if self.message is None:
+            return
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(
+                content="⌛ 확인 시간이 지나 초기화를 취소했습니다.",
+                view=self
+            )
+        except discord.HTTPException:
+            pass
+
+
 class AdminGame(commands.Cog):
 
     def __init__(self, bot):
@@ -457,6 +530,177 @@ class AdminGame(commands.Cog):
                 interaction
             )
 
+    @discord.app_commands.command(
+        name="내전초기화종료",
+        description="세트 결과 등록 전에도 현재 내전 상태를 초기화하고 종료합니다."
+    )
+    async def force_reset_end_game(self, interaction: discord.Interaction):
+        if not (is_admin(interaction) or is_match_operator(interaction)):
+            await send_match_operator_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None:
+            await interaction.response.send_message(
+                "❌ 내전 관리 기능을 불러오지 못했습니다.",
+                ephemeral=True
+            )
+            return
+        if not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        if room.match_transaction_active or room.pending_match_token is not None:
+            await interaction.response.send_message(
+                "❌ 경기 결과를 저장하는 중입니다. 저장이 끝난 뒤 다시 실행해주세요.",
+                ephemeral=True
+            )
+            return
+
+        participant_count = len(room.players)
+        team_count = sum(
+            len(team or {})
+            for team in (room.current_teams or {}).values()
+            if isinstance(team, dict)
+        )
+        confirmation = ForceResetConfirmView(
+            self.bot,
+            room,
+            interaction.user.id
+        )
+        await interaction.response.send_message(
+            f"⚠️ **{room.room_name} 내전 초기화 확인**\n"
+            f"참가자 {participant_count}명 · 팀 배정 선수 {team_count}명 · "
+            f"기록된 세트 {room.series_game}세트\n\n"
+            "확정하면 현재 참가자, 팀, 점수, 진행 중 경기 상태를 초기화합니다.\n"
+            "이미 저장된 경기 전적은 삭제하지 않습니다.",
+            view=confirmation,
+            ephemeral=True
+        )
+        confirmation.message = await interaction.original_response()
+
+    async def force_reset_room(self, interaction, room):
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None or not join_cog.activate_room(room):
+            await interaction.edit_original_response(
+                content="❌ 연결된 내전 방을 찾지 못했습니다.",
+                view=None
+            )
+            return
+        if room.operation_lock.locked():
+            await interaction.edit_original_response(
+                content=(
+                    "⏳ 이 방에서 다른 작업을 처리 중입니다. "
+                    "내전은 초기화하지 않았으니 잠시 후 다시 눌러주세요."
+                ),
+                view=None
+            )
+            return
+
+        async with room.operation_lock:
+            if room.match_transaction_active or room.pending_match_token is not None:
+                await interaction.edit_original_response(
+                    content=(
+                        "❌ 경기 결과 저장이 진행 중이라 초기화하지 않았습니다. "
+                        "저장 완료 후 다시 실행해주세요."
+                    ),
+                    view=None
+                )
+                return
+
+            player_ids = set(map(str, room.players.keys()))
+            player_ids.update(
+                str(user_id)
+                for team in (room.current_teams or {}).values()
+                if isinstance(team, dict)
+                for user_id in team.values()
+            )
+            recruit_view = room.current_recruit_view
+            tournament_id = room.tournament_id
+            fixture_no = room.tournament_fixture_no
+            tournament_released = True
+            if tournament_id and fixture_no:
+                try:
+                    fixture = get_fixture(tournament_id, fixture_no)
+                    if fixture and fixture["status"] == "in_progress":
+                        tournament_released = release_fixture(
+                            tournament_id,
+                            fixture_no
+                        )
+                except Exception:
+                    tournament_released = False
+                    logger.exception(
+                        "초기화 종료 중 미니컵 대진 복귀 실패 | 방=%s | 대진=%s",
+                        room.room_id,
+                        fixture_no
+                    )
+
+            if recruit_view is not None:
+                recruit_view.recruit_closed = True
+                for item in recruit_view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = item.custom_id not in (
+                            "inhouse_list",
+                            "inhouse_reset"
+                        )
+
+            logger.warning(
+                "운영자가 내전을 초기화 종료 | 방=%s | 사용자=%s | "
+                "세트=%s | 경기중=%s | 참가자=%s",
+                room.room_id,
+                interaction.user.id,
+                room.series_game,
+                room.match_in_progress,
+                len(player_ids)
+            )
+            room.reset_game()
+            try:
+                join_cog.save_rooms_state()
+                state_saved = True
+            except Exception:
+                state_saved = False
+                logger.exception(
+                    "내전 강제 초기화 상태 저장 실패 | 방=%s",
+                    room.room_id
+                )
+
+            if recruit_view is not None and recruit_view.message is not None:
+                try:
+                    await recruit_view.message.edit(
+                        embed=recruit_view.create_embed(),
+                        view=recruit_view
+                    )
+                except Exception:
+                    logger.exception("초기화 종료 후 모집 메시지 갱신 실패")
+
+            voice = {"moved": 0, "failed": 0}
+            if player_ids:
+                try:
+                    voice = await asyncio.wait_for(
+                        join_cog.move_members_to_voice_channel(
+                            guild=interaction.guild,
+                            user_ids=player_ids,
+                            channel_id=room.waiting_voice_channel_id
+                        ),
+                        timeout=15
+                    )
+                except Exception:
+                    voice = {"moved": 0, "failed": len(player_ids)}
+                    logger.exception(
+                        "내전 초기화 후 대기 음성채널 이동 실패 | 방=%s",
+                        room.room_id
+                    )
+
+        message = (
+            f"✅ **{room.room_name} 내전을 초기화하고 종료했습니다.**\n"
+            f"참가자·팀·점수를 초기화했습니다. 음성채널 복귀: {voice['moved']}명."
+        )
+        if not tournament_released:
+            message += "\n⚠️ 미니컵 대진을 대기 상태로 되돌리지 못했습니다. 운영자가 확인해주세요."
+        if not state_saved:
+            message += "\n⚠️ 상태 파일 저장에 실패했습니다. Render 로그를 확인해주세요."
+        await interaction.edit_original_response(content=message, view=None)
+
     async def _end_game_locked(
         self,
         interaction: discord.Interaction
@@ -578,12 +822,8 @@ class AdminGame(commands.Cog):
                 "current_teams": copy.deepcopy(room.current_teams),
                 "series_score": dict(room.series_score),
                 "series_game": int(room.series_game),
-                # These fields exist only on mini-cup rooms, not normal
-                # inhouse rooms. Use defaults so ordinary series can end.
-                "tournament_id": getattr(room, "tournament_id", None),
-                "tournament_fixture_no": getattr(
-                    room, "tournament_fixture_no", None
-                ),
+                "tournament_id": room.tournament_id,
+                "tournament_fixture_no": room.tournament_fixture_no,
                 "last_match_id": int(last_match["id"]) if last_match else None,
             }
             participant_ids = set(map(str, room.players.keys()))
@@ -615,8 +855,8 @@ class AdminGame(commands.Cog):
                 voice = {"moved": 0, "failed": len(participant_ids)}
 
             tournament_notice = ""
-            tournament_id = getattr(room, "tournament_id", None)
-            fixture_no = getattr(room, "tournament_fixture_no", None)
+            tournament_id = room.tournament_id
+            fixture_no = room.tournament_fixture_no
             if tournament_id and fixture_no:
                 try:
                     red_score = int(room.series_score.get("red", 0))
