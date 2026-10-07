@@ -164,6 +164,20 @@ class TournamentServiceTests(unittest.TestCase):
             tournament_service.delete_tournament(self.tournament_id)
         self.assertIsNotNone(tournament_service.get_tournament(self.tournament_id))
 
+    def test_delete_tournament_works_inside_existing_transaction(self):
+        self.db.execute("CREATE TABLE unrelated (value TEXT)")
+        self.db.execute("INSERT INTO unrelated (value) VALUES ('pending')")
+        self.assertTrue(self.db.in_transaction)
+
+        self.assertTrue(tournament_service.delete_tournament(self.tournament_id))
+
+        self.assertIsNone(tournament_service.get_tournament(self.tournament_id))
+        self.assertTrue(self.db.in_transaction)
+        self.assertEqual(
+            self.db.execute("SELECT value FROM unrelated").fetchone()[0],
+            "pending"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
