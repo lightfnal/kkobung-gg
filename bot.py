@@ -100,6 +100,7 @@ EXTENSIONS = (
     "cogs.riot",
     "cogs.register",
     "cogs.champion_record",
+    "cogs.tournament",
 )
 
 
