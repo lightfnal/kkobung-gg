@@ -88,6 +88,20 @@ class TestInhouseRoom(
             0
         )
 
+    def test_ended_series_snapshot_survives_restart(self):
+        room = InhouseRoom(room_id="1", room_name="내전 1")
+        room.ended_series_snapshot = {
+            "players": {"101": {"nickname": "player"}},
+            "current_teams": {"red": {"TOP": "101"}, "blue": {}},
+            "series_score": {"red": 1, "blue": 0},
+            "series_game": 1,
+            "recovery_message_id": "98765",
+        }
+        restored = InhouseRoom.from_dict(room.to_dict())
+        self.assertEqual(restored.ended_series_snapshot, room.ended_series_snapshot)
+        restored.reset_game()
+        self.assertIsNone(restored.ended_series_snapshot)
+
     def test_reset_and_restore_room(self):
         room = InhouseRoom(
             room_id="2",
