@@ -102,6 +102,14 @@ class TestInhouseRoom(
         restored.reset_game()
         self.assertIsNone(restored.ended_series_snapshot)
 
+    def test_player_limit_survives_restart_and_resets_after_game(self):
+        room = InhouseRoom(room_id="1", room_name="내전 1")
+        room.player_limit = 20
+        restored = InhouseRoom.from_dict(room.to_dict())
+        self.assertEqual(restored.player_limit, 20)
+        restored.reset_game()
+        self.assertEqual(restored.player_limit, 10)
+
     def test_reset_and_restore_room(self):
         room = InhouseRoom(
             room_id="2",

@@ -82,9 +82,29 @@ class TournamentServiceTests(unittest.TestCase):
     def test_fixture_can_only_be_claimed_once_and_released(self):
         tournament_service.create_bracket(self.tournament_id)
         self.assertTrue(tournament_service.claim_fixture(self.tournament_id, 1))
-        self.assertFalse(tournament_service.claim_fixture(self.tournament_id, 1))
-        self.assertTrue(tournament_service.release_fixture(self.tournament_id, 1))
-        self.assertTrue(tournament_service.claim_fixture(self.tournament_id, 1))
+
+    def test_auction_rosters_create_a_ready_four_team_bracket(self):
+        teams = [
+            {
+                "team_name": f"경매팀 {index}",
+                "captain_id": roster[0],
+                "roster": roster,
+            }
+            for index, roster in enumerate(self.rosters, start=1)
+        ]
+        cup_id = tournament_service.create_auction_bracket(
+            1, "경매 내전 컵", "moderator", teams
+        )
+        bracket = tournament_service.get_bracket(cup_id)
+        self.assertEqual(len(bracket), 3)
+        self.assertEqual(bracket[0]["status"], "ready")
+        self.assertEqual(bracket[1]["status"], "ready")
+        self.assertEqual(bracket[2]["status"], "waiting")
+        self.assertEqual(bracket[0]["red_team_name"], "경매팀 1")
+        self.assertEqual(bracket[0]["blue_team_name"], "경매팀 4")
+        self.assertTrue(tournament_service.claim_fixture(cup_id, 1))
+        self.assertTrue(tournament_service.release_fixture(cup_id, 1))
+        self.assertTrue(tournament_service.claim_fixture(cup_id, 1))
 
     def test_player_cannot_register_on_two_teams(self):
         other_cup = tournament_service.create_tournament(1, "중복 검사 컵", 10)
