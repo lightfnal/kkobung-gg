@@ -1,6 +1,3 @@
-from config import MAX_PLAYERS
-
-
 def get_room_progress_label(room):
     if room.match_in_progress:
         return "경기 진행 중"
@@ -25,13 +22,13 @@ def format_room_status(room, include_players=True):
 
     if include_players:
         lines.append(
-            f"👥 참가자: **{len(room.players)}/{MAX_PLAYERS}명**"
+            f"👥 참가자: **{len(room.players)}/{room.player_limit}명**"
         )
 
     lines.extend(
         (
             f"🧩 완료 세트: **{room.series_game}세트**",
-            "📊 BO3 점수: "
+            "📊 BO5 점수: "
             f"**🔴 {score['red']} : {score['blue']} 🔵**"
         )
     )
