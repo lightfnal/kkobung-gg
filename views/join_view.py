@@ -294,23 +294,47 @@ class EndSeriesConfirmView(discord.ui.View):
         row=0
     )
     async def confirm_button(self, interaction, button):
-        await interaction.response.edit_message(
-            content="내전을 종료하고 결과 기록을 보존하는 중입니다…",
-            view=None
-        )
+        # Acknowledge the component immediately. Editing the ephemeral view
+        # first can itself exceed Discord's short interaction deadline.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            if interaction.message is not None:
+                await interaction.message.edit(
+                    content="내전을 종료하고 결과 기록을 보존하는 중입니다…",
+                    view=None
+                )
+            await interaction.edit_original_response(
+                content="내전을 종료하고 결과 기록을 보존하는 중입니다…"
+            )
+        except discord.HTTPException:
+            logger.exception("내전 종료 확인창 갱신 실패")
         game_cog = self.bot.get_cog("AdminGame")
         if game_cog is None:
-            await interaction.followup.send(
-                "❌ 내전 종료 기능을 불러오지 못했습니다.",
-                ephemeral=True
+            await interaction.edit_original_response(
+                content="❌ 내전 종료 기능을 불러오지 못했습니다."
             )
             return
-        await game_cog.confirm_end_series(
-            interaction,
-            self.room,
-            control_view=self.control_view,
-            source_message=self.source_message
-        )
+        try:
+            await game_cog.confirm_end_series(
+                interaction,
+                self.room,
+                control_view=self.control_view,
+                source_message=self.source_message
+            )
+        except Exception:
+            logger.exception(
+                "내전 종료 처리 실패 | 방=%s",
+                self.room.room_id
+            )
+            try:
+                await interaction.edit_original_response(
+                    content=(
+                        "❌ 내전 종료 처리 중 오류가 발생했습니다. "
+                        "경기 기록은 별도로 확인이 필요합니다. 관리자에게 알려주세요."
+                    )
+                )
+            except discord.HTTPException:
+                pass
         self.stop()
 
     @discord.ui.button(
@@ -812,6 +836,16 @@ class MatchControlView(discord.ui.View):
         row=1
     )
     async def end_series_button(self, interaction, button):
+        if (
+            self.room.match_transaction_active
+            or self.room.pending_match_token is not None
+        ):
+            await interaction.response.send_message(
+                "⏳ 직전 경기 결과를 아직 저장하고 있습니다. "
+                "저장이 끝난 뒤 내전을 종료해주세요.",
+                ephemeral=True
+            )
+            return
         if self.room.series_game <= 0:
             await interaction.response.send_message(
                 "❌ 최소 한 세트 결과를 등록한 뒤 내전을 종료할 수 있습니다.",
