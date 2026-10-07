@@ -1809,6 +1809,8 @@ class Join(commands.Cog):
             await send_admin_only_message(interaction)
             return
 
+        await interaction.response.defer(thinking=True)
+
         # ContextVar 기본 방에 의존하지 않고, 이 명령을 실행한
         # 채널에 연결된 방 객체를 직접 사용합니다.
         room = self.select_room_for_interaction(interaction)
@@ -1825,7 +1827,7 @@ class Join(commands.Cog):
 
         # 경기 진행 중에는 모집창 재생성 금지
         if room.match_in_progress:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 현재 경기가 진행 중입니다.\n"
                 "경기 종료 후 모집할 수 있습니다.",
                 ephemeral=True
@@ -1834,7 +1836,7 @@ class Join(commands.Cog):
 
         # 팀이 이미 생성됐다면 모집창 재생성 금지
         if room.current_teams is not None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 현재 생성된 팀이 있습니다.\n"
                 "내전 종료 후 다시 모집해주세요.",
                 ephemeral=True
@@ -1864,24 +1866,22 @@ class Join(commands.Cog):
                 ):
                     pass
 
-            await interaction.response.send_message(
+            recruit_view.message = await interaction.followup.send(
                 embed=recruit_view.create_embed(),
-                view=recruit_view
+                view=recruit_view,
+                wait=True
             )
-
-            recruit_view.message = await interaction.original_response()
             return
 
         # 모집창이 없다면 채널에 연결된 방을 명시해 새로 생성
         view = JoinView(self, room=room)
         room.current_recruit_view = view
 
-        await interaction.response.send_message(
+        view.message = await interaction.followup.send(
             embed=view.create_embed(),
-            view=view
+            view=view,
+            wait=True
         )
-
-        view.message = await interaction.original_response()
 
 
     
