@@ -5,15 +5,6 @@ import sqlite3
 from storage.sqlite_db import conn
 
 
-def _begin_immediate_transaction():
-    """Start a write transaction and clear an abandoned connection transaction."""
-    if conn.in_transaction:
-        # The shared sqlite connection can retain a transaction after another
-        # operation exits exceptionally. Clear it before starting this atomic write.
-        conn.rollback()
-    conn.execute("BEGIN IMMEDIATE")
-
-
 POSITIONS = ("top", "jungle", "mid", "adc", "support")
 
 
@@ -34,6 +25,49 @@ def get_tournament(tournament_id):
         "SELECT * FROM tournaments WHERE id = ?",
         (int(tournament_id),)
     ).fetchone()
+
+
+def delete_tournament(tournament_id):
+    """Delete a cup and its bracket while preserving ordinary match history."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        tournament = conn.execute(
+            "SELECT id FROM tournaments WHERE id = ?",
+            (int(tournament_id),)
+        ).fetchone()
+        if tournament is None:
+            conn.commit()
+            return False
+
+        active_fixture = conn.execute(
+            """
+            SELECT 1 FROM tournament_fixtures
+            WHERE tournament_id = ? AND status = 'in_progress'
+            LIMIT 1
+            """,
+            (int(tournament_id),)
+        ).fetchone()
+        if active_fixture is not None:
+            raise ValueError("경기가 진행 중인 미니컵은 삭제할 수 없습니다. 먼저 경기를 종료해주세요.")
+
+        # Fixture rows reference teams, so remove the bracket before its rosters.
+        conn.execute(
+            "DELETE FROM tournament_fixtures WHERE tournament_id = ?",
+            (int(tournament_id),)
+        )
+        conn.execute(
+            "DELETE FROM tournament_teams WHERE tournament_id = ?",
+            (int(tournament_id),)
+        )
+        conn.execute(
+            "DELETE FROM tournaments WHERE id = ?",
+            (int(tournament_id),)
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def register_team(tournament_id, team_name, captain_id, roster_ids):
@@ -110,7 +144,7 @@ def create_auction_bracket(guild_id, name, created_by, teams):
         seen_players.update(roster)
         normalized.append((team_name, captain_id, roster))
 
-    _begin_immediate_transaction()
+    conn.execute("BEGIN IMMEDIATE")
     try:
         cursor = conn.execute(
             "INSERT INTO tournaments (guild_id, name, created_by) VALUES (?, ?, ?)",
@@ -177,7 +211,7 @@ def create_bracket(tournament_id):
         raise ValueError(f"대진표를 만들려면 4팀이 필요합니다. 현재 {len(teams)}팀입니다.")
 
     ids = [int(team["id"]) for team in teams]
-    _begin_immediate_transaction()
+    conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute(
             "UPDATE tournament_teams SET seed = NULL WHERE tournament_id = ?",
@@ -289,7 +323,7 @@ def release_fixture(tournament_id, fixture_no):
 
 def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
     """Resolve a series fixture once and place its winner in the final slot."""
-    _begin_immediate_transaction()
+    conn.execute("BEGIN IMMEDIATE")
     try:
         fixture = conn.execute(
             """
@@ -351,7 +385,7 @@ def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
 
 def reopen_fixture(tournament_id, fixture_no):
     """Undo bracket advancement when an operator reopens a recorded result."""
-    _begin_immediate_transaction()
+    conn.execute("BEGIN IMMEDIATE")
     try:
         fixture = conn.execute(
             """
