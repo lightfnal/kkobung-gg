@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 
 import discord
@@ -39,6 +40,7 @@ from storage.sqlite_db import (
     get_match_champion_status,
     get_match_champion_progress,
     get_last_match,
+    get_match_by_result_token,
     add_match_balance_prediction
 )
 
@@ -266,17 +268,113 @@ class Match(commands.Cog):
             )
             return
 
-        # 모든 방이 하나의 SQLite 연결을 사용하므로 결과 저장 트랜잭션도
-        # 한 번에 하나만 실행해야 합니다. 다른 방의 결과 처리와 겹치면
-        # 먼저 시작한 저장이 끝날 때까지 짧게 기다립니다.
-        async with join_cog.match_result_lock:
-            return await self._process_match_result_locked(
-                interaction,
-                winner,
-                room,
-                join_cog,
-                match_control_view
-            )
+        # 같은 방의 팀 재편성·초기화가 결과 저장과 겹치지 않게 하고,
+        # SQLite 연결은 기존처럼 전역 잠금으로 한 번에 하나씩 처리합니다.
+        async with room.operation_lock:
+            async with join_cog.match_result_lock:
+                if room.pending_match_token is not None:
+                    await interaction.followup.send(
+                        "❌ 이전 경기 결과의 복구가 아직 끝나지 않았습니다. "
+                        "중복 기록을 막기 위해 새 결과를 저장하지 않았습니다. "
+                        "관리자가 봇 로그와 `/내전방정보`를 확인해주세요.",
+                        ephemeral=True
+                    )
+                    return
+                room.match_result_finalizing = True
+                try:
+                    return await self._process_match_result_locked(
+                        interaction,
+                        winner,
+                        room,
+                        join_cog,
+                        match_control_view
+                    )
+                except Exception:
+                    # 커밋 전 실패라면 미완료 SQLite 변경과 JSON 복구 표식을
+                    # 함께 되돌려 같은 경기를 안전하게 다시 등록할 수 있게 합니다.
+                    if not room.match_transaction_committed:
+                        rollback_ok = True
+                        result_token = room.pending_match_token
+                        if room.match_transaction_active:
+                            try:
+                                rollback_transaction()
+                            except Exception:
+                                rollback_ok = False
+                                logger.exception(
+                                    "경기 결과 트랜잭션 롤백 실패 | 방=%s",
+                                    room.room_id
+                                )
+                        join_cog.activate_room(room)
+                        committed_match = None
+                        if rollback_ok and result_token is not None:
+                            try:
+                                committed_match = get_match_by_result_token(
+                                    result_token
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "실패한 경기 토큰의 커밋 여부 조회 실패 | 방=%s",
+                                    room.room_id
+                                )
+                                rollback_ok = False
+
+                        if committed_match is not None:
+                            # commit()에서 오류가 반환됐더라도 DB에 토큰이 있으면
+                            # 결과가 확정된 것이므로 점수 복구 표식을 반영합니다.
+                            room.match_transaction_active = False
+                            room.match_transaction_committed = True
+                            if isinstance(room.pending_series_score, dict):
+                                room.series_score = dict(room.pending_series_score)
+                            if room.pending_series_game is not None:
+                                room.series_game = room.pending_series_game
+                            room.pending_match_token = None
+                            room.pending_series_score = None
+                            room.pending_series_game = None
+                            room.transaction_series_score = None
+                            room.transaction_series_game = None
+                            try:
+                                join_cog.reload_profiles()
+                                join_cog.save_rooms_state()
+                            except Exception:
+                                logger.exception(
+                                    "커밋 확인 후 경기 점수 복구 실패 | 방=%s",
+                                    room.room_id
+                                )
+                        elif rollback_ok:
+                            room.match_transaction_active = False
+                            room.match_transaction_committed = False
+                            room.pending_match_token = None
+                            room.pending_series_score = None
+                            room.pending_series_game = None
+                            room.series_score = (
+                                dict(room.transaction_series_score)
+                                if isinstance(room.transaction_series_score, dict)
+                                else {"red": 0, "blue": 0}
+                            )
+                            room.series_game = (
+                                room.transaction_series_game
+                                if room.transaction_series_game is not None
+                                else 0
+                            )
+                            room.transaction_series_score = None
+                            room.transaction_series_game = None
+                        else:
+                            # 커밋 여부가 불확실하면 복구 토큰을 남겨 재시작 시
+                            # DB 토큰을 대조하기 전까지 같은 결과를 막습니다.
+                            room.match_transaction_active = True
+                        room.match_in_progress = True
+                        try:
+                            if rollback_ok:
+                                join_cog.reload_profiles()
+                            join_cog.save_rooms_state()
+                        except Exception:
+                            logger.exception(
+                                "경기 결과 롤백 후 상태 복구 실패 | 방=%s",
+                                room.room_id
+                            )
+                    raise
+                finally:
+                    room.match_result_finalizing = False
 
     async def _process_match_result_locked(
         self,
@@ -746,6 +844,19 @@ class Match(commands.Cog):
         room.pending_series_score = None
         room.pending_series_game = None
 
+        if room.single_draft_mode_active:
+            room.last_single_draft_result = {
+                "match_id": match_id,
+                "winner": winner,
+                "players": copy.deepcopy(room.players),
+                "current_teams": copy.deepcopy(room.current_teams),
+                "current_balance_prediction": copy.deepcopy(
+                    room.current_balance_prediction
+                ),
+                "series_score": dict(next_series_score),
+                "series_game": next_series_game,
+            }
+
         join_cog.save_rooms_state()
 
         # 첫 번째 세트 결과가 정상적으로 처리된 경우에만
@@ -851,7 +962,8 @@ class Match(commands.Cog):
                 "\n\n🏆 **연속 단판 경기 종료**\n"
                 f"최종 승리: **{winner_name}**\n"
                 "현재 판은 독립 경기로 기록했습니다. 같은 10명으로 "
-                "다음 팀을 다시 편성해주세요."
+                "다음 팀을 다시 편성해주세요.\n"
+                "현재 팀을 유지해 BO5로 이어가려면 `/단판bo5전환`을 실행하세요."
             )
             result_title = "✅ 단판 경기 결과가 등록되었습니다."
             winner_label = "🏆 승리팀"

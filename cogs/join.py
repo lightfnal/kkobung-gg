@@ -479,6 +479,13 @@ class Join(commands.Cog):
                     # 같은 경기 결과를 다시 받지 않습니다.
                     room.match_in_progress = False
 
+                    if room.single_draft_mode_active:
+                        room.recover_committed_single_draft_result(
+                            saved_match,
+                            pending_score,
+                            pending_game
+                        )
+
                     committed_result_count += 1
 
                     self._recovered_result_room_ids.add(
