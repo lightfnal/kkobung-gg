@@ -1190,13 +1190,14 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        setup_view = CaptainSetupView(
-            self.recruit_view,
-            player_ids,
-            profiles
-        )
-        self.recruit_view._captain_setup_view = setup_view
+        setup_view = None
         try:
+            setup_view = CaptainSetupView(
+                self.recruit_view,
+                player_ids,
+                profiles
+            )
+            self.recruit_view._captain_setup_view = setup_view
             setup_view.message = await interaction.edit_original_response(
                 content=(
                     "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
@@ -1204,17 +1205,24 @@ class TeamModeView(discord.ui.View):
                 ),
                 view=setup_view
             )
-        except discord.HTTPException:
-            self.recruit_view._captain_setup_view = None
+        except Exception:
+            if self.recruit_view._captain_setup_view is setup_view:
+                self.recruit_view._captain_setup_view = None
             self.recruit_view.team_generating = False
             logger.exception(
                 "캡틴 드래프트 선택창 전송 실패 | 방=%s",
                 self.room.room_id
             )
-            await interaction.followup.send(
-                "❌ 캡틴 선택창을 표시하지 못했습니다. 모집 메시지를 새로고침한 뒤 다시 눌러주세요.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "❌ 캡틴 선택창을 표시하지 못했습니다. 모집 메시지를 새로고침한 뒤 다시 눌러주세요.",
+                    ephemeral=True
+                )
+            except discord.HTTPException:
+                logger.warning(
+                    "캡틴 드래프트 실패 안내 전송 불가 | 방=%s",
+                    self.room.room_id
+                )
 
     @discord.ui.button(
         label="경매 내전",
@@ -2273,6 +2281,7 @@ class CaptainSetupView(discord.ui.View):
         self.room = recruit_view.room
         self.player_ids = list(player_ids)
         self.profiles = profiles
+        self.captain_count = 2
         self.selected_captains = []
         self.message = None
         self.started = False
