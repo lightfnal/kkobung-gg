@@ -1190,13 +1190,14 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        setup_view = CaptainSetupView(
-            self.recruit_view,
-            player_ids,
-            profiles
-        )
-        self.recruit_view._captain_setup_view = setup_view
+        setup_view = None
         try:
+            setup_view = CaptainSetupView(
+                self.recruit_view,
+                player_ids,
+                profiles
+            )
+            self.recruit_view._captain_setup_view = setup_view
             setup_view.message = await interaction.edit_original_response(
                 content=(
                     "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
@@ -1204,8 +1205,9 @@ class TeamModeView(discord.ui.View):
                 ),
                 view=setup_view
             )
-        except discord.HTTPException:
-            self.recruit_view._captain_setup_view = None
+        except Exception:
+            if self.recruit_view._captain_setup_view is setup_view:
+                self.recruit_view._captain_setup_view = None
             self.recruit_view.team_generating = False
             logger.exception(
                 "캡틴 드래프트 선택창 전송 실패 | 방=%s",
@@ -2261,6 +2263,9 @@ class CaptainSetupView(discord.ui.View):
         self.room = recruit_view.room
         self.player_ids = list(player_ids)
         self.profiles = profiles
+        # CaptainSelection is shared with AuctionSetupView and reads this
+        # attribute to configure its dropdown. Captain drafts always select 2.
+        self.captain_count = 2
         self.selected_captains = []
         self.message = None
         self.started = False
