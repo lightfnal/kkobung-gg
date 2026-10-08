@@ -51,6 +51,8 @@ class TestInhouseRoom(
             0
         )
 
+        self.assertFalse(room.single_draft_mode_active)
+
         self.assertIsNone(room.tournament_id)
         self.assertIsNone(room.tournament_fixture_no)
 
@@ -112,6 +114,18 @@ class TestInhouseRoom(
         self.assertEqual(restored.player_limit, 20)
         restored.reset_game()
         self.assertEqual(restored.player_limit, 10)
+
+    def test_single_draft_mode_survives_restart_and_resets_after_game(self):
+        room = InhouseRoom(room_id="1", room_name="내전 1")
+        room.single_draft_mode_active = True
+        room.players = {str(index): {"nickname": f"player{index}"} for index in range(10)}
+
+        restored = InhouseRoom.from_dict(room.to_dict())
+        self.assertTrue(restored.single_draft_mode_active)
+        self.assertEqual(len(restored.players), 10)
+
+        restored.reset_game()
+        self.assertFalse(restored.single_draft_mode_active)
 
     def test_tournament_fixture_link_survives_restart_and_resets_after_game(self):
         room = InhouseRoom(room_id="1", room_name="내전 1")
