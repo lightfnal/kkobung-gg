@@ -74,6 +74,9 @@ class InhouseRoom:
 
     series_game: int = 0
 
+    # BO5를 중간 종료하고, 같은 10명으로 매 경기 팀을 다시 짜는 모드
+    single_draft_mode_active: bool = False
+
     # 수동 내전 종료 후 진행자/관리자가 복구할 수 있는 시리즈 상태
     ended_series_snapshot: dict | None = None
 
@@ -82,6 +85,7 @@ class InhouseRoom:
 
     # Discord 화면 객체이므로 파일에는 저장하지 않음
     current_recruit_view: object | None = None
+    current_match_control_view: object | None = None
 
     # 현재 프로세스에서만 유효한 경기 결과·MVP 화면
     current_winner_select_view: object | None = None
@@ -124,7 +128,8 @@ class InhouseRoom:
 
         for attribute_name in (
             "current_winner_select_view",
-            "current_mvp_vote_view"
+            "current_mvp_vote_view",
+            "current_match_control_view"
         ):
             view = getattr(self, attribute_name)
             if view is not None and hasattr(view, "invalidate"):
@@ -154,6 +159,7 @@ class InhouseRoom:
         }
 
         self.series_game = 0
+        self.single_draft_mode_active = False
         self.player_limit = 10
         self.ended_series_snapshot = None
         self.last_team_signature = None
@@ -212,6 +218,7 @@ class InhouseRoom:
             ),
             "series_score": self.series_score,
             "series_game": self.series_game,
+            "single_draft_mode_active": self.single_draft_mode_active,
             "ended_series_snapshot": self.ended_series_snapshot,
             # Discord 투표창은 재시작 시 복구할 수 없으므로
             # 파일에는 항상 종료 상태로 저장합니다.
@@ -340,6 +347,9 @@ class InhouseRoom:
             "blue": _safe_int(series_score.get("blue", 0))
         }
         room.series_game = _safe_int(data.get("series_game", 0))
+        room.single_draft_mode_active = bool(
+            data.get("single_draft_mode_active", False)
+        )
         ended_series_snapshot = data.get("ended_series_snapshot")
         room.ended_series_snapshot = (
             dict(ended_series_snapshot)
