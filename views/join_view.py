@@ -2639,7 +2639,9 @@ class CaptainSetupView(discord.ui.View):
                 pass
         await interaction.followup.send(
             "✅ 캡틴들에게 첫 픽 담당을 합의해달라고 안내했습니다.\n"
-            f"진행 메시지: {message.jump_url}",
+            f"진행 메시지: {message.jump_url}\n"
+            "관리자 단독 테스트는 아래 비공개 버튼을 사용하세요.",
+            view=OperatorTestControlView(first_pick_view, interaction.user.id),
             ephemeral=True
         )
 
@@ -2839,6 +2841,87 @@ class CaptainFirstPickView(discord.ui.View):
                 pass
         return replacement
 
+    async def _start_draft(self, interaction, side, operator_test=False):
+        draft_view = None
+        updated_message = None
+        try:
+            draft_view = CaptainDraftView(
+                self.recruit_view,
+                self.player_ids,
+                self.profiles,
+                red_captain=self.captains["red"],
+                blue_captain=self.captains["blue"],
+                first_side=side
+            )
+            draft_view.operator_test = operator_test
+            draft_view.lock_acquired = self.lock_acquired
+            self.lock_acquired = False
+            self.stop()
+            updated_message = await self._publish_view(
+                draft_view.create_embed(),
+                draft_view
+            )
+        except Exception:
+            logger.exception(
+                "캡틴 첫 픽 합의 후 드래프트 전환 실패 | 방=%s",
+                self.room.room_id
+            )
+
+        if updated_message is None:
+            if draft_view is not None:
+                draft_view._release_room_lock()
+            else:
+                self._release_room_lock()
+            self.recruit_view.team_generating = False
+            self.recruit_view.recruit_closed = getattr(
+                self.recruit_view,
+                "_draft_was_closed",
+                False
+            )
+            await self.recruit_view.restore_recruitment_controls()
+            await interaction.followup.send(
+                "❌ 드래프트 화면 전환에 실패했습니다. 모집창에서 다시 시작해주세요.",
+                ephemeral=True
+            )
+            return
+
+        draft_view.message = updated_message
+        await interaction.followup.send(
+            "🧪 운영자 단독 테스트로 드래프트를 시작했습니다."
+            if operator_test
+            else "✅ 두 캡틴이 합의했습니다. 드래프트가 시작됐습니다.",
+            ephemeral=True
+        )
+
+    async def operator_test_button(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        await interaction.response.defer(ephemeral=True)
+        async with self.vote_lock:
+            if self.is_finished():
+                await interaction.followup.send(
+                    "이 드래프트는 이미 종료되었습니다.",
+                    ephemeral=True
+                )
+                return
+            if (
+                list(self.room.players.keys()) != self.player_ids
+                or self.room.current_teams is not None
+                or self.room.match_in_progress
+            ):
+                await self.abort("참가자 또는 경기 상태가 변경되어 드래프트가 취소되었습니다.")
+                await interaction.followup.send(
+                    "❌ 참가자나 경기 상태가 바뀌어 드래프트를 취소했습니다.",
+                    ephemeral=True
+                )
+                return
+            await self._start_draft(
+                interaction,
+                side="red",
+                operator_test=True
+            )
+
     async def vote(self, interaction, side):
         user_id = str(interaction.user.id)
         if user_id not in self.captains.values():
@@ -2874,53 +2957,7 @@ class CaptainFirstPickView(discord.ui.View):
             )
 
             if agreement_reached:
-                draft_view = None
-                updated_message = None
-                try:
-                    draft_view = CaptainDraftView(
-                        self.recruit_view,
-                        self.player_ids,
-                        self.profiles,
-                        red_captain=self.captains["red"],
-                        blue_captain=self.captains["blue"],
-                        first_side=side
-                    )
-                    draft_view.lock_acquired = self.lock_acquired
-                    self.lock_acquired = False
-                    self.stop()
-                    updated_message = await self._publish_view(
-                        draft_view.create_embed(),
-                        draft_view
-                    )
-                except Exception:
-                    logger.exception(
-                        "캡틴 첫 픽 합의 후 드래프트 전환 실패 | 방=%s",
-                        self.room.room_id
-                    )
-
-                if updated_message is None:
-                    if draft_view is not None:
-                        draft_view._release_room_lock()
-                    else:
-                        self._release_room_lock()
-                    self.recruit_view.team_generating = False
-                    self.recruit_view.recruit_closed = getattr(
-                        self.recruit_view,
-                        "_draft_was_closed",
-                        False
-                    )
-                    await self.recruit_view.restore_recruitment_controls()
-                    await interaction.followup.send(
-                        "❌ 드래프트 화면 전환에 실패했습니다. 모집창에서 다시 시작해주세요.",
-                        ephemeral=True
-                    )
-                    return
-
-                draft_view.message = updated_message
-                await interaction.followup.send(
-                    "✅ 두 캡틴이 합의했습니다. 드래프트가 시작됐습니다.",
-                    ephemeral=True
-                )
+                await self._start_draft(interaction, side)
                 return
 
             updated_message = await self._publish_view(
@@ -2983,6 +3020,26 @@ class CaptainFirstPickView(discord.ui.View):
                 await self.abort(
                     "30분 동안 캡틴 간 합의가 없어 드래프트가 종료되었습니다."
                 )
+
+
+class OperatorTestControlView(discord.ui.View):
+    """드래프트를 시작한 운영자에게만 표시되는 개인 테스트 컨트롤."""
+
+    def __init__(self, first_pick_view, operator_id):
+        super().__init__(timeout=1800)
+        self.first_pick_view = first_pick_view
+        self.operator_id = int(operator_id)
+
+    @discord.ui.button(
+        label="운영자 단독 테스트",
+        emoji="🧪",
+        style=discord.ButtonStyle.secondary
+    )
+    async def run_test_button(self, interaction, button):
+        if interaction.user.id != self.operator_id or not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        await self.first_pick_view.operator_test_button(interaction)
 
 
 class DraftPlayerSelect(discord.ui.Select):
@@ -3085,15 +3142,18 @@ class CaptainDraftView(discord.ui.View):
     def create_embed(self):
         side_text = "🔴 레드팀" if self.current_side == "red" else "🔵 블루팀"
         remaining = MAX_PLAYERS - len(self.red_team) - len(self.blue_team)
+        description = (
+            f"현재 선택 차례: **{side_text}** — "
+            f"<@{self.captains[self.current_side]}>\n"
+            f"이번 선택 인원: **{self.current_pick_size}명**\n"
+            f"남은 선수: **{remaining}명**\n\n"
+            "해당 팀 캡틴이 아래 목록에서 필요한 인원을 한 번에 선택하세요."
+        )
+        if getattr(self, "operator_test", False):
+            description += "\n\n🧪 운영자 단독 테스트 중입니다. 운영자가 모든 선택을 진행할 수 있습니다."
         embed = discord.Embed(
             title=f"🎖️ {self.room.room_name} · 캡틴 드래프트",
-            description=(
-                f"현재 선택 차례: **{side_text}** — "
-                f"<@{self.captains[self.current_side]}>\n"
-                f"이번 선택 인원: **{self.current_pick_size}명**\n"
-                f"남은 선수: **{remaining}명**\n\n"
-                "해당 팀 캡틴이 아래 목록에서 필요한 인원을 한 번에 선택하세요."
-            )
+            description=description
         )
         for side, team, label in (
             ("red", self.red_team, "🔴 레드팀"),
