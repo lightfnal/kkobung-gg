@@ -1693,6 +1693,7 @@ class AuctionView(discord.ui.View):
         self._lot_token = 0
         self.current_bid = 0
         self.current_bidder = None
+        self.seconds_remaining = AUCTION_LOT_SECONDS
         self._auction_lock = asyncio.Lock()
         self._timer_task = None
         self._finished = False
@@ -1752,7 +1753,10 @@ class AuctionView(discord.ui.View):
                 f"대상 **{self.lot_index + 1}/{len(self.lots)}**\n"
                 f"{self._player_label(current_player)}\n\n"
                 f"{bidding_text}\n"
-                f"입찰 시간은 {AUCTION_LOT_SECONDS}초이며, 입찰할 때마다 초기화됩니다."
+                f"입찰할 때마다 시간이 초기화됩니다.\n\n"
+                f"⏱️ **남은 시간: {self.seconds_remaining}초**\n"
+                f"`{'🟩' * max(0, min(AUCTION_LOT_SECONDS, self.seconds_remaining))}"
+                f"{'⬛' * max(0, AUCTION_LOT_SECONDS - min(AUCTION_LOT_SECONDS, self.seconds_remaining))}`"
             )
         else:
             if self.unsold_players:
@@ -1810,6 +1814,7 @@ class AuctionView(discord.ui.View):
         if old_task is not None and old_task is not current_task:
             old_task.cancel()
         if self.lot_index < len(self.lots) and not self._finished:
+            self.seconds_remaining = AUCTION_LOT_SECONDS
             token = self._lot_token
             self._timer_task = asyncio.create_task(
                 self._close_lot_after_timeout(token)
@@ -1817,11 +1822,16 @@ class AuctionView(discord.ui.View):
 
     async def _close_lot_after_timeout(self, expected_lot):
         try:
-            await asyncio.sleep(AUCTION_LOT_SECONDS)
-            async with self._auction_lock:
-                if self._finished or expected_lot != self._lot_token:
-                    return
-                await self._close_current_lot()
+            for remaining in range(AUCTION_LOT_SECONDS - 1, -1, -1):
+                await asyncio.sleep(1)
+                async with self._auction_lock:
+                    if self._finished or expected_lot != self._lot_token:
+                        return
+                    if remaining == 0:
+                        await self._close_current_lot()
+                        return
+                    self.seconds_remaining = remaining
+                    await self._publish_current_state()
         except asyncio.CancelledError:
             return
         except Exception:
@@ -2004,12 +2014,14 @@ class AuctionView(discord.ui.View):
     async def _publish_current_state(self, content=None):
         if self.message is None or self._finished:
             return
+        edit_kwargs = {
+            "embed": self.create_embed(),
+            "view": self
+        }
+        if content is not None:
+            edit_kwargs["content"] = content
         try:
-            await self.message.edit(
-                content=content,
-                embed=self.create_embed(),
-                view=self
-            )
+            await self.message.edit(**edit_kwargs)
         except discord.HTTPException:
             logger.exception("경매 메시지 갱신 실패 | 방=%s", self.room.room_id)
             try:
