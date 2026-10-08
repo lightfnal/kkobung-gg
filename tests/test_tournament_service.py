@@ -82,6 +82,8 @@ class TournamentServiceTests(unittest.TestCase):
     def test_fixture_can_only_be_claimed_once_and_released(self):
         tournament_service.create_bracket(self.tournament_id)
         self.assertTrue(tournament_service.claim_fixture(self.tournament_id, 1))
+        self.assertTrue(tournament_service.release_fixture(self.tournament_id, 1))
+        self.assertTrue(tournament_service.claim_fixture(self.tournament_id, 1))
 
     def test_auction_rosters_create_a_ready_four_team_bracket(self):
         teams = [
@@ -103,8 +105,46 @@ class TournamentServiceTests(unittest.TestCase):
         self.assertEqual(bracket[0]["red_team_name"], "경매팀 1")
         self.assertEqual(bracket[0]["blue_team_name"], "경매팀 4")
         self.assertTrue(tournament_service.claim_fixture(cup_id, 1))
-        self.assertTrue(tournament_service.release_fixture(cup_id, 1))
-        self.assertTrue(tournament_service.claim_fixture(cup_id, 1))
+
+    def test_auction_bracket_creation_preserves_open_transaction(self):
+        self.db.execute("CREATE TABLE unrelated (value TEXT)")
+        self.db.execute("INSERT INTO unrelated (value) VALUES ('pending')")
+        teams = [
+            {
+                "team_name": f"경매팀 {index}",
+                "captain_id": roster[0],
+                "roster": roster,
+            }
+            for index, roster in enumerate(self.rosters, start=1)
+        ]
+
+        cup_id = tournament_service.create_auction_bracket(
+            1, "중첩 트랜잭션 컵", "moderator", teams
+        )
+
+        self.assertIsNotNone(tournament_service.get_tournament(cup_id))
+        self.assertTrue(self.db.in_transaction)
+        self.assertEqual(
+            self.db.execute("SELECT value FROM unrelated").fetchone()[0],
+            "pending"
+        )
+
+    def test_claim_fixture_preserves_open_transaction(self):
+        tournament_service.create_bracket(self.tournament_id)
+        self.db.execute("CREATE TABLE unrelated (value TEXT)")
+        self.db.execute("INSERT INTO unrelated (value) VALUES ('pending')")
+
+        self.assertTrue(tournament_service.claim_fixture(self.tournament_id, 1))
+
+        self.assertTrue(self.db.in_transaction)
+        self.assertEqual(
+            tournament_service.get_fixture(self.tournament_id, 1)["status"],
+            "in_progress"
+        )
+        self.assertEqual(
+            self.db.execute("SELECT value FROM unrelated").fetchone()[0],
+            "pending"
+        )
 
     def test_player_cannot_register_on_two_teams(self):
         other_cup = tournament_service.create_tournament(1, "중복 검사 컵", 10)
