@@ -1,22 +1,56 @@
 """Persistence helpers for four-team, fixed-roster mini cups."""
 
 import sqlite3
+from itertools import count
 
 from storage.sqlite_db import conn
 
 
 POSITIONS = ("top", "jungle", "mid", "adc", "support")
+_SAVEPOINT_IDS = count(1)
+
+
+class _Atomic:
+    """Use a top-level immediate transaction or a nested savepoint."""
+
+    def __enter__(self):
+        self.had_open_transaction = conn.in_transaction
+        self.savepoint = f"mini_cup_{next(_SAVEPOINT_IDS)}"
+        if self.had_open_transaction:
+            conn.execute(f"SAVEPOINT {self.savepoint}")
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        if exception_type is None:
+            if self.had_open_transaction:
+                conn.execute(f"RELEASE SAVEPOINT {self.savepoint}")
+            else:
+                conn.commit()
+            return False
+
+        if self.had_open_transaction:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {self.savepoint}")
+            conn.execute(f"RELEASE SAVEPOINT {self.savepoint}")
+        else:
+            conn.rollback()
+        return False
+
+
+def _atomic():
+    return _Atomic()
 
 
 def create_tournament(guild_id, name, created_by):
-    cursor = conn.execute(
-        """
-        INSERT INTO tournaments (guild_id, name, created_by)
-        VALUES (?, ?, ?)
-        """,
-        (str(guild_id), str(name).strip(), str(created_by))
-    )
-    conn.commit()
+    with _atomic():
+        cursor = conn.execute(
+            """
+            INSERT INTO tournaments (guild_id, name, created_by)
+            VALUES (?, ?, ?)
+            """,
+            (str(guild_id), str(name).strip(), str(created_by))
+        )
     return int(cursor.lastrowid)
 
 
@@ -29,21 +63,14 @@ def get_tournament(tournament_id):
 
 def delete_tournament(tournament_id):
     """Delete a cup and its bracket while preserving ordinary match history."""
-    # This module shares one SQLite connection with the rest of the bot. Other
-    # commands can already have an open transaction on it, so use a savepoint
-    # instead of BEGIN IMMEDIATE (which fails when a transaction is active).
-    had_open_transaction = conn.in_transaction
-    savepoint = "delete_mini_cup"
-    conn.execute(f"SAVEPOINT {savepoint}")
-    try:
+    # This module shares the bot's SQLite connection. Preserve any transaction
+    # already opened by another command while keeping deletion atomic.
+    with _atomic():
         tournament = conn.execute(
             "SELECT id FROM tournaments WHERE id = ?",
             (int(tournament_id),)
         ).fetchone()
         if tournament is None:
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")
-            if not had_open_transaction:
-                conn.commit()
             return False
 
         active_fixture = conn.execute(
@@ -70,16 +97,7 @@ def delete_tournament(tournament_id):
             "DELETE FROM tournaments WHERE id = ?",
             (int(tournament_id),)
         )
-        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
-        if not had_open_transaction:
-            conn.commit()
         return True
-    except Exception:
-        conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
-        if not had_open_transaction:
-            conn.rollback()
-        raise
 
 
 def register_team(tournament_id, team_name, captain_id, roster_ids):
@@ -113,22 +131,21 @@ def register_team(tournament_id, team_name, captain_id, roster_ids):
         raise ValueError("참가자 한 명은 미니컵에서 한 팀에만 등록할 수 있습니다.")
 
     try:
-        cursor = conn.execute(
-            """
-            INSERT INTO tournament_teams (
-                tournament_id, team_name, captain_id,
-                top_id, jungle_id, mid_id, adc_id, support_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(tournament_id), str(team_name).strip(), str(captain_id),
-                *[str(user_id) for user_id in roster_ids]
+        with _atomic():
+            cursor = conn.execute(
+                """
+                INSERT INTO tournament_teams (
+                    tournament_id, team_name, captain_id,
+                    top_id, jungle_id, mid_id, adc_id, support_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(tournament_id), str(team_name).strip(), str(captain_id),
+                    *[str(user_id) for user_id in roster_ids]
+                )
             )
-        )
-        conn.commit()
-        return int(cursor.lastrowid)
+            return int(cursor.lastrowid)
     except sqlite3.IntegrityError as error:
-        conn.rollback()
         message = str(error).lower()
         if "team_name" in message:
             raise ValueError("같은 이름의 팀이 이미 등록되어 있습니다.") from error
@@ -156,8 +173,7 @@ def create_auction_bracket(guild_id, name, created_by, teams):
         seen_players.update(roster)
         normalized.append((team_name, captain_id, roster))
 
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with _atomic():
         cursor = conn.execute(
             "INSERT INTO tournaments (guild_id, name, created_by) VALUES (?, ?, ?)",
             (str(guild_id), str(name).strip(), str(created_by))
@@ -199,11 +215,7 @@ def create_auction_bracket(guild_id, name, created_by, teams):
             "UPDATE tournaments SET status = 'in_progress' WHERE id = ?",
             (tournament_id,)
         )
-        conn.commit()
         return tournament_id
-    except Exception:
-        conn.rollback()
-        raise
 
 
 def create_bracket(tournament_id):
@@ -223,8 +235,7 @@ def create_bracket(tournament_id):
         raise ValueError(f"대진표를 만들려면 4팀이 필요합니다. 현재 {len(teams)}팀입니다.")
 
     ids = [int(team["id"]) for team in teams]
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with _atomic():
         conn.execute(
             "UPDATE tournament_teams SET seed = NULL WHERE tournament_id = ?",
             (int(tournament_id),)
@@ -258,10 +269,7 @@ def create_bracket(tournament_id):
             "UPDATE tournaments SET status = 'in_progress' WHERE id = ?",
             (int(tournament_id),)
         )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+    
     return get_bracket(tournament_id)
 
 
@@ -308,35 +316,34 @@ def get_fixture(tournament_id, fixture_no):
 
 def claim_fixture(tournament_id, fixture_no):
     """Atomically reserve a ready fixture so it cannot be loaded twice."""
-    cursor = conn.execute(
-        """
-        UPDATE tournament_fixtures
-        SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP
-        WHERE tournament_id = ? AND fixture_no = ? AND status = 'ready'
-        """,
-        (int(tournament_id), int(fixture_no))
-    )
-    conn.commit()
+    with _atomic():
+        cursor = conn.execute(
+            """
+            UPDATE tournament_fixtures
+            SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP
+            WHERE tournament_id = ? AND fixture_no = ? AND status = 'ready'
+            """,
+            (int(tournament_id), int(fixture_no))
+        )
     return cursor.rowcount == 1
 
 
 def release_fixture(tournament_id, fixture_no):
-    cursor = conn.execute(
-        """
-        UPDATE tournament_fixtures
-        SET status = 'ready', updated_at = CURRENT_TIMESTAMP
-        WHERE tournament_id = ? AND fixture_no = ? AND status = 'in_progress'
-        """,
-        (int(tournament_id), int(fixture_no))
-    )
-    conn.commit()
+    with _atomic():
+        cursor = conn.execute(
+            """
+            UPDATE tournament_fixtures
+            SET status = 'ready', updated_at = CURRENT_TIMESTAMP
+            WHERE tournament_id = ? AND fixture_no = ? AND status = 'in_progress'
+            """,
+            (int(tournament_id), int(fixture_no))
+        )
     return cursor.rowcount == 1
 
 
 def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
     """Resolve a series fixture once and place its winner in the final slot."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with _atomic():
         fixture = conn.execute(
             """
             SELECT * FROM tournament_fixtures
@@ -347,7 +354,6 @@ def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
         if fixture is None:
             raise ValueError("대회 대진 정보를 찾을 수 없습니다.")
         if fixture["status"] == "completed":
-            conn.commit()
             return False
         if int(winner_team_id) not in (
             int(fixture["red_team_id"] or 0),
@@ -388,17 +394,12 @@ def resolve_fixture(tournament_id, fixture_no, winner_team_id, match_id):
                 "WHERE id = ?",
                 (int(tournament_id),)
             )
-        conn.commit()
         return True
-    except Exception:
-        conn.rollback()
-        raise
 
 
 def reopen_fixture(tournament_id, fixture_no):
     """Undo bracket advancement when an operator reopens a recorded result."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with _atomic():
         fixture = conn.execute(
             """
             SELECT * FROM tournament_fixtures
@@ -407,7 +408,6 @@ def reopen_fixture(tournament_id, fixture_no):
             (int(tournament_id), int(fixture_no))
         ).fetchone()
         if fixture is None or fixture["status"] != "completed":
-            conn.commit()
             return False
         if int(fixture_no) in (1, 2):
             final_side = "red_team_id" if int(fixture_no) == 1 else "blue_team_id"
@@ -430,8 +430,4 @@ def reopen_fixture(tournament_id, fixture_no):
             """,
             (int(tournament_id), int(fixture_no))
         )
-        conn.commit()
         return True
-    except Exception:
-        conn.rollback()
-        raise
