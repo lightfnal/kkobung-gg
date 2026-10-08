@@ -697,6 +697,9 @@ class MatchControlView(discord.ui.View):
 
             self.room.match_in_progress = True
             self.room.ended_series_snapshot = None
+            # Previous matches leave this marker set intentionally for other
+            # admin safeguards. Clear it when this new game's result is pending.
+            self.room.match_transaction_committed = False
 
             self.join_cog.save_rooms_state()
 
@@ -768,7 +771,108 @@ class MatchControlView(discord.ui.View):
                     "버튼 경기 결과 처리 실패 | 방=%s",
                     self.room.room_id
                 )
-                # 실패하면 결과 버튼을 다시 열어 입력을 복구합니다.
+                if (
+                    self.room.pending_match_token is not None
+                    and not self.room.match_transaction_committed
+                ):
+                    # DB 커밋 여부를 확정하지 못한 경우 결과 입력을 잠가
+                    # 재시작 복구 토큰으로 확인하기 전까지 중복 저장을 막습니다.
+                    self.room.match_in_progress = True
+                    self.start_button.disabled = True
+                    self.red_button.disabled = True
+                    self.blue_button.disabled = True
+                    self.end_series_button.disabled = True
+                    if self.room.current_teams is None:
+                        self.stop()
+                    try:
+                        self.join_cog.save_rooms_state()
+                        await team_message.edit(view=self)
+                    except Exception:
+                        logger.exception(
+                            "복구 대기 중 경기 버튼 잠금 실패 | 방=%s",
+                            self.room.room_id
+                        )
+                    await interaction.followup.send(
+                        "⚠️ 경기 결과 저장 여부를 아직 확인할 수 없습니다. 중복 입력을 막기 위해 버튼을 잠갔습니다. "
+                        "봇 워커를 재시작한 뒤 `/내전방정보`로 결과 상태를 확인해주세요.",
+                        ephemeral=True
+                    )
+                    return
+
+                # DB 커밋 뒤 Discord 후처리에서 실패했다면 같은 결과를
+                # 다시 받지 않습니다. 점수와 팀 상태를 커밋 결과에 맞춥니다.
+                if self.room.match_transaction_committed:
+                    self.room.match_in_progress = False
+                    if self.room.single_draft_mode_active:
+                        self.room.current_teams = None
+                        self.room.current_balance_prediction = None
+                        self.room.series_score = {"red": 0, "blue": 0}
+                        self.room.series_game = 0
+                        self.room.current_match_control_view = None
+                        recruit_view = self.room.current_recruit_view
+                        if recruit_view is not None:
+                            recruit_view.recruit_closed = True
+                            recruit_view.team_generating = False
+                            for item in recruit_view.children:
+                                if isinstance(item, discord.ui.Button):
+                                    item.disabled = item.custom_id not in (
+                                        "inhouse_list",
+                                        "inhouse_reset",
+                                        "inhouse_make_teams"
+                                    )
+                            recruit_view.make_teams_button.disabled = (
+                                len(self.room.players) != self.room.player_limit
+                            )
+                    elif (
+                        MATCH_MODE == "single"
+                        or self.room.series_score.get("red", 0) >= 3
+                        or self.room.series_score.get("blue", 0) >= 3
+                        or self.room.series_game >= 5
+                    ):
+                        self.room.players.clear()
+                        self.room.current_teams = None
+                        self.room.current_balance_prediction = None
+                        self.room.series_score = {"red": 0, "blue": 0}
+                        self.room.series_game = 0
+                        self.room.tournament_id = None
+                        self.room.tournament_fixture_no = None
+                        self.room.current_match_control_view = None
+                        self.room.current_recruit_view = None
+                        self.stop()
+                    # 미완료 BO5는 저장된 점수를 유지하고 다음 세트만 시작 가능하게 둡니다.
+                    self.start_button.disabled = self.room.current_teams is None
+                    self.red_button.disabled = True
+                    self.blue_button.disabled = True
+                    self.end_series_button.disabled = True
+                    try:
+                        self.join_cog.activate_room(self.room)
+                        self.join_cog.save_rooms_state()
+                        await team_message.edit(view=self)
+                    except Exception:
+                        logger.exception(
+                            "커밋된 경기 상태 복구 실패 | 방=%s",
+                            self.room.room_id
+                        )
+                    recruit_view = self.room.current_recruit_view
+                    if recruit_view is not None and recruit_view.message is not None:
+                        try:
+                            await recruit_view.message.edit(
+                                embed=recruit_view.create_embed(),
+                                view=recruit_view
+                            )
+                        except Exception:
+                            logger.exception(
+                                "커밋된 경기 후 모집창 갱신 실패 | 방=%s",
+                                self.room.room_id
+                            )
+                    await interaction.followup.send(
+                        "⚠️ 경기 결과는 이미 저장됐습니다. 중복 등록을 막기 위해 결과 버튼을 닫았습니다. "
+                        "새로고침 후 점수를 확인하고, 문제가 남으면 관리자에게 알려주세요.",
+                        ephemeral=True
+                    )
+                    return
+
+                # 커밋 전 실패일 때만 결과 버튼을 다시 열어 입력을 복구합니다.
                 self.start_button.disabled = True
                 self.red_button.disabled = False
                 self.blue_button.disabled = False
@@ -2885,7 +2989,8 @@ class JoinView(discord.ui.View):
             if self.room.current_teams is None:
                 description = (
                     "같은 10명으로 다음 판 팀을 편성할 수 있습니다.\n"
-                    "`🎲 팀 생성`을 눌러 자동 밸런스, 경매, 캡틴 드래프트 중 선택하세요."
+                    "`🎲 팀 생성`을 눌러 자동 밸런스, 경매, 캡틴 드래프트 중 선택하세요.\n"
+                    "현재 단판 팀을 유지해 BO5로 이어가려면 `/단판bo5전환`을 실행하세요."
                 )
             else:
                 description = (
