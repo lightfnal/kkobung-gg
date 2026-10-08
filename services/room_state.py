@@ -1,4 +1,5 @@
 import asyncio
+import copy
 
 from dataclasses import (
     dataclass,
@@ -77,6 +78,9 @@ class InhouseRoom:
     # BO5를 중간 종료하고, 같은 10명으로 매 경기 팀을 다시 짜는 모드
     single_draft_mode_active: bool = False
 
+    # 마지막 연속 단판 결과를 BO5 1세트로 되돌릴 수 있는 스냅샷
+    last_single_draft_result: dict | None = None
+
     # 수동 내전 종료 후 진행자/관리자가 복구할 수 있는 시리즈 상태
     ended_series_snapshot: dict | None = None
 
@@ -97,6 +101,10 @@ class InhouseRoom:
     # 경기 결과 저장 트랜잭션도 방마다 별도로 관리
     match_transaction_active: bool = False
     match_transaction_committed: bool = False
+
+    # 경기 결과 DB 저장부터 Discord 후처리가 끝날 때까지 잠금 상태를
+    # 표시하는 프로세스 전용 플래그입니다. 재시작 시에는 항상 해제합니다.
+    match_result_finalizing: bool = False
 
     transaction_series_score: dict | None = None
     transaction_series_game: int | None = None
@@ -136,6 +144,43 @@ class InhouseRoom:
                 view.invalidate()
             setattr(self, attribute_name, None)
 
+    def recover_committed_single_draft_result(
+        self,
+        saved_match,
+        series_score,
+        series_game
+    ):
+        """재시작 중 확인된 단판 결과를 저장하고 다음 편성 대기로 전환합니다."""
+        if not self.single_draft_mode_active:
+            return False
+
+        winner = saved_match.get("winner") if isinstance(saved_match, dict) else None
+        if (
+            winner in {"red", "blue"}
+            and isinstance(self.players, dict)
+            and isinstance(self.current_teams, dict)
+        ):
+            self.last_single_draft_result = {
+                "match_id": saved_match.get("id"),
+                "winner": winner,
+                "players": copy.deepcopy(self.players),
+                "current_teams": copy.deepcopy(self.current_teams),
+                "current_balance_prediction": copy.deepcopy(
+                    self.current_balance_prediction
+                ),
+                "series_score": dict(series_score),
+                "series_game": series_game,
+            }
+        else:
+            self.last_single_draft_result = None
+
+        self.current_teams = None
+        self.current_balance_prediction = None
+        self.series_score = {"red": 0, "blue": 0}
+        self.series_game = 0
+        self.match_in_progress = False
+        return True
+
     def reset_game(self, keep_recruit_view=False):
         """
         참가자와 경기 상태를 모두 초기화합니다.
@@ -160,6 +205,7 @@ class InhouseRoom:
 
         self.series_game = 0
         self.single_draft_mode_active = False
+        self.last_single_draft_result = None
         self.player_limit = 10
         self.ended_series_snapshot = None
         self.last_team_signature = None
@@ -169,6 +215,7 @@ class InhouseRoom:
 
         self.match_transaction_active = False
         self.match_transaction_committed = False
+        self.match_result_finalizing = False
         self.transaction_series_score = None
         self.transaction_series_game = None
 
@@ -219,6 +266,7 @@ class InhouseRoom:
             "series_score": self.series_score,
             "series_game": self.series_game,
             "single_draft_mode_active": self.single_draft_mode_active,
+            "last_single_draft_result": self.last_single_draft_result,
             "ended_series_snapshot": self.ended_series_snapshot,
             # Discord 투표창은 재시작 시 복구할 수 없으므로
             # 파일에는 항상 종료 상태로 저장합니다.
@@ -350,6 +398,12 @@ class InhouseRoom:
         room.single_draft_mode_active = bool(
             data.get("single_draft_mode_active", False)
         )
+        last_single_draft_result = data.get("last_single_draft_result")
+        room.last_single_draft_result = (
+            dict(last_single_draft_result)
+            if isinstance(last_single_draft_result, dict)
+            else None
+        )
         ended_series_snapshot = data.get("ended_series_snapshot")
         room.ended_series_snapshot = (
             dict(ended_series_snapshot)
@@ -401,6 +455,7 @@ class InhouseRoom:
 
         room.match_transaction_active = False
         room.match_transaction_committed = False
+        room.match_result_finalizing = False
         room.transaction_series_score = None
         room.transaction_series_game = None
 
