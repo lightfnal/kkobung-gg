@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import copy
 from typing import Literal, Optional
@@ -19,12 +20,14 @@ from storage.sqlite_db import (
     update_season_player_stats,
     begin_transaction,
     commit_transaction,
-    rollback_transaction
+    rollback_transaction,
+    get_match_champion_progress
 )
 
 from utils.cog_helper import get_join_cog
 from views.join_view import (
     JoinView,
+    TeamModeView,
     refresh_match_controls_at_bottom
 )
 from utils.permissions import (
@@ -44,6 +47,261 @@ class AdminMatch(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._guild_commands_synced = False
+
+    @discord.app_commands.command(
+        name="단판재편성",
+        description="현재 BO5를 여기서 끝내고 같은 10명으로 매 판 팀을 다시 편성합니다."
+    )
+    async def start_single_draft_mode(self, interaction: discord.Interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None or not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        if room.team_generation_lock.locked():
+            await interaction.followup.send(
+                "⏳ 팀 편성·경매·드래프트가 진행 중입니다. 끝난 뒤 다시 실행해주세요.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            await asyncio.wait_for(
+                room.team_generation_lock.acquire(),
+                timeout=0.5
+            )
+        except asyncio.TimeoutError:
+            await interaction.followup.send(
+                "⏳ 팀 편성 작업이 시작됐습니다. 잠시 뒤 다시 실행해주세요.",
+                ephemeral=True
+            )
+            return
+
+        operation_lock_acquired = False
+        state_snapshot = None
+        try:
+            await asyncio.wait_for(room.operation_lock.acquire(), timeout=5)
+            operation_lock_acquired = True
+
+            if room.single_draft_mode_active:
+                await interaction.followup.send(
+                    "이미 연속 단판 재편성 모드입니다. 모집창의 `🎲 팀 생성` 버튼을 눌러주세요.",
+                    ephemeral=True
+                )
+                return
+            if room.tournament_id is not None:
+                await interaction.followup.send(
+                    "❌ 미니컵 대진 경기는 단판 재편성 모드로 전환할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+            if room.match_in_progress or room.match_transaction_active or room.pending_match_token is not None:
+                await interaction.followup.send(
+                    "❌ 먼저 현재 경기 결과 저장을 마쳐주세요.",
+                    ephemeral=True
+                )
+                return
+            if room.mvp_vote_in_progress:
+                await interaction.followup.send(
+                    "❌ MVP 투표가 끝난 뒤 단판 재편성을 시작해주세요.",
+                    ephemeral=True
+                )
+                return
+            if room.series_game > 0:
+                previous_match = get_last_match(room.room_id)
+                if previous_match is not None:
+                    progress = get_match_champion_progress(previous_match["id"])
+                    if (
+                        progress["total_count"] > 0
+                        and progress["completed_count"] < progress["total_count"]
+                    ):
+                        missing = progress["total_count"] - progress["completed_count"]
+                        await interaction.followup.send(
+                            f"⏳ 직전 경기의 챔피언 입력이 {missing}명 남았습니다. "
+                            "입력을 마친 뒤 단판 재편성을 시작해주세요.",
+                            ephemeral=True
+                        )
+                        return
+            if room.current_teams is None or room.series_game < 1:
+                await interaction.followup.send(
+                    "❌ BO5 세트 결과가 한 번 이상 저장된 진행 중인 내전에서 사용할 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+            if room.player_limit != MAX_PLAYERS or len(room.players) != MAX_PLAYERS:
+                await interaction.followup.send(
+                    f"❌ 참가자 {MAX_PLAYERS}명이 모두 유지된 10인 내전에서만 사용할 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+            recruit_view = room.current_recruit_view
+
+            previous_control = room.current_match_control_view
+            previous_score = dict(room.series_score)
+            previous_game_count = room.series_game
+            state_snapshot = {
+                "single_draft_mode_active": room.single_draft_mode_active,
+                "current_teams": room.current_teams,
+                "current_balance_prediction": room.current_balance_prediction,
+                "series_score": dict(room.series_score),
+                "series_game": room.series_game,
+                "match_in_progress": room.match_in_progress,
+                "ended_series_snapshot": room.ended_series_snapshot,
+                "current_recruit_view": room.current_recruit_view,
+                "current_match_control_view": room.current_match_control_view,
+                "recruit_closed": (
+                    recruit_view.recruit_closed
+                    if recruit_view is not None else None
+                ),
+                "team_generating": (
+                    recruit_view.team_generating
+                    if recruit_view is not None else None
+                ),
+                "button_disabled": [
+                    item.disabled
+                    for item in recruit_view.children
+                    if isinstance(item, discord.ui.Button)
+                ] if recruit_view is not None else None,
+            }
+
+            # Keep all ten registered players. Only discard the current BO5
+            # teams and score so the next match starts as an independent game.
+            room.single_draft_mode_active = True
+            room.current_teams = None
+            room.current_balance_prediction = None
+            room.series_score = {"red": 0, "blue": 0}
+            room.series_game = 0
+            room.match_in_progress = False
+            room.ended_series_snapshot = None
+            room.current_match_control_view = None
+            if recruit_view is not None:
+                recruit_view.recruit_closed = True
+                recruit_view.team_generating = False
+                for item in recruit_view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = item.custom_id not in (
+                            "inhouse_list",
+                            "inhouse_reset",
+                            "inhouse_make_teams"
+                        )
+                recruit_view.make_teams_button.disabled = False
+            else:
+                # The recruitment View itself is not persisted across process
+                # restarts. Rebuild it while holding the room operation lock.
+                recruit_view = JoinView(join_cog)
+                room.current_recruit_view = recruit_view
+                recruit_view.recruit_closed = True
+                for item in recruit_view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = item.custom_id not in (
+                            "inhouse_list",
+                            "inhouse_reset",
+                            "inhouse_make_teams"
+                        )
+                recruit_view.make_teams_button.disabled = False
+            join_cog.save_rooms_state()
+
+        except asyncio.TimeoutError:
+            await interaction.followup.send(
+                "⏳ 이 방에서 다른 처리가 진행 중입니다. 아무 상태도 바꾸지 않았으니 잠시 후 다시 실행해주세요.",
+                ephemeral=True
+            )
+            return
+        except Exception:
+            logger.exception("연속 단판 재편성 시작 실패 | 방=%s", room.room_id)
+            if state_snapshot is not None:
+                room.single_draft_mode_active = state_snapshot["single_draft_mode_active"]
+                room.current_teams = state_snapshot["current_teams"]
+                room.current_balance_prediction = state_snapshot["current_balance_prediction"]
+                room.series_score = state_snapshot["series_score"]
+                room.series_game = state_snapshot["series_game"]
+                room.match_in_progress = state_snapshot["match_in_progress"]
+                room.ended_series_snapshot = state_snapshot["ended_series_snapshot"]
+                room.current_recruit_view = state_snapshot["current_recruit_view"]
+                room.current_match_control_view = state_snapshot["current_match_control_view"]
+                if recruit_view is not None:
+                    recruit_view.recruit_closed = state_snapshot["recruit_closed"]
+                    recruit_view.team_generating = state_snapshot["team_generating"]
+                    button_states = iter(state_snapshot["button_disabled"])
+                    for item in recruit_view.children:
+                        if isinstance(item, discord.ui.Button):
+                            item.disabled = next(button_states)
+                try:
+                    join_cog.save_rooms_state()
+                except Exception:
+                    logger.exception(
+                        "연속 단판 전환 실패 후 상태 복구 저장도 실패 | 방=%s",
+                        room.room_id
+                    )
+            await interaction.followup.send(
+                "❌ 단판 재편성을 시작하지 못했습니다. 방 상태는 Render 로그에서 확인해주세요.",
+                ephemeral=True
+            )
+            return
+        finally:
+            if operation_lock_acquired:
+                room.operation_lock.release()
+            room.team_generation_lock.release()
+
+        if recruit_view.message is None:
+            # A restart loses Discord View objects, while the roster and mode
+            # are persisted. Recreate the fixed-roster control message on demand.
+            try:
+                recruit_view.message = await interaction.followup.send(
+                    embed=recruit_view.create_embed(),
+                    view=recruit_view,
+                    ephemeral=False,
+                    wait=True
+                )
+            except discord.HTTPException:
+                logger.exception("재시작 후 연속 단판 모집창 복구 실패 | 방=%s", room.room_id)
+        else:
+            try:
+                await recruit_view.message.edit(
+                    embed=recruit_view.create_embed(),
+                    view=recruit_view
+                )
+            except discord.HTTPException:
+                logger.exception("연속 단판 모집창 갱신 실패 | 방=%s", room.room_id)
+
+        if previous_control is not None:
+            previous_control.stop()
+            if previous_control.team_message is not None:
+                try:
+                    await previous_control.team_message.edit(view=None)
+                except discord.HTTPException:
+                    logger.info(
+                        "단판 재편성 전 기존 경기 버튼 제거 실패 | 방=%s",
+                        room.room_id
+                    )
+
+        try:
+            await join_cog.send_output_message(
+                room=room,
+                fallback_channel=interaction.channel,
+                content=(
+                    f"🔄 **{room.room_name} · 연속 단판 재편성 시작**\n"
+                    f"중단한 BO5 점수: 🔴 {previous_score['red']} : "
+                    f"{previous_score['blue']} 🔵 · 저장된 경기 {previous_game_count}판\n"
+                    "이미 등록된 경기 기록은 유지하고, 같은 10명으로 다음 판 팀을 다시 편성합니다.\n"
+                    "매 경기 결과는 독립 단판으로 기록됩니다. 종료하려면 "
+                    "`/내전초기화종료`를 실행해주세요."
+                )
+            )
+        except Exception:
+            logger.exception("연속 단판 재편성 안내 전송 실패 | 방=%s", room.room_id)
+
+        await interaction.followup.send(
+            "BO5를 현재 판에서 마무리했습니다. 다음 편성 방식을 선택하세요.",
+            view=TeamModeView(recruit_view),
+            ephemeral=True
+        )
 
     @commands.Cog.listener()
     async def on_ready(self):

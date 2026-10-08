@@ -777,7 +777,9 @@ class Match(commands.Cog):
                 room.room_id
             )
 
-        if MATCH_MODE == "single":
+        if getattr(room, "single_draft_mode_active", False):
+            series_finished = True
+        elif MATCH_MODE == "single":
             series_finished = True
         else:
             series_finished = (
@@ -844,7 +846,17 @@ class Match(commands.Cog):
             else "🔵 블루팀"
         )
 
-        if MATCH_MODE == "single":
+        if getattr(room, "single_draft_mode_active", False):
+            series_message = (
+                "\n\n🏆 **연속 단판 경기 종료**\n"
+                f"최종 승리: **{winner_name}**\n"
+                "현재 판은 독립 경기로 기록했습니다. 같은 10명으로 "
+                "다음 팀을 다시 편성해주세요."
+            )
+            result_title = "✅ 단판 경기 결과가 등록되었습니다."
+            winner_label = "🏆 승리팀"
+
+        elif MATCH_MODE == "single":
             series_message = (
                 f"\n\n🏆 **단판 경기 종료**\n"
                 f"최종 승리: **{winner_name}**"
@@ -1010,19 +1022,50 @@ class Match(commands.Cog):
                 )
 
 
-            join_cog.players.clear()
-
-            join_cog.current_teams = None
-            join_cog.last_team_signature = None
-            join_cog.current_recruit_view = None
-
-            join_cog.series_score = {
-                "red": 0,
-                "blue": 0
-            }
-            join_cog.series_game = 0
-            room.tournament_id = None
-            room.tournament_fixture_no = None
+            if room.single_draft_mode_active:
+                # Keep the original ten entrants registered between rounds.
+                # Each recorded match starts a fresh 0-0 single-draft round.
+                room.current_teams = None
+                room.current_balance_prediction = None
+                room.series_score = {"red": 0, "blue": 0}
+                room.series_game = 0
+                room.match_in_progress = False
+                room.ended_series_snapshot = None
+                room.current_match_control_view = None
+                recruit_view = room.current_recruit_view
+                if recruit_view is not None:
+                    recruit_view.recruit_closed = True
+                    for item in recruit_view.children:
+                        if isinstance(item, discord.ui.Button):
+                            item.disabled = item.custom_id not in (
+                                "inhouse_list",
+                                "inhouse_reset",
+                                "inhouse_make_teams"
+                            )
+                    recruit_view.make_teams_button.disabled = (
+                        len(room.players) != room.player_limit
+                    )
+                    if recruit_view.message is not None:
+                        try:
+                            await recruit_view.message.edit(
+                                embed=recruit_view.create_embed(),
+                                view=recruit_view
+                            )
+                        except Exception:
+                            logger.exception(
+                                "연속 단판 후 다음 팀 편성 버튼 갱신 실패 | 방=%s",
+                                room.room_id
+                            )
+            else:
+                # Ordinary single-game or completed BO5 cleanup.
+                join_cog.players.clear()
+                join_cog.current_teams = None
+                join_cog.last_team_signature = None
+                join_cog.current_recruit_view = None
+                join_cog.series_score = {"red": 0, "blue": 0}
+                join_cog.series_game = 0
+                room.tournament_id = None
+                room.tournament_fixture_no = None
 
         join_cog.save_rooms_state()
 

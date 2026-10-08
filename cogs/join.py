@@ -1822,6 +1822,41 @@ class Join(commands.Cog):
     async def _create_recruitment_locked(self, interaction, room):
         self.activate_room(room)
 
+        # In continuous single-draft mode the original ten entrants and
+        # recruitment controls are intentionally retained between games.
+        # Recreating recruitment here would make it look like a fresh signup.
+        if room.single_draft_mode_active:
+            if room.current_recruit_view is None:
+                # View objects are process-local. Rebuild the fixed-roster
+                # controls after a bot restart without reopening signups.
+                view = JoinView(self)
+                room.current_recruit_view = view
+                view.recruit_closed = True
+                for item in view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = item.custom_id not in (
+                            "inhouse_list",
+                            "inhouse_reset",
+                            "inhouse_make_teams"
+                        )
+                view.make_teams_button.disabled = (
+                    len(room.players) != room.player_limit
+                )
+                self.save_rooms_state()
+                view.message = await interaction.edit_original_response(
+                    embed=view.create_embed(),
+                    view=view
+                )
+                return
+
+            await interaction.followup.send(
+                "❌ 연속 단판 재편성 모드에서는 참가 명단이 고정되어 있습니다.\n"
+                "현재 모집창의 `🎲 팀 생성` 버튼으로 다음 판 팀을 편성하거나, "
+                "모드를 끝내려면 `/내전초기화종료`를 실행해주세요.",
+                ephemeral=True
+            )
+            return
+
         # 경기 진행 중에는 모집창 재생성 금지
         if room.match_in_progress:
             await interaction.followup.send(
