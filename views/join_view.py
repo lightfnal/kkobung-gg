@@ -106,21 +106,31 @@ async def refresh_match_controls_at_bottom(
             source_message.embeds[0].to_dict()
         )
         next_set = max(1, int(room.series_game) + 1)
-        next_embed.title = (
-            f"🎮 {room.room_name} · {next_set}세트 경기 조작"
-        )
-        score = room.series_score
-        if stage == "in_progress":
-            stage_line = "🎮 경기가 진행 중입니다. 끝나면 아래에서 승리팀을 선택하세요."
-        elif stage == "reselect":
-            stage_line = "↩️ 잘못된 결과를 취소했습니다. 이번 세트의 승리팀을 다시 선택하세요."
+        if getattr(room, "single_draft_mode_active", False):
+            next_embed.title = f"🎮 {room.room_name} · 연속 단판 경기 조작"
+            if stage == "in_progress":
+                stage_line = "🎮 단판 경기가 진행 중입니다. 끝나면 아래에서 승리팀을 선택하세요."
+            elif stage == "reselect":
+                stage_line = "↩️ 결과를 취소했습니다. 이번 단판의 승리팀을 다시 선택하세요."
+            else:
+                stage_line = "다음 단판 경기 시작 버튼을 눌러주세요."
+            score_line = f"🔄 연속 단판 · 매 경기 결과를 독립 기록합니다.\n{stage_line}"
         else:
-            stage_line = f"다음은 **{next_set}세트**입니다. 경기 시작 버튼을 눌러주세요."
-        score_line = (
-            f"📊 현재 시리즈 점수: 🔴 레드 **{score['red']}** : "
-            f"**{score['blue']}** 블루 🔵\n"
-            + stage_line
-        )
+            next_embed.title = (
+                f"🎮 {room.room_name} · {next_set}세트 경기 조작"
+            )
+            score = room.series_score
+            if stage == "in_progress":
+                stage_line = "🎮 경기가 진행 중입니다. 끝나면 아래에서 승리팀을 선택하세요."
+            elif stage == "reselect":
+                stage_line = "↩️ 잘못된 결과를 취소했습니다. 이번 세트의 승리팀을 다시 선택하세요."
+            else:
+                stage_line = f"다음은 **{next_set}세트**입니다. 경기 시작 버튼을 눌러주세요."
+            score_line = (
+                f"📊 현재 시리즈 점수: 🔴 레드 **{score['red']}** : "
+                f"**{score['blue']}** 블루 🔵\n"
+                + stage_line
+            )
         description = (next_embed.description or "").split(
             "\n\n📊 현재 시리즈 점수:",
             1
@@ -132,9 +142,13 @@ async def refresh_match_controls_at_bottom(
 
     content = source_message.content or None
     if next_embed is None and content is None:
+        game_label = (
+            "연속 단판 경기"
+            if getattr(room, "single_draft_mode_active", False)
+            else f"{max(1, int(room.series_game) + 1)}세트 경기"
+        )
         content = (
-            f"🎮 **{room.room_name} · "
-            f"{max(1, int(room.series_game) + 1)}세트 경기 조작**\n"
+            f"🎮 **{room.room_name} · {game_label} 조작**\n"
             f"팀 편성 확인: {source_message.jump_url}"
         )
 
@@ -518,6 +532,7 @@ class MatchControlView(discord.ui.View):
         self.room = (
             join_cog.active_room
         )
+        self.room.current_match_control_view = self
         self.teams_reference = self.room.current_teams
         self.team_message = None
         self.players_snapshot = copy.deepcopy(
@@ -637,7 +652,12 @@ class MatchControlView(discord.ui.View):
                 )
                 return
 
-            if MATCH_MODE != "single" and self.room.series_game > 0:
+            if (
+                MATCH_MODE != "single" or self.room.single_draft_mode_active
+            ) and (
+                self.room.series_game > 0
+                or self.room.single_draft_mode_active
+            ):
                 previous_match = get_last_match(self.room.room_id)
                 if previous_match is not None:
                     progress = get_match_champion_progress(
@@ -2860,7 +2880,19 @@ class JoinView(discord.ui.View):
             len(players) < self.room.player_limit
         )
 
-        if self.recruit_closed:
+        if getattr(self.room, "single_draft_mode_active", False):
+            title = "🔄 연속 단판 · 10명 고정"
+            if self.room.current_teams is None:
+                description = (
+                    "같은 10명으로 다음 판 팀을 편성할 수 있습니다.\n"
+                    "`🎲 팀 생성`을 눌러 자동 밸런스, 경매, 캡틴 드래프트 중 선택하세요."
+                )
+            else:
+                description = (
+                    "현재 경기는 단판입니다. 결과가 등록되면 같은 10명으로 "
+                    "다음 팀을 다시 편성할 수 있습니다."
+                )
+        elif self.recruit_closed:
             title = "🔒 내전 모집 종료"
             description = (
                 "모집이 종료되었습니다.\n\n"
@@ -2999,7 +3031,9 @@ class JoinView(discord.ui.View):
                 inline=False
             )
 
-        if self.recruit_closed:
+        if getattr(self.room, "single_draft_mode_active", False):
+            embed.set_footer(text="연속 단판 모드 · 참가 명단은 고정되어 있습니다.")
+        elif self.recruit_closed:
             embed.set_footer(
                 text="모집이 종료되었습니다."
             )
@@ -3048,6 +3082,13 @@ class JoinView(discord.ui.View):
                 await send_ephemeral_response(
                     interaction,
                     "⏳ 팀 편성, 경매 또는 드래프트 준비 중에는 참가 명단을 변경할 수 없습니다."
+                )
+                return
+
+            if room.single_draft_mode_active:
+                await send_ephemeral_response(
+                    interaction,
+                    "🔒 연속 단판 모드에서는 기존 참가자 10명이 고정되어 있습니다."
                 )
                 return
 
@@ -3179,6 +3220,13 @@ class JoinView(discord.ui.View):
                 await send_ephemeral_response(
                     interaction,
                     "⏳ 팀 편성, 경매 또는 드래프트 준비 중에는 참가 명단을 변경할 수 없습니다."
+                )
+                return
+
+            if room.single_draft_mode_active:
+                await send_ephemeral_response(
+                    interaction,
+                    "🔒 연속 단판 모드에서는 기존 참가자 10명이 고정되어 있습니다."
                 )
                 return
 
