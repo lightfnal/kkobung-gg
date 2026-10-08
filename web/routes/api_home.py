@@ -240,7 +240,11 @@ def home_api():
 
         season_match_count = 0
         season_player_count = 0
-        weekly_awards, activity_feed = build_home_engagement(cursor)
+        season_id = active_season["id"] if active_season else None
+        weekly_awards, activity_feed = build_home_engagement(
+            cursor,
+            season_id
+        )
 
 
         # ==============================
