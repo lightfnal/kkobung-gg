@@ -297,14 +297,17 @@ class Tournament(commands.Cog):
         join_cog = get_join_cog(self.bot)
         if join_cog is None or not await join_cog.require_room(interaction):
             return
+        # This command reads SQLite and may wait for the selected room lock.
+        # Acknowledge now so Discord does not expire the interaction first.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         tournament = get_tournament(대회번호)
         if tournament is None or str(tournament["guild_id"]) != str(interaction.guild_id):
-            await interaction.response.send_message("❌ 이 서버의 미니컵을 찾지 못했습니다.", ephemeral=True)
+            await interaction.followup.send("❌ 이 서버의 미니컵을 찾지 못했습니다.", ephemeral=True)
             return
         fixture_no = {"1번 준결승": 1, "2번 준결승": 2, "결승": 3}[경기]
         fixture = get_fixture(대회번호, fixture_no)
         if fixture is None or fixture["status"] != "ready":
-            await interaction.response.send_message("❌ 해당 경기는 아직 대진이 확정되지 않았거나 이미 끝났습니다.", ephemeral=True)
+            await interaction.followup.send("❌ 해당 경기는 아직 대진이 확정되지 않았거나 이미 끝났습니다.", ephemeral=True)
             return
         room = join_cog.active_room
         if (
@@ -312,7 +315,7 @@ class Tournament(commands.Cog):
             or room.mvp_vote_in_progress or room.match_transaction_active
             or room.players or room.waiting_players
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 현재 내전방에 참가자나 진행 중인 경기가 있습니다. 방을 비운 뒤 다시 실행해주세요.",
                 ephemeral=True
             )
@@ -321,18 +324,26 @@ class Tournament(commands.Cog):
         blue = {position: str(fixture[f"blue_{key}"]) for position, key in zip(POSITIONS, ("top", "jungle", "mid", "adc", "support"))}
         all_ids = list(red.values()) + list(blue.values())
         if len(set(all_ids)) != 10:
-            await interaction.response.send_message("❌ 두 팀 로스터에 중복 참가자가 있습니다. 등록 정보를 확인해주세요.", ephemeral=True)
+            await interaction.followup.send("❌ 두 팀 로스터에 중복 참가자가 있습니다. 등록 정보를 확인해주세요.", ephemeral=True)
             return
         profiles = {user_id: get_player(user_id) for user_id in all_ids}
         if any(profile is None for profile in profiles.values()):
-            await interaction.response.send_message("❌ 로스터 참가자의 프로필을 찾지 못했습니다. 팀 등록을 확인해주세요.", ephemeral=True)
+            await interaction.followup.send("❌ 로스터 참가자의 프로필을 찾지 못했습니다. 팀 등록을 확인해주세요.", ephemeral=True)
             return
         async with room.operation_lock:
-            if room.current_teams is not None or room.players or room.waiting_players or room.match_in_progress:
-                await interaction.response.send_message("❌ 방 상태가 바뀌었습니다. 다시 시도해주세요.", ephemeral=True)
+            if (
+                room.current_teams is not None
+                or room.players
+                or room.waiting_players
+                or room.match_in_progress
+                or room.mvp_vote_in_progress
+                or room.match_transaction_active
+                or room.pending_match_token is not None
+            ):
+                await interaction.followup.send("❌ 방 상태가 바뀌었습니다. 다시 시도해주세요.", ephemeral=True)
                 return
             if not claim_fixture(대회번호, fixture_no):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ 다른 진행자가 이미 이 대진을 경기방에 불러왔습니다.",
                     ephemeral=True
                 )
@@ -363,12 +374,21 @@ class Tournament(commands.Cog):
             rows = [f"**{position}** — <@{fixture[f'{side}_{key}']}>" for position, key in zip(POSITIONS, ("top", "jungle", "mid", "adc", "support"))]
             embed.add_field(name=title, value="\n".join(rows), inline=True)
         add_match_button_instructions(embed)
-        message, _ = await join_cog.send_output_message(
-            room=room,
-            fallback_channel=interaction.channel,
-            embed=embed,
-            view=MatchControlView(join_cog)
-        )
+        try:
+            message, _ = await join_cog.send_output_message(
+                room=room,
+                fallback_channel=interaction.channel,
+                embed=embed,
+                view=MatchControlView(join_cog)
+            )
+        except Exception:
+            logger.exception(
+                "미니컵 경기방 불러오기 메시지 전송 실패 | 대회=%s | 경기=%s | 방=%s",
+                대회번호,
+                fixture_no,
+                room.room_id
+            )
+            message = None
         link = f"\n대진표: {SITE_BASE_URL}/tournament/{대회번호}"
         if message is None:
             async with room.operation_lock:
@@ -381,14 +401,14 @@ class Tournament(commands.Cog):
                 room.tournament_fixture_no = None
                 join_cog.save_rooms_state()
             release_fixture(대회번호, fixture_no)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 진행 메시지를 보낼 수 없어 경기방 설정을 되돌렸습니다. "
                 "꼬붕봇의 채널 보기·메시지 보내기 권한을 확인한 뒤 다시 실행해주세요."
                 + link,
                 ephemeral=True
             )
         else:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"✅ **{fixture['red_team_name']} vs {fixture['blue_team_name']}** 경기를 방에 불러왔습니다."
                 + link,
                 ephemeral=True

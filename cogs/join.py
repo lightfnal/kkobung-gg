@@ -1805,27 +1805,22 @@ class Join(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
-        # Discord 상호작용은 약 3초 안에 최초 응답이 필요하므로
-        # 권한 검사보다 먼저 응답을 예약합니다.
-        await interaction.response.defer(thinking=True)
-
         if not is_admin(interaction):
             await send_admin_only_message(interaction)
             return
 
-        # ContextVar 기본 방에 의존하지 않고, 이 명령을 실행한
-        # 채널에 연결된 방 객체를 직접 사용합니다.
-        room = self.select_room_for_interaction(interaction)
-        if room is None:
-            await self.require_room(interaction)
+        if not await self.require_room(
+            interaction
+        ):
             return
 
-        logger.info(
-            "모집창 생성 요청 | 서버=%s | 채널=%s | 방=%s",
-            interaction.guild.id if interaction.guild else None,
-            interaction.channel_id,
-            room.room_id
-        )
+        room = self.active_room
+        await interaction.response.defer()
+        async with room.operation_lock:
+            await self._create_recruitment_locked(interaction, room)
+
+    async def _create_recruitment_locked(self, interaction, room):
+        self.activate_room(room)
 
         # 경기 진행 중에는 모집창 재생성 금지
         if room.match_in_progress:
@@ -1845,18 +1840,24 @@ class Join(commands.Cog):
             )
             return
 
-        recruit_view = room.current_recruit_view
         if (
-            recruit_view is not None
-            and str(recruit_view.room.room_id) != str(room.room_id)
+            room.team_generation_lock.locked()
+            or (
+                room.current_recruit_view is not None
+                and room.current_recruit_view.team_generating
+            )
         ):
-            # 다른 방에 잘못 묶인 오래된 View가 있으면 재사용하지 않습니다.
-            recruit_view = None
-            room.current_recruit_view = None
+            await interaction.followup.send(
+                "⏳ 팀 편성, 경매 또는 드래프트가 진행 중입니다. 끝난 뒤 다시 시도해주세요.",
+                ephemeral=True
+            )
+            return
 
         # 모집 중이라면 기존 모집창을 삭제하고 맨 아래로 이동
-        if recruit_view is not None:
-            old_message = recruit_view.message
+        if room.current_recruit_view:
+
+            old_view = room.current_recruit_view
+            old_message = old_view.message
 
             if old_message:
                 try:
@@ -1868,21 +1869,21 @@ class Join(commands.Cog):
                 ):
                     pass
 
-            recruit_view.message = await interaction.followup.send(
-                embed=recruit_view.create_embed(),
-                view=recruit_view,
-                wait=True
+            message = await interaction.edit_original_response(
+                embed=old_view.create_embed(),
+                view=old_view
             )
+            old_view.message = message
             return
 
-        # 모집창이 없다면 채널에 연결된 방을 명시해 새로 생성
-        view = JoinView(self, room=room)
+        # 모집창이 없다면 새로 생성
+        view = JoinView(self)
+
         room.current_recruit_view = view
 
-        view.message = await interaction.followup.send(
+        view.message = await interaction.edit_original_response(
             embed=view.create_embed(),
-            view=view,
-            wait=True
+            view=view
         )
 
 

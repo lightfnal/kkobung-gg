@@ -413,13 +413,11 @@ class Room(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
         if (
             interaction.guild is None
             or interaction.channel_id is None
         ):
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ 서버 채널에서만 사용할 수 있습니다.",
                 ephemeral=True
             )
@@ -430,7 +428,7 @@ class Room(commands.Cog):
         )
 
         if join_cog is None:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ 내전 관리 기능을 불러오지 못했습니다.",
                 ephemeral=True
             )
@@ -445,12 +443,14 @@ class Room(commands.Cog):
         )
 
         if room is None:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ 현재 채널에는 연결된 내전 방이 없습니다.\n"
                 "관리자가 `/내전방생성`을 실행해주세요.",
                 ephemeral=True
             )
             return
+
+        await interaction.response.defer()
 
         status_text = (
             "🎮 경기 진행 중"
@@ -476,8 +476,8 @@ class Room(commands.Cog):
             else "설정되지 않음"
         )
 
-        await interaction.followup.send(
-            "🏠 **현재 내전 방 정보**\n\n"
+        await interaction.edit_original_response(
+            content="🏠 **현재 내전 방 정보**\n\n"
             f"방 번호: `{room.room_id}`\n"
             f"방 이름: **{room.room_name}**\n"
             f"참가자: {len(room.players)}/{room.player_limit}명\n"
@@ -553,6 +553,8 @@ class Room(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         async with room.operation_lock:
             await self._set_voice_channels_locked(
                 interaction,
@@ -578,7 +580,7 @@ class Room(commands.Cog):
             interaction.guild is None
             or interaction.channel_id is None
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 서버 채널에서만 사용할 수 있습니다.",
                 ephemeral=True
             )
@@ -589,7 +591,7 @@ class Room(commands.Cog):
         )
 
         if join_cog is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 내전 관리 기능을 불러오지 못했습니다.",
                 ephemeral=True
             )
@@ -604,7 +606,7 @@ class Room(commands.Cog):
         )
 
         if room is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 현재 채널에는 연결된 내전 방이 없습니다.\n"
                 "먼저 `/내전방생성`을 실행해주세요.",
                 ephemeral=True
@@ -621,7 +623,7 @@ class Room(commands.Cog):
             or room.pending_series_score is not None
             or room.pending_series_game is not None
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 팀이 생성됐거나 경기를 처리 중일 때는 "
                 "음성채널 설정을 변경할 수 없습니다.\n"
                 "내전 종료 후 다시 설정해주세요.",
@@ -636,7 +638,7 @@ class Room(commands.Cog):
         }
 
         if len(selected_channel_ids) != 3:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 대기, 레드팀, 블루팀 채널은 "
                 "서로 다른 음성채널이어야 합니다.",
                 ephemeral=True
@@ -654,7 +656,7 @@ class Room(commands.Cog):
             != interaction.guild.id
             for channel in voice_channels
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 현재 서버에 속한 음성채널만 "
                 "설정할 수 있습니다.",
                 ephemeral=True
@@ -664,7 +666,7 @@ class Room(commands.Cog):
         bot_member = interaction.guild.me
 
         if bot_member is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 서버에서 봇의 권한 정보를 "
                 "확인할 수 없습니다.",
                 ephemeral=True
@@ -672,7 +674,7 @@ class Room(commands.Cog):
             return
 
         if not bot_member.guild_permissions.move_members:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 꼬붕봇에 `멤버 이동` 권한이 없습니다.\n"
                 "서버 역할 설정에서 권한을 허용해주세요.",
                 ephemeral=True
@@ -695,7 +697,7 @@ class Room(commands.Cog):
                 )
 
         if inaccessible_channels:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ 꼬붕봇이 접근할 수 없는 음성채널이 "
                 "있습니다.\n"
                 "필요한 권한: `채널 보기`, `연결`\n"
@@ -721,7 +723,7 @@ class Room(commands.Cog):
 
         join_cog.save_rooms_state()
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ **{room.room_name} 음성채널 설정 완료**\n\n"
             f"방 번호: `{room.room_id}`\n"
             f"대기 채널: {대기채널.mention}\n"
