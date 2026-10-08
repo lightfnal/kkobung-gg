@@ -251,6 +251,7 @@ class ExpiredInhouseView(discord.ui.View):
         ("명단 확인", "inhouse_list"),
         ("인원 선택", "inhouse_capacity"),
         ("팀 생성", "inhouse_make_teams"),
+        ("준비 잠금 해제", "inhouse_clear_setup_lock"),
         ("모집 종료", "inhouse_close"),
         ("모집 초기화", "inhouse_reset"),
         ("경기 시작", "match_start_button"),
@@ -2642,6 +2643,63 @@ class CaptainSetupView(discord.ui.View):
             ephemeral=True
         )
 
+    @discord.ui.button(
+        label="드래프트 준비 취소",
+        emoji="✖️",
+        style=discord.ButtonStyle.secondary,
+        row=1
+    )
+    async def cancel_setup_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if self.recruit_view._captain_setup_view is not self or self.started:
+            await interaction.response.send_message(
+                "⏳ 이미 시작했거나 종료된 드래프트 준비입니다.",
+                ephemeral=True
+            )
+            return
+
+        self.stop()
+        self.recruit_view._captain_setup_view = None
+        self.recruit_view.team_generating = False
+        if getattr(self, "_redraft_from_finished_team", False):
+            self.recruit_view.recruit_closed = True
+            for item in self.recruit_view.children:
+                if isinstance(item, discord.ui.Button):
+                    item.disabled = item.custom_id not in (
+                        "inhouse_list",
+                        "inhouse_reset",
+                        "inhouse_make_teams",
+                        "inhouse_clear_setup_lock"
+                    )
+            self.recruit_view.make_teams_button.disabled = (
+                len(self.room.players) != self.room.player_limit
+            )
+            if self.recruit_view.message is not None:
+                try:
+                    await self.recruit_view.message.edit(
+                        embed=self.recruit_view.create_embed(),
+                        view=self.recruit_view
+                    )
+                except discord.HTTPException:
+                    logger.exception(
+                        "캡틴 재드래프트 취소 후 모집 버튼 복구 실패 | 방=%s",
+                        self.room.room_id
+                    )
+        else:
+            await self.recruit_view.restore_recruitment_controls()
+        try:
+            await interaction.response.edit_message(
+                content="⏹️ 드래프트 준비를 취소했습니다. 참가 명단은 유지됩니다.",
+                view=None
+            )
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                "✅ 드래프트 준비를 취소했습니다. 참가 명단은 유지됩니다.",
+                ephemeral=True
+            )
+
     async def on_timeout(self):
         if self.recruit_view._captain_setup_view is self:
             self.recruit_view._captain_setup_view = None
@@ -4544,6 +4602,55 @@ class JoinView(discord.ui.View):
         finally:
             self.team_generating = False
             self.team_generation_user = None
+
+    @discord.ui.button(
+        label="준비 잠금 해제",
+        emoji="🔓",
+        style=discord.ButtonStyle.secondary,
+        custom_id="inhouse_clear_setup_lock",
+        row=2
+    )
+    async def clear_setup_lock_button(self, interaction, button):
+        """닫힌 준비 창 때문에 남은 임시 잠금만 운영자가 해제합니다."""
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        room = self.room
+        if self.join_cog.current_recruit_view is not self:
+            await interaction.response.send_message(
+                "❌ 가장 최근 모집창에서 잠금을 해제해주세요.",
+                ephemeral=True
+            )
+            return
+        if room.team_generation_lock.locked():
+            await interaction.response.send_message(
+                "⏳ 팀 편성 작업이 실제로 진행 중입니다. 작업이 끝난 뒤 다시 눌러주세요.",
+                ephemeral=True
+            )
+            return
+        if self._auction_setup_view is not None:
+            await interaction.response.send_message(
+                "⏳ 경매 준비창은 경매 창의 취소 버튼으로 종료해주세요.",
+                ephemeral=True
+            )
+            return
+        captain_setup = self._captain_setup_view
+        if not self.team_generating and captain_setup is None:
+            await interaction.response.send_message(
+                "✅ 해제할 준비 잠금이 없습니다.",
+                ephemeral=True
+            )
+            return
+
+        if captain_setup is not None:
+            captain_setup.stop()
+            self._captain_setup_view = None
+        self.team_generating = False
+        await self.restore_recruitment_controls()
+        await interaction.response.send_message(
+            "✅ 남아 있던 드래프트 준비 잠금을 해제했습니다. 참가 명단은 유지됩니다.",
+            ephemeral=True
+        )
 
     async def restore_recruitment_controls(self):
         """드래프트가 취소되면 모집 버튼 상태를 다시 엽니다."""
