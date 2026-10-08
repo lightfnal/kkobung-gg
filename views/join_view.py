@@ -2506,6 +2506,44 @@ class CaptainFirstPickView(discord.ui.View):
         embed.set_footer(text="합의되면 1-2-2-2-1 순서로 드래프트가 시작됩니다.")
         return embed
 
+    async def _publish_view(self, embed, view):
+        """현재 메시지를 갱신하고, 실패하면 같은 채널에 대체 메시지를 보냅니다."""
+        original_message = self.message
+        if original_message is not None:
+            try:
+                await original_message.edit(embed=embed, view=view)
+                return original_message
+            except Exception:
+                logger.exception(
+                    "캡틴 첫 픽 메시지 갱신 실패 | 방=%s",
+                    self.room.room_id
+                )
+
+        try:
+            replacement, _ = await self.join_cog.send_output_message(
+                room=self.room,
+                fallback_channel=getattr(original_message, "channel", None),
+                embed=embed,
+                view=view
+            )
+        except Exception:
+            logger.exception(
+                "캡틴 첫 픽 대체 메시지 전송 실패 | 방=%s",
+                self.room.room_id
+            )
+            return None
+
+        if replacement is not None and original_message is not None:
+            try:
+                await original_message.edit(
+                    content="↪️ 진행 화면이 갱신되었습니다. 새 메시지를 확인해주세요.",
+                    embed=None,
+                    view=None
+                )
+            except Exception:
+                pass
+        return replacement
+
     async def vote(self, interaction, side):
         user_id = str(interaction.user.id)
         if user_id not in self.captains.values():
@@ -2535,33 +2573,76 @@ class CaptainFirstPickView(discord.ui.View):
                 return
 
             self.votes[user_id] = side
-            if (
+            agreement_reached = (
                 len(self.votes) == 2
                 and len(set(self.votes.values())) == 1
-            ):
-                first_side = side
-                draft_view = CaptainDraftView(
-                    self.recruit_view,
-                    self.player_ids,
-                    self.profiles,
-                    red_captain=self.captains["red"],
-                    blue_captain=self.captains["blue"],
-                    first_side=first_side
-                )
-                draft_view.lock_acquired = self.lock_acquired
-                self.lock_acquired = False
-                draft_view.message = self.message
-                self.stop()
-                await self.message.edit(
-                    embed=draft_view.create_embed(),
-                    view=draft_view
+            )
+
+            if agreement_reached:
+                draft_view = None
+                updated_message = None
+                try:
+                    draft_view = CaptainDraftView(
+                        self.recruit_view,
+                        self.player_ids,
+                        self.profiles,
+                        red_captain=self.captains["red"],
+                        blue_captain=self.captains["blue"],
+                        first_side=side
+                    )
+                    draft_view.lock_acquired = self.lock_acquired
+                    self.lock_acquired = False
+                    self.stop()
+                    updated_message = await self._publish_view(
+                        draft_view.create_embed(),
+                        draft_view
+                    )
+                except Exception:
+                    logger.exception(
+                        "캡틴 첫 픽 합의 후 드래프트 전환 실패 | 방=%s",
+                        self.room.room_id
+                    )
+
+                if updated_message is None:
+                    if draft_view is not None:
+                        draft_view._release_room_lock()
+                    else:
+                        self._release_room_lock()
+                    self.recruit_view.team_generating = False
+                    self.recruit_view.recruit_closed = getattr(
+                        self.recruit_view,
+                        "_draft_was_closed",
+                        False
+                    )
+                    await self.recruit_view.restore_recruitment_controls()
+                    await interaction.followup.send(
+                        "❌ 드래프트 화면 전환에 실패했습니다. 모집창에서 다시 시작해주세요.",
+                        ephemeral=True
+                    )
+                    return
+
+                draft_view.message = updated_message
+                await interaction.followup.send(
+                    "✅ 두 캡틴이 합의했습니다. 드래프트가 시작됐습니다.",
+                    ephemeral=True
                 )
                 return
 
-            await self.message.edit(
-                embed=self.create_embed(),
-                view=self
+            updated_message = await self._publish_view(
+                self.create_embed(),
+                self
             )
+            if updated_message is not None:
+                self.message = updated_message
+                await interaction.followup.send(
+                    "✅ 선택을 저장했습니다. 다른 캡틴도 같은 버튼을 눌러야 시작됩니다.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "⚠️ 선택은 저장됐지만 화면 갱신에 실패했습니다. 봇 연결을 확인한 뒤 다시 눌러주세요.",
+                    ephemeral=True
+                )
 
     async def cancel_button(self, interaction):
         if not is_admin(interaction):
