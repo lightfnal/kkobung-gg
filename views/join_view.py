@@ -55,6 +55,14 @@ AUCTION_SIDES = (
 )
 
 
+async def send_ephemeral_response(interaction, content):
+    """Send an ephemeral result whether this interaction was already deferred."""
+    if interaction.response.is_done():
+        await interaction.followup.send(content, ephemeral=True)
+    else:
+        await interaction.response.send_message(content, ephemeral=True)
+
+
 def add_match_button_instructions(embed):
     """팀 편성 결과에 버튼 사용 순서를 짧게 붙입니다."""
     instruction = (
@@ -601,17 +609,20 @@ class MatchControlView(discord.ui.View):
             self.room
         )
         self.team_message = interaction.message
+        # The room lock can be busy while another room or match operation is
+        # finishing. Acknowledge this click before waiting for it.
+        await interaction.response.defer()
 
         async with self.room.operation_lock:
             if self.room.current_teams is None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ 먼저 팀을 생성해주세요.",
                     ephemeral=True
                 )
                 return
 
             if self.room.current_teams is not self.teams_reference:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ 팀이 다시 생성되어 이 경기 시작 버튼은 "
                     "만료되었습니다.\n"
                     "가장 최근 팀 메시지의 버튼을 사용해주세요.",
@@ -620,7 +631,7 @@ class MatchControlView(discord.ui.View):
                 return
 
             if self.room.match_in_progress:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ 이미 경기 중입니다.",
                     ephemeral=True
                 )
@@ -641,7 +652,7 @@ class MatchControlView(discord.ui.View):
                             progress["total_count"]
                             - progress["completed_count"]
                         )
-                        await interaction.response.send_message(
+                        await interaction.followup.send(
                             f"⏳ 이전 세트 경기번호 **{previous_match['id']}**의 "
                             f"챔피언 입력이 **{missing}명** 남았습니다.\n"
                             "각자 결과 메시지에서 `내 챔피언 입력`을 눌러주세요. "
@@ -674,9 +685,7 @@ class MatchControlView(discord.ui.View):
             self.blue_button.disabled = False
             self.end_series_button.disabled = True
 
-        await interaction.response.edit_message(
-            view=self
-        )
+        await interaction.message.edit(view=self)
 
         await interaction.followup.send(
             f"🎮 **{self.room.room_name} 경기가 "
@@ -994,7 +1003,10 @@ class TeamModeView(discord.ui.View):
                 content="⚖️ 자동 밸런스 팀을 편성하고 있습니다…",
                 view=None
             )
-            await self.recruit_view.generate_teams(interaction)
+            await self.recruit_view.generate_teams(
+                interaction,
+                allow_team_generating=True
+            )
         finally:
             self.recruit_view.team_generating = False
 
@@ -1018,10 +1030,17 @@ class TeamModeView(discord.ui.View):
             )
             return
 
+        # Reserve this room's team-generation flow before yielding to the DB
+        # read, so a second mode cannot open a competing setup at the same time.
+        self.recruit_view.team_generating = True
         # 프로필/시즌 정보를 동기 DB에서 읽으므로 먼저 버튼 상호작용을
         # 확인합니다. 이 조회가 Discord의 3초 응답 제한을 넘으면 버튼이
         # 실패한 것처럼 보이고 Unknown interaction 오류가 발생합니다.
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except Exception:
+            self.recruit_view.team_generating = False
+            raise
         try:
             profiles = _season_profiles_for_players(
                 self.join_cog,
@@ -1033,12 +1052,14 @@ class TeamModeView(discord.ui.View):
                 "캡틴 드래프트 참가자 프로필 조회 실패 | 방=%s",
                 self.room.room_id
             )
+            self.recruit_view.team_generating = False
             await interaction.followup.send(
                 "❌ 참가자 프로필을 확인하지 못했습니다. 잠시 후 다시 눌러주세요.",
                 ephemeral=True
             )
             return
         if errors:
+            self.recruit_view.team_generating = False
             await interaction.followup.send(
                 "❌ 참가자 프로필의 포지션 정보를 확인해주세요.\n"
                 + "\n".join(f"• {error}" for error in errors),
@@ -1050,7 +1071,6 @@ class TeamModeView(discord.ui.View):
             player_ids,
             profiles
         )
-        self.recruit_view.team_generating = True
         self.recruit_view._captain_setup_view = setup_view
         try:
             setup_view.message = await interaction.edit_original_response(
@@ -1271,7 +1291,18 @@ class AuctionSetupView(discord.ui.View):
         self.started = True
         self.recruit_view._auction_setup_view = None
         await interaction.response.defer(ephemeral=True)
-        await self.room.team_generation_lock.acquire()
+        try:
+            await asyncio.wait_for(
+                self.room.team_generation_lock.acquire(),
+                timeout=0.5
+            )
+        except asyncio.TimeoutError:
+            await self._rollback_start()
+            await interaction.followup.send(
+                "⏳ 이 내전방에서 다른 팀 편성 작업이 진행 중입니다. 끝난 뒤 경매를 다시 준비해주세요.",
+                ephemeral=True
+            )
+            return
         self.lock_acquired = True
 
         if list(self.room.players.keys()) != self.player_ids:
@@ -1396,6 +1427,7 @@ class PlayerLimitView(discord.ui.View):
 
     async def _select_limit(self, interaction, limit):
         room = self.room
+        await interaction.response.defer(ephemeral=True, thinking=True)
         async with room.operation_lock:
             if (
                 self.recruit_view.recruit_closed
@@ -1405,28 +1437,27 @@ class PlayerLimitView(discord.ui.View):
                 or room.match_transaction_active
                 or self.recruit_view.team_generating
             ):
-                await interaction.response.send_message(
-                    "❌ 모집 중이고 팀/경기가 없는 상태에서만 정원을 바꿀 수 있습니다.",
-                    ephemeral=True
+                await interaction.edit_original_response(
+                    content="❌ 모집 중이고 팀/경기가 없는 상태에서만 정원을 바꿀 수 있습니다."
                 )
                 return
             if len(room.players) > limit:
-                await interaction.response.send_message(
-                    f"❌ 현재 참가자가 {len(room.players)}명이라 "
-                    f"{limit}인 정원으로 바꿀 수 없습니다. 참가자를 줄인 뒤 다시 시도해주세요.",
-                    ephemeral=True
+                await interaction.edit_original_response(
+                    content=(
+                        f"❌ 현재 참가자가 {len(room.players)}명이라 "
+                        f"{limit}인 정원으로 바꿀 수 없습니다. 참가자를 줄인 뒤 다시 시도해주세요."
+                    )
                 )
                 return
             if limit not in (MAX_PLAYERS, MAX_AUCTION_PLAYERS):
-                await interaction.response.send_message(
-                    "❌ 지원하지 않는 모집 정원입니다.",
-                    ephemeral=True
+                await interaction.edit_original_response(
+                    content="❌ 지원하지 않는 모집 정원입니다."
                 )
                 return
 
             room.player_limit = limit
             self.join_cog.save_rooms_state()
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 content=(
                     f"✅ 모집 정원을 **{limit}명**으로 설정했습니다.\n"
                     + (
@@ -1867,6 +1898,14 @@ class AuctionView(discord.ui.View):
         self.recruit_view.team_generating = False
 
     async def _finish_auction(self):
+        try:
+            await self._finish_auction_locked()
+        finally:
+            # Even if Discord fails while publishing the committed result,
+            # do not leave this room permanently locked.
+            self._release_generation_lock()
+
+    async def _finish_auction_locked(self):
         self._finished = True
         self.stop()
         timer_task = self._timer_task
@@ -1925,7 +1964,6 @@ class AuctionView(discord.ui.View):
                     "inhouse_list",
                     "inhouse_reset"
                 )
-        self._release_generation_lock()
         if self.recruit_view.message is not None:
             try:
                 await self.recruit_view.message.edit(
@@ -1986,23 +2024,35 @@ class AuctionView(discord.ui.View):
 
         if len(assignments) == 2:
             guild = getattr(self.message, "guild", None)
-            await self.join_cog.move_members_to_voice_channel(
-                guild=guild,
-                user_ids=assignments["blue"].values(),
-                channel_id=self.room.blue_voice_channel_id
-            )
-            await self.join_cog.move_members_to_voice_channel(
-                guild=guild,
-                user_ids=assignments["red"].values(),
-                channel_id=self.room.red_voice_channel_id
-            )
+            try:
+                await self.join_cog.move_members_to_voice_channel(
+                    guild=guild,
+                    user_ids=assignments["blue"].values(),
+                    channel_id=self.room.blue_voice_channel_id
+                )
+                await self.join_cog.move_members_to_voice_channel(
+                    guild=guild,
+                    user_ids=assignments["red"].values(),
+                    channel_id=self.room.red_voice_channel_id
+                )
+            except Exception:
+                # 팀 저장은 이미 완료됐습니다. 음성 이동 실패가
+                # 경매 성공 상태나 결과 메시지 전송을 취소시키면 안 됩니다.
+                logger.exception(
+                    "경매 완료 후 음성 채널 이동 실패 | 방=%s",
+                    self.room.room_id
+                )
             add_match_button_instructions(embed)
-        result_message, _ = await self.join_cog.send_output_message(
-            room=self.room,
-            fallback_channel=getattr(self.message, "channel", None),
-            embed=embed,
-            view=MatchControlView(self.join_cog) if len(assignments) == 2 else None
-        )
+        try:
+            result_message, _ = await self.join_cog.send_output_message(
+                room=self.room,
+                fallback_channel=getattr(self.message, "channel", None),
+                embed=embed,
+                view=MatchControlView(self.join_cog) if len(assignments) == 2 else None
+            )
+        except Exception:
+            logger.exception("경매 완료 결과 메시지 전송 실패 | 방=%s", self.room.room_id)
+            result_message = None
         if self.message is not None:
             try:
                 await self.message.edit(
@@ -2076,7 +2126,14 @@ class CaptainSetupView(discord.ui.View):
         self.selected_captains = []
         self.message = None
         self.started = False
+        self.lock_acquired = False
         self.add_item(CaptainSelection(self))
+
+    def _release_room_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
 
     @discord.ui.button(
         label="드래프트 시작",
@@ -2135,8 +2192,21 @@ class CaptainSetupView(discord.ui.View):
             return
 
         self.started = True
-        self.recruit_view._captain_setup_view = None
         await interaction.response.defer(ephemeral=True)
+        try:
+            await asyncio.wait_for(
+                self.room.team_generation_lock.acquire(),
+                timeout=0.5
+            )
+        except asyncio.TimeoutError:
+            self.started = False
+            await interaction.followup.send(
+                "⏳ 이 내전방에서 다른 팀 편성 작업이 진행 중입니다. 끝난 뒤 다시 눌러주세요.",
+                ephemeral=True
+            )
+            return
+        self.lock_acquired = True
+        self.recruit_view._captain_setup_view = None
         self.recruit_view.team_generating = True
         self.recruit_view._draft_was_closed = self.recruit_view.recruit_closed
         self.recruit_view.recruit_closed = True
@@ -2161,13 +2231,21 @@ class CaptainSetupView(discord.ui.View):
             captain1=self.selected_captains[0],
             captain2=self.selected_captains[1]
         )
-        message, _ = await self.join_cog.send_output_message(
-            room=self.room,
-            fallback_channel=interaction.channel,
-            embed=first_pick_view.create_embed(),
-            view=first_pick_view
-        )
+        try:
+            message, _ = await self.join_cog.send_output_message(
+                room=self.room,
+                fallback_channel=interaction.channel,
+                embed=first_pick_view.create_embed(),
+                view=first_pick_view
+            )
+        except Exception:
+            logger.exception(
+                "캡틴 드래프트 시작 메시지 전송 실패 | 방=%s",
+                self.room.room_id
+            )
+            message = None
         if message is None:
+            self._release_room_lock()
             self.recruit_view.team_generating = False
             self.recruit_view.recruit_closed = self.recruit_view._draft_was_closed
             await self.recruit_view.restore_recruitment_controls()
@@ -2176,6 +2254,8 @@ class CaptainSetupView(discord.ui.View):
                 ephemeral=True
             )
             return
+        first_pick_view.lock_acquired = self.lock_acquired
+        self.lock_acquired = False
         first_pick_view.message = message
         if interaction.message is not None:
             try:
@@ -2223,6 +2303,7 @@ class CaptainFirstPickView(discord.ui.View):
         self.captains = {"red": captain1, "blue": captain2}
         self.votes = {}
         self.vote_lock = asyncio.Lock()
+        self.lock_acquired = False
         self.message = None
         self.add_item(FirstPickButton(self, "red", "캡틴1이 첫 픽"))
         self.add_item(FirstPickButton(self, "blue", "캡틴2가 첫 픽"))
@@ -2234,6 +2315,12 @@ class CaptainFirstPickView(discord.ui.View):
         )
         cancel.callback = self.cancel_button
         self.add_item(cancel)
+
+    def _release_room_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
 
     def create_embed(self):
         red_vote = self.votes.get(self.captains["red"], "아직 선택 안 함")
@@ -2302,6 +2389,8 @@ class CaptainFirstPickView(discord.ui.View):
                     blue_captain=self.captains["blue"],
                     first_side=first_side
                 )
+                draft_view.lock_acquired = self.lock_acquired
+                self.lock_acquired = False
                 draft_view.message = self.message
                 self.stop()
                 await self.message.edit(
@@ -2335,6 +2424,7 @@ class CaptainFirstPickView(discord.ui.View):
 
     async def abort(self, reason):
         self.stop()
+        self._release_room_lock()
         self.recruit_view.team_generating = False
         self.recruit_view.recruit_closed = getattr(
             self.recruit_view,
@@ -2424,8 +2514,15 @@ class CaptainDraftView(discord.ui.View):
         self.turn_index = 0
         self._finishing = False
         self._draft_lock = asyncio.Lock()
+        self.lock_acquired = False
         self.message = None
         self._refresh_controls()
+
+    def _release_room_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
 
     @property
     def current_side(self):
@@ -2545,19 +2642,35 @@ class CaptainDraftView(discord.ui.View):
         )
 
     async def finish_draft(self):
-        self.join_cog.activate_room(self.room)
-        red_assignment, _ = assign_positions(self.red_team, self.profiles)
-        blue_assignment, _ = assign_positions(self.blue_team, self.profiles)
-        self.room.current_teams = {
-            "red": red_assignment,
-            "blue": blue_assignment
-        }
-        self.room.current_balance_prediction = None
-        self.join_cog.last_team_signature = create_team_signature(
-            self.red_team,
-            self.blue_team
-        )
-        self.join_cog.save_rooms_state()
+        try:
+            self.join_cog.activate_room(self.room)
+            red_assignment, _ = assign_positions(self.red_team, self.profiles)
+            blue_assignment, _ = assign_positions(self.blue_team, self.profiles)
+            if red_assignment is None or blue_assignment is None:
+                raise ValueError("드래프트 팀의 포지션 배정을 만들지 못했습니다.")
+            self.room.current_teams = {
+                "red": red_assignment,
+                "blue": blue_assignment
+            }
+            self.room.current_balance_prediction = None
+            self.join_cog.last_team_signature = create_team_signature(
+                self.red_team,
+                self.blue_team
+            )
+            self.join_cog.save_rooms_state()
+        except Exception:
+            logger.exception(
+                "캡틴 드래프트 팀 배정/저장 실패 | 방=%s",
+                self.room.room_id
+            )
+            self.room.current_teams = None
+            self.room.current_balance_prediction = None
+            self.join_cog.last_team_signature = None
+            self._finishing = False
+            await self.abort("팀 배정 중 오류가 발생해 드래프트를 취소했습니다.")
+            return
+
+        self._release_room_lock()
 
         for item in self.recruit_view.children:
             if not isinstance(item, discord.ui.Button):
@@ -2607,23 +2720,41 @@ class CaptainDraftView(discord.ui.View):
             )
 
         guild = getattr(self.message, "guild", None)
-        await self.join_cog.move_members_to_voice_channel(
-            guild=guild,
-            user_ids=blue_assignment.values(),
-            channel_id=self.room.blue_voice_channel_id
-        )
-        await self.join_cog.move_members_to_voice_channel(
-            guild=self.message.guild if self.message else None,
-            user_ids=red_assignment.values(),
-            channel_id=self.room.red_voice_channel_id
-        )
+        try:
+            await asyncio.wait_for(
+                self.join_cog.move_members_to_voice_channel(
+                    guild=guild,
+                    user_ids=blue_assignment.values(),
+                    channel_id=self.room.blue_voice_channel_id
+                ),
+                timeout=15
+            )
+            await asyncio.wait_for(
+                self.join_cog.move_members_to_voice_channel(
+                    guild=self.message.guild if self.message else None,
+                    user_ids=red_assignment.values(),
+                    channel_id=self.room.red_voice_channel_id
+                ),
+                timeout=15
+            )
+        except Exception:
+            logger.exception(
+                "캡틴 드래프트 후 음성채널 이동 실패 | 방=%s",
+                self.room.room_id
+            )
         add_match_button_instructions(embed)
-        await self.join_cog.send_output_message(
-            room=self.room,
-            fallback_channel=getattr(self.message, "channel", None),
-            embed=embed,
-            view=MatchControlView(self.join_cog)
-        )
+        try:
+            await self.join_cog.send_output_message(
+                room=self.room,
+                fallback_channel=getattr(self.message, "channel", None),
+                embed=embed,
+                view=MatchControlView(self.join_cog)
+            )
+        except Exception:
+            logger.exception(
+                "캡틴 드래프트 최종 팀 메시지 전송 실패 | 방=%s",
+                self.room.room_id
+            )
         self.stop()
         if self.message is not None:
             try:
@@ -2657,6 +2788,7 @@ class CaptainDraftView(discord.ui.View):
             return
         self._finishing = True
         self.stop()
+        self._release_room_lock()
         self.recruit_view.team_generating = False
         self.recruit_view.recruit_closed = getattr(
             self.recruit_view,
@@ -2889,6 +3021,7 @@ class JoinView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        await interaction.response.defer()
         async with (
             self.join_cog.room_manager
             .management_lock
@@ -2911,32 +3044,38 @@ class JoinView(discord.ui.View):
 
             self.join_cog.reload_profiles()
 
+            if self.team_generating or room.team_generation_lock.locked():
+                await send_ephemeral_response(
+                    interaction,
+                    "⏳ 팀 편성, 경매 또는 드래프트 준비 중에는 참가 명단을 변경할 수 없습니다."
+                )
+                return
+
             if room.match_in_progress:
-                await interaction.response.send_message(
-                    "❌ 현재 경기가 진행 중입니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "❌ 현재 경기가 진행 중입니다."
                 )
                 return
 
             if self.recruit_closed:
-                await interaction.response.send_message(
-                    "🔒 모집이 종료되었습니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "🔒 모집이 종료되었습니다."
                 )
                 return
 
             if user_id not in self.join_cog.profiles:
-                await interaction.response.send_message(
-                    "❌ 내전에 참가하려면 먼저 `/가입`으로 "
-                    "프로필 등록을 완료해주세요.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "❌ 내전에 참가하려면 먼저 `/가입`으로 프로필 등록을 완료해주세요."
                 )
                 return
 
             if user_id in players:
-                await interaction.response.send_message(
-                    "❌ 이미 참가 중입니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "❌ 이미 참가 중입니다."
                 )
                 return
 
@@ -2944,10 +3083,9 @@ class JoinView(discord.ui.View):
                 waiting_number = (
                     list(room.waiting_players).index(user_id) + 1
                 )
-                await interaction.response.send_message(
-                    f"❌ 이미 대기 **{waiting_number}번**으로 "
-                    "등록되어 있습니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    f"❌ 이미 대기 **{waiting_number}번**으로 등록되어 있습니다."
                 )
                 return
 
@@ -2959,19 +3097,18 @@ class JoinView(discord.ui.View):
             )
 
             if other_room is not None:
-                await interaction.response.send_message(
+                await send_ephemeral_response(
+                    interaction,
                     "❌ 다른 내전에 이미 참가 중입니다.\n"
-                    f"현재 참가 중인 방: "
-                    f"**{other_room.room_name}**",
-                    ephemeral=True
+                    f"현재 참가 중인 방: **{other_room.room_name}**"
                 )
                 return
 
             if len(players) >= room.player_limit:
                 if len(room.waiting_players) >= MAX_WAITING_PLAYERS:
-                    await interaction.response.send_message(
-                        "❌ 참가자와 대기자 모집이 모두 마감되었습니다.",
-                        ephemeral=True
+                    await send_ephemeral_response(
+                        interaction,
+                        "❌ 참가자와 대기자 모집이 모두 마감되었습니다."
                     )
                     return
 
@@ -2981,7 +3118,7 @@ class JoinView(discord.ui.View):
                 self.join_cog.save_rooms_state()
                 waiting_number = len(room.waiting_players)
 
-                await interaction.response.edit_message(
+                await interaction.edit_original_response(
                     embed=self.create_embed(),
                     view=self
                 )
@@ -3006,7 +3143,7 @@ class JoinView(discord.ui.View):
                 len(players) < self.room.player_limit
             )
 
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 embed=self.create_embed(),
                 view=self
             )
@@ -3031,23 +3168,31 @@ class JoinView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        await interaction.response.defer()
         user_id = str(interaction.user.id)
         room = self.join_cog.active_room
 
         async with room.operation_lock:
             players = room.players
 
+            if self.team_generating or room.team_generation_lock.locked():
+                await send_ephemeral_response(
+                    interaction,
+                    "⏳ 팀 편성, 경매 또는 드래프트 준비 중에는 참가 명단을 변경할 수 없습니다."
+                )
+                return
+
             if self.recruit_closed:
-                await interaction.response.send_message(
-                    "🔒 모집이 종료되어 참가 취소가 불가능합니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "🔒 모집이 종료되어 참가 취소가 불가능합니다."
                 )
                 return
 
             if room.match_in_progress:
-                await interaction.response.send_message(
-                    "❌ 경기 중에는 참가 취소가 불가능합니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "❌ 경기 중에는 참가 취소가 불가능합니다."
                 )
                 return
 
@@ -3055,9 +3200,9 @@ class JoinView(discord.ui.View):
                 user_id not in players
                 and user_id not in room.waiting_players
             ):
-                await interaction.response.send_message(
-                    "❌ 현재 참가 또는 대기 중이 아닙니다.",
-                    ephemeral=True
+                await send_ephemeral_response(
+                    interaction,
+                    "❌ 현재 참가 또는 대기 중이 아닙니다."
                 )
                 return
 
@@ -3082,7 +3227,7 @@ class JoinView(discord.ui.View):
                 len(players) < self.room.player_limit
             )
 
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 embed=self.create_embed(),
                 view=self
             )
@@ -3109,6 +3254,7 @@ class JoinView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        await interaction.response.defer(ephemeral=True, thinking=True)
         room = self.join_cog.active_room
 
         async with room.operation_lock:
@@ -3121,9 +3267,8 @@ class JoinView(discord.ui.View):
             )
 
         if not player_ids and not waiting_ids:
-            await interaction.response.send_message(
-                "📋 현재 참가자와 대기자가 없습니다.",
-                ephemeral=True
+            await interaction.edit_original_response(
+                content="📋 현재 참가자와 대기자가 없습니다."
             )
             return
 
@@ -3151,12 +3296,13 @@ class JoinView(discord.ui.View):
                 )
             )
 
-        await interaction.response.send_message(
-            f"📋 **현재 참가자 "
+        await interaction.edit_original_response(
+            content=(
+                f"📋 **현재 참가자 "
                 f"({len(player_ids)}/{self.room.player_limit}명)**\n\n"
-            + "\n".join(participant_list)
-            + waiting_text,
-            ephemeral=True
+                + "\n".join(participant_list)
+                + waiting_text
+            )
         )
 
     @discord.ui.button(
@@ -3191,31 +3337,87 @@ class JoinView(discord.ui.View):
 
     async def generate_teams(
         self,
-        interaction: discord.Interaction
+        interaction: discord.Interaction,
+        allow_team_generating=False
     ):
         """현재 방의 팀 생성을 한 번에 하나씩 처리합니다."""
 
         room = self.join_cog.active_room
 
-        if room.team_generation_lock.locked():
-            send_method = (
-                interaction.followup.send
-                if interaction.response.is_done()
-                else interaction.response.send_message
+        # Slash commands can create a temporary JoinView. Route generation
+        # through the room's live recruitment view so its buttons and state
+        # are the ones that get locked after the teams are made.
+        active_view = room.current_recruit_view
+        if active_view is not None and active_view is not self:
+            return await active_view.generate_teams(
+                interaction,
+                allow_team_generating=allow_team_generating
             )
-            await send_method(
-                "⏳ 이 내전방은 이미 팀을 생성하고 있습니다.\n"
-                "현재 작업이 끝난 뒤 다시 시도해주세요.",
-                ephemeral=True
+
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
+        if active_view is not None:
+            setup_in_progress = (
+                getattr(active_view, "_captain_setup_view", None) is not None
+                or getattr(active_view, "_auction_setup_view", None) is not None
+            )
+            if setup_in_progress or (
+                active_view.team_generating and not allow_team_generating
+            ):
+                await send_ephemeral_response(
+                    interaction,
+                    "⏳ 이 내전방에서 팀 편성·드래프트·경매 준비가 진행 중입니다."
+                )
+                return
+
+        if getattr(room, "tournament_id", None):
+            await send_ephemeral_response(
+                interaction,
+                "❌ 미니컵 대진에서 불러온 경기는 일반 팀 재생성을 할 수 없습니다."
             )
             return
 
-        async with room.team_generation_lock:
-            async with room.operation_lock:
+        if room.team_generation_lock.locked():
+            await send_ephemeral_response(
+                interaction,
+                "⏳ 이 내전방은 이미 팀 생성·경매 작업 중입니다. 작업 종료 후 다시 시도해주세요."
+            )
+            return
+
+        try:
+            await asyncio.wait_for(
+                room.team_generation_lock.acquire(),
+                timeout=0.5
+            )
+        except asyncio.TimeoutError:
+            await send_ephemeral_response(
+                interaction,
+                "⏳ 이 내전방에서 다른 팀 생성 작업이 시작됐습니다. 잠시 뒤 다시 시도해주세요."
+            )
+            return
+
+        try:
+            try:
+                await asyncio.wait_for(
+                    room.operation_lock.acquire(),
+                    timeout=5
+                )
+            except asyncio.TimeoutError:
+                await send_ephemeral_response(
+                    interaction,
+                    "⏳ 이 내전방에서 다른 처리가 진행 중입니다. 잠시 뒤 다시 시도해주세요."
+                )
+                return
+            try:
                 await self._generate_teams(
                     interaction,
                     room
                 )
+            finally:
+                room.operation_lock.release()
+        finally:
+            room.team_generation_lock.release()
 
     async def _generate_teams(
         self,
@@ -3225,17 +3427,27 @@ class JoinView(discord.ui.View):
         """포지션과 레이팅을 고려해 팀을 생성합니다."""
 
         if room.mvp_vote_in_progress:
-            await interaction.response.send_message(
-                "❌ MVP 투표 중에는 팀을 다시 생성할 수 없습니다.",
-                ephemeral=True
+            await send_ephemeral_response(
+                interaction,
+                "❌ MVP 투표 중에는 팀을 다시 생성할 수 없습니다."
             )
             return
 
-        if room.match_in_progress:
-            await interaction.response.send_message(
-                "❌ 경기 진행 중에는 팀을 다시 생성할 수 없습니다.\n"
-                "먼저 세트를 정상 종료하거나 취소해주세요.",
-                ephemeral=True
+        if (
+            room.match_in_progress
+            or room.match_transaction_active
+            or room.pending_match_token is not None
+        ):
+            await send_ephemeral_response(
+                interaction,
+                "❌ 경기 진행 또는 결과 저장 중에는 팀을 다시 생성할 수 없습니다."
+            )
+            return
+
+        if room.series_game > 0:
+            await send_ephemeral_response(
+                interaction,
+                "❌ 세트 결과가 등록된 시리즈는 팀을 다시 생성할 수 없습니다. 먼저 `/내전종료`를 실행해주세요."
             )
             return
 
@@ -3248,10 +3460,9 @@ class JoinView(discord.ui.View):
             # 팀 생성 완료
             
 
-            await interaction.response.send_message(
-                f"❌ 아직 {room.player_limit}명이 모이지 않았습니다.\n"
-                f"현재 {len(players)}/{room.player_limit}명입니다.",
-                ephemeral=True
+            await send_ephemeral_response(
+                interaction,
+                f"❌ 아직 {room.player_limit}명이 모이지 않았습니다. 현재 {len(players)}/{room.player_limit}명입니다."
             )
             return
 
@@ -3259,9 +3470,9 @@ class JoinView(discord.ui.View):
 
             
 
-            await interaction.response.send_message(
-                "❌ 서버 안에서만 팀을 생성할 수 있습니다.",
-                ephemeral=True
+            await send_ephemeral_response(
+                interaction,
+                "❌ 서버 안에서만 팀을 생성할 수 있습니다."
             )
             return
 
@@ -3884,7 +4095,15 @@ class JoinView(discord.ui.View):
 
         room = self.join_cog.active_room
 
+        await interaction.response.defer()
+
         async with room.operation_lock:
+            if self.team_generating or room.team_generation_lock.locked():
+                await send_ephemeral_response(
+                    interaction,
+                    "⏳ 팀 편성, 경매 또는 드래프트 중에는 모집을 변경할 수 없습니다."
+                )
+                return
             if self.recruit_closed:
                 if (
                     room.current_teams is not None
@@ -3892,10 +4111,9 @@ class JoinView(discord.ui.View):
                     or room.mvp_vote_in_progress
                     or room.match_transaction_active
                 ):
-                    await interaction.response.send_message(
-                        "❌ 팀이 생성됐거나 경기를 처리 중일 때는 "
-                        "모집을 다시 열 수 없습니다.",
-                        ephemeral=True
+                    await send_ephemeral_response(
+                        interaction,
+                        "❌ 팀이 생성됐거나 경기를 처리 중일 때는 모집을 다시 열 수 없습니다."
                     )
                     return
 
@@ -3935,7 +4153,7 @@ class JoinView(discord.ui.View):
                 button.style = discord.ButtonStyle.success
                 result_message = "🔒 모집을 종료했습니다."
 
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 embed=self.create_embed(),
                 view=self
             )
@@ -3964,9 +4182,28 @@ class JoinView(discord.ui.View):
 
         room = self.join_cog.active_room
 
+        await interaction.response.defer()
+
         async with room.operation_lock:
-            if room.tournament_id and room.tournament_fixture_no:
-                release_fixture(room.tournament_id, room.tournament_fixture_no)
+            if self.team_generating or room.team_generation_lock.locked():
+                await send_ephemeral_response(
+                    interaction,
+                    "⏳ 팀 편성, 경매 또는 드래프트 중에는 모집을 초기화할 수 없습니다."
+                )
+                return
+            fixture_released = True
+            tournament_id = getattr(room, "tournament_id", None)
+            fixture_no = getattr(room, "tournament_fixture_no", None)
+            if tournament_id and fixture_no:
+                try:
+                    fixture_released = release_fixture(tournament_id, fixture_no)
+                except Exception:
+                    fixture_released = False
+                    logger.exception(
+                        "모집 초기화 중 미니컵 대진 반환 실패 | 방=%s | 대진=%s",
+                        room.room_id,
+                        fixture_no
+                    )
             room.reset_game(keep_recruit_view=True)
 
             self.join_cog.save_rooms_state()
@@ -3984,12 +4221,12 @@ class JoinView(discord.ui.View):
 
             self.make_teams_button.disabled = True
 
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 embed=self.create_embed(),
                 view=self
             )
 
-            await interaction.followup.send(
-                "🔄 모집이 초기화되었습니다.",
-                ephemeral=True
-            )
+            message = "🔄 모집이 초기화되었습니다."
+            if not fixture_released:
+                message += "\n⚠️ 미니컵 대진을 대기 상태로 되돌리지 못했습니다. 대진 상태를 확인해주세요."
+            await interaction.followup.send(message, ephemeral=True)
