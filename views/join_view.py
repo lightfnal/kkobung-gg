@@ -1190,14 +1190,13 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        setup_view = None
+        setup_view = CaptainSetupView(
+            self.recruit_view,
+            player_ids,
+            profiles
+        )
+        self.recruit_view._captain_setup_view = setup_view
         try:
-            setup_view = CaptainSetupView(
-                self.recruit_view,
-                player_ids,
-                profiles
-            )
-            self.recruit_view._captain_setup_view = setup_view
             setup_view.message = await interaction.edit_original_response(
                 content=(
                     "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
@@ -1205,9 +1204,8 @@ class TeamModeView(discord.ui.View):
                 ),
                 view=setup_view
             )
-        except Exception:
-            if self.recruit_view._captain_setup_view is setup_view:
-                self.recruit_view._captain_setup_view = None
+        except discord.HTTPException:
+            self.recruit_view._captain_setup_view = None
             self.recruit_view.team_generating = False
             logger.exception(
                 "캡틴 드래프트 선택창 전송 실패 | 방=%s",
@@ -2263,9 +2261,6 @@ class CaptainSetupView(discord.ui.View):
         self.room = recruit_view.room
         self.player_ids = list(player_ids)
         self.profiles = profiles
-        # CaptainSelection is shared with AuctionSetupView and reads this
-        # attribute to configure its dropdown. Captain drafts always select 2.
-        self.captain_count = 2
         self.selected_captains = []
         self.message = None
         self.started = False
@@ -2410,9 +2405,7 @@ class CaptainSetupView(discord.ui.View):
                 pass
         await interaction.followup.send(
             "✅ 캡틴들에게 첫 픽 담당을 합의해달라고 안내했습니다.\n"
-            "테스트가 필요하면 아래 운영자 전용 버튼으로 캡틴1 선픽을 확정할 수 있습니다.\n"
             f"진행 메시지: {message.jump_url}",
-            view=AdminFirstPickControlView(first_pick_view),
             ephemeral=True
         )
 
@@ -2433,27 +2426,6 @@ class FirstPickButton(discord.ui.Button):
 
     async def callback(self, interaction):
         await self.first_pick_view.vote(interaction, self.side)
-
-
-class AdminFirstPickControlView(discord.ui.View):
-    """드래프트를 시작한 관리자/내전 진행자에게만 보이는 개인 운영 버튼."""
-
-    def __init__(self, first_pick_view):
-        super().__init__(timeout=1800)
-        self.first_pick_view = first_pick_view
-        button = discord.ui.Button(
-            label="운영자 단독 테스트 시작 · 캡틴1 선픽",
-            emoji="🛠️",
-            style=discord.ButtonStyle.secondary
-        )
-        button.callback = self.force_captain1_first
-        self.add_item(button)
-
-    async def force_captain1_first(self, interaction):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
-            return
-        await self.first_pick_view.force_first_pick(interaction, "red")
 
 
 class CaptainFirstPickView(discord.ui.View):
@@ -2513,34 +2485,6 @@ class CaptainFirstPickView(discord.ui.View):
         embed.set_footer(text="합의되면 1-2-2-2-1 순서로 드래프트가 시작됩니다.")
         return embed
 
-    async def _start_draft(self, first_side):
-        draft_view = CaptainDraftView(
-            self.recruit_view,
-            self.player_ids,
-            self.profiles,
-            red_captain=self.captains["red"],
-            blue_captain=self.captains["blue"],
-            first_side=first_side
-        )
-        draft_view.lock_acquired = self.lock_acquired
-        self.lock_acquired = False
-        draft_view.message = self.message
-        self.stop()
-        await self.message.edit(
-            embed=draft_view.create_embed(),
-            view=draft_view
-        )
-
-    async def _room_state_allows_start(self):
-        if (
-            list(self.room.players.keys()) != self.player_ids
-            or self.room.current_teams is not None
-            or self.room.match_in_progress
-        ):
-            await self.abort("참가자 또는 경기 상태가 변경되어 드래프트가 취소되었습니다.")
-            return False
-        return True
-
     async def vote(self, interaction, side):
         user_id = str(interaction.user.id)
         if user_id not in self.captains.values():
@@ -2557,7 +2501,12 @@ class CaptainFirstPickView(discord.ui.View):
                     ephemeral=True
                 )
                 return
-            if not await self._room_state_allows_start():
+            if (
+                list(self.room.players.keys()) != self.player_ids
+                or self.room.current_teams is not None
+                or self.room.match_in_progress
+            ):
+                await self.abort("참가자 또는 경기 상태가 변경되어 드래프트가 취소되었습니다.")
                 await interaction.followup.send(
                     "❌ 참가자나 경기 상태가 바뀌어 드래프트를 취소했습니다.",
                     ephemeral=True
@@ -2569,35 +2518,29 @@ class CaptainFirstPickView(discord.ui.View):
                 len(self.votes) == 2
                 and len(set(self.votes.values())) == 1
             ):
-                await self._start_draft(side)
+                first_side = side
+                draft_view = CaptainDraftView(
+                    self.recruit_view,
+                    self.player_ids,
+                    self.profiles,
+                    red_captain=self.captains["red"],
+                    blue_captain=self.captains["blue"],
+                    first_side=first_side
+                )
+                draft_view.lock_acquired = self.lock_acquired
+                self.lock_acquired = False
+                draft_view.message = self.message
+                self.stop()
+                await self.message.edit(
+                    embed=draft_view.create_embed(),
+                    view=draft_view
+                )
                 return
 
             await self.message.edit(
                 embed=self.create_embed(),
                 view=self
             )
-
-    async def force_first_pick(self, interaction, side):
-        """Privileged operator may bypass captain consensus for testing."""
-        await interaction.response.defer(ephemeral=True)
-        async with self.vote_lock:
-            if self.is_finished():
-                await interaction.followup.send(
-                    "이 첫 픽 선택은 이미 처리되었습니다.",
-                    ephemeral=True
-                )
-                return
-            if not await self._room_state_allows_start():
-                await interaction.followup.send(
-                    "❌ 참가자나 경기 상태가 바뀌어 드래프트를 취소했습니다.",
-                    ephemeral=True
-                )
-                return
-            await self._start_draft(side)
-        await interaction.edit_original_response(
-            content="✅ 운영자 권한으로 캡틴1 선픽을 확정하고 드래프트를 시작했습니다.",
-            view=None
-        )
 
     async def cancel_button(self, interaction):
         if not is_admin(interaction):
