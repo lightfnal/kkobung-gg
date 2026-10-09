@@ -537,7 +537,11 @@ def player_detail(
 
                     mp.team,
                     mp.won,
-                    mp.position,
+                    COALESCE(
+                        NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
+                        'UNKNOWN'
+                    ) AS position,
                     mp.rating_before,
                     mp.rating_after,
                     mp.rating_change,
@@ -880,9 +884,10 @@ def player_detail(
                 SELECT
                     COALESCE(
                         NULLIF(
-                            TRIM(mp.position),
+                            UPPER(TRIM(mpc.actual_position)),
                             ''
                         ),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
                         'UNKNOWN'
                     ) AS position,
 
@@ -909,15 +914,20 @@ def player_detail(
                 JOIN matches m
                     ON m.id = mp.match_id
 
+                LEFT JOIN match_player_champions mpc
+                    ON mpc.match_id = mp.match_id
+                   AND mpc.discord_id = mp.discord_id
+
                 WHERE mp.discord_id = ?
                   AND m.season_id = ?
 
                 GROUP BY
                     COALESCE(
                         NULLIF(
-                            TRIM(mp.position),
+                            UPPER(TRIM(mpc.actual_position)),
                             ''
                         ),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
                         'UNKNOWN'
                     )
 

@@ -506,7 +506,11 @@ def analysis_page(
                         m.match_date,
                         m.winner,
                         mp.team,
-                        mp.position,
+                        COALESCE(
+                            NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                            NULLIF(UPPER(TRIM(mp.position)), ''),
+                            'UNKNOWN'
+                        ) AS position,
                         mp.won,
                         mp.rating_before,
                         mp.rating_after,
@@ -514,6 +518,9 @@ def analysis_page(
                     FROM match_players mp
                     JOIN matches m
                         ON m.id = mp.match_id
+                    LEFT JOIN match_player_champions mpc
+                        ON mpc.match_id = mp.match_id
+                       AND mpc.discord_id = mp.discord_id
                     WHERE mp.discord_id = ?
                       AND (
                           ? IS NULL
@@ -756,9 +763,10 @@ def analysis_page(
                     SELECT
                         COALESCE(
                             NULLIF(
-                                TRIM(position),
+                                UPPER(TRIM(mpc.actual_position)),
                                 ''
                             ),
+                            NULLIF(UPPER(TRIM(mp.position)), ''),
                             'UNKNOWN'
                         ) AS position,
 
@@ -789,6 +797,9 @@ def analysis_page(
                     FROM match_players mp
                     JOIN matches m
                         ON m.id = mp.match_id
+                    LEFT JOIN match_player_champions mpc
+                        ON mpc.match_id = mp.match_id
+                       AND mpc.discord_id = mp.discord_id
 
                     WHERE mp.discord_id = ?
                       AND (
@@ -802,9 +813,10 @@ def analysis_page(
                     GROUP BY
                         COALESCE(
                             NULLIF(
-                                TRIM(position),
+                                UPPER(TRIM(mpc.actual_position)),
                                 ''
                             ),
+                            NULLIF(UPPER(TRIM(mp.position)), ''),
                             'UNKNOWN'
                         )
 

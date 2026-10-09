@@ -183,7 +183,11 @@ def history_page(
                     mp.match_id,
                     mp.discord_id,
                     mp.team,
-                    mp.position,
+                    COALESCE(
+                        NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
+                        'UNKNOWN'
+                    ) AS position,
                     mp.won,
                     mp.rating_change,
 
@@ -197,6 +201,10 @@ def history_page(
                 LEFT JOIN players p
                     ON p.discord_id
                         = mp.discord_id
+
+                LEFT JOIN match_player_champions mpc
+                    ON mpc.match_id = mp.match_id
+                   AND mpc.discord_id = mp.discord_id
 
                 WHERE mp.match_id
                     IN ({placeholders})
@@ -216,11 +224,10 @@ def history_page(
                         ELSE 2
                     END,
 
-                    CASE UPPER(
-                        COALESCE(
-                            mp.position,
-                            ''
-                        )
+                    CASE COALESCE(
+                        NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
+                        ''
                     )
                         WHEN 'TOP' THEN 1
                         WHEN 'JUNGLE' THEN 2

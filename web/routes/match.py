@@ -95,7 +95,11 @@ def match_detail(
             SELECT
                 mp.discord_id,
                 mp.team,
-                mp.position,
+                COALESCE(
+                    NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                    NULLIF(UPPER(TRIM(mp.position)), ''),
+                    'UNKNOWN'
+                ) AS position,
                 mp.won,
 
                 mp.rating_before,
@@ -132,11 +136,10 @@ def match_detail(
                     ELSE 2
                 END,
 
-                CASE UPPER(
-                    COALESCE(
-                        mp.position,
-                        ''
-                    )
+                CASE COALESCE(
+                    NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                    NULLIF(UPPER(TRIM(mp.position)), ''),
+                    ''
                 )
                     WHEN 'TOP' THEN 1
                     WHEN 'JUNGLE' THEN 2

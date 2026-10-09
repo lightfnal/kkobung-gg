@@ -90,7 +90,11 @@ def history_api():
                 SELECT
                     mp.discord_id,
                     mp.team,
-                    mp.position,
+                    COALESCE(
+                        NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
+                        'UNKNOWN'
+                    ) AS position,
                     mp.won,
                     mp.rating_before,
                     mp.rating_after,
@@ -107,6 +111,10 @@ def history_api():
                     ON p.discord_id
                         = mp.discord_id
 
+                LEFT JOIN match_player_champions mpc
+                    ON mpc.match_id = mp.match_id
+                   AND mpc.discord_id = mp.discord_id
+
                 WHERE mp.match_id = ?
 
                 ORDER BY
@@ -121,7 +129,11 @@ def history_api():
                         ELSE 3
                     END,
 
-                    CASE UPPER(mp.position)
+                    CASE COALESCE(
+                        NULLIF(UPPER(TRIM(mpc.actual_position)), ''),
+                        NULLIF(UPPER(TRIM(mp.position)), ''),
+                        ''
+                    )
 
                         WHEN 'TOP'
                         THEN 1
