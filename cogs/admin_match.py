@@ -51,6 +51,125 @@ class AdminMatch(commands.Cog):
         self._guild_commands_synced = False
 
     @discord.app_commands.command(
+        name="팀결과복구",
+        description="저장된 현재 팀 편성 결과 메시지를 다시 게시합니다."
+    )
+    async def repost_current_team_result(self, interaction: discord.Interaction):
+        """Rebuild the missing result card from the room's saved team state."""
+        if not (is_admin(interaction) or is_match_operator(interaction)):
+            await send_match_operator_only_message(interaction)
+            return
+
+        join_cog = get_join_cog(self.bot)
+        if join_cog is None or not await join_cog.require_room(interaction):
+            return
+
+        room = join_cog.active_room
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        if room.team_generation_lock.locked():
+            await interaction.followup.send(
+                "⏳ 팀 편성 작업이 진행 중입니다. 끝난 뒤 다시 실행해주세요.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            await asyncio.wait_for(room.operation_lock.acquire(), timeout=5)
+        except asyncio.TimeoutError:
+            await interaction.followup.send(
+                "⏳ 이 내전방에서 다른 처리가 진행 중입니다. 잠시 뒤 다시 실행해주세요.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            teams = room.current_teams
+            players = {str(user_id) for user_id in room.players}
+            red = teams.get("red") if isinstance(teams, dict) else None
+            blue = teams.get("blue") if isinstance(teams, dict) else None
+            team_ids = (
+                [str(user_id) for assignment in (red, blue) if isinstance(assignment, dict)
+                 for user_id in assignment.values()]
+                if isinstance(red, dict) and isinstance(blue, dict) else []
+            )
+
+            if room.match_in_progress or room.match_transaction_active or room.pending_match_token is not None:
+                await interaction.followup.send(
+                    "❌ 경기가 진행 중이거나 결과 저장 중이라 팀 안내를 다시 게시할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+            if (
+                not isinstance(red, dict)
+                or not isinstance(blue, dict)
+                or len(red) != MAX_PLAYERS // 2
+                or len(blue) != MAX_PLAYERS // 2
+                or len(set(team_ids)) != MAX_PLAYERS
+                or set(team_ids) != players
+            ):
+                await interaction.followup.send(
+                    "❌ 복구할 팀 정보가 없거나 참가자 명단과 맞지 않습니다. 모집 초기화는 누르지 말고 관리자에게 알려주세요.",
+                    ephemeral=True
+                )
+                return
+
+            embed = discord.Embed(
+                title=f"✅ {room.room_name} · 팀 편성 결과 복구",
+                description=(
+                    f"🏠 **{room.room_name}** · 방 **{room.room_id}**\n"
+                    f"👥 참가자 **{len(players)}명**\n"
+                    f"📊 BO5 점수: 🔴 **{room.series_score['red']} : "
+                    f"{room.series_score['blue']}** 🔵"
+                )
+            )
+            for side, assignment, label in (
+                ("red", red, "🔴 레드팀"),
+                ("blue", blue, "🔵 블루팀")
+            ):
+                lines = [
+                    f"**{position}** — <@{user_id}>"
+                    for position, user_id in assignment.items()
+                ]
+                embed.add_field(name=label, value="\n".join(lines), inline=True)
+
+            add_match_button_instructions(embed)
+            control_view = MatchControlView(join_cog)
+            result_message, used_fallback = await join_cog.send_output_message(
+                room=room,
+                fallback_channel=interaction.channel,
+                embed=embed,
+                view=control_view
+            )
+            if result_message is None:
+                control_view.stop()
+                await interaction.followup.send(
+                    "❌ 저장된 팀 정보는 확인했지만 결과 메시지를 보낼 수 없습니다. 봇의 채널 보기·메시지 보내기 권한을 확인해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            control_view.team_message = result_message
+            if used_fallback:
+                await interaction.followup.send(
+                    f"✅ 저장된 팀 결과를 이 채널에 다시 게시했습니다.\n{result_message.jump_url}",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"✅ 저장된 팀 결과를 다시 게시했습니다.\n{result_message.jump_url}",
+                    ephemeral=True
+                )
+        except Exception:
+            logger.exception("팀 결과 메시지 복구 실패 | 방=%s", room.room_id)
+            await interaction.followup.send(
+                "❌ 팀 결과 복구 중 오류가 발생했습니다. 기존 팀 상태는 초기화하지 않았습니다.",
+                ephemeral=True
+            )
+        finally:
+            room.operation_lock.release()
+
+    @discord.app_commands.command(
         name="단판재편성",
         description="현재 BO5를 여기서 끝내고 같은 10명으로 매 판 팀을 다시 편성합니다."
     )
