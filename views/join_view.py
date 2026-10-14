@@ -3,6 +3,7 @@ import copy
 import logging
 import os
 import random
+import time
 import discord
 
 from config import (
@@ -1122,6 +1123,7 @@ class TeamModeView(discord.ui.View):
             )
             return
         self.recruit_view.team_generating = True
+        self.recruit_view._team_generation_started_at = time.monotonic()
         try:
             await interaction.response.edit_message(
                 content="⚖️ 자동 밸런스 팀을 편성하고 있습니다…",
@@ -1141,8 +1143,36 @@ class TeamModeView(discord.ui.View):
     )
     async def captain_button(self, interaction, button):
         if self.recruit_view.team_generating:
+            active_setup = getattr(
+                self.recruit_view,
+                "_captain_setup_view",
+                None
+            )
+            if (
+                active_setup is not None
+                and not active_setup.is_finished()
+                and not active_setup.started
+            ):
+                # If the first ephemeral setup was dismissed or failed to
+                # appear on the client, issue a fresh setup message instead
+                # of leaving the admin stuck behind the busy guard.
+                setup_view = CaptainSetupView(
+                    self.recruit_view,
+                    list(self.room.players.keys()),
+                    active_setup.profiles
+                )
+                setup_view.selected_captains = list(
+                    active_setup.selected_captains
+                )
+                self.recruit_view._captain_setup_view = setup_view
+                await interaction.response.send_message(
+                    "🎖️ 드래프트 캡틴 선택창을 다시 열었습니다. 캡틴 2명을 선택해주세요.",
+                    view=setup_view,
+                    ephemeral=True
+                )
+                return
             await interaction.response.send_message(
-                "⏳ 이미 팀 편성 또는 드래프트가 진행 중입니다.",
+                "⏳ 팀 편성 작업이 진행 중입니다. 잠시 기다려주세요. 진행 중인 캡틴 선택창이 보이지 않으면 다시 눌러 창을 열 수 있습니다.",
                 ephemeral=True
             )
             return
@@ -1157,6 +1187,7 @@ class TeamModeView(discord.ui.View):
         # Reserve this room's team-generation flow before yielding to the DB
         # read, so a second mode cannot open a competing setup at the same time.
         self.recruit_view.team_generating = True
+        self.recruit_view._team_generation_started_at = time.monotonic()
         # 프로필/시즌 정보를 동기 DB에서 읽으므로 먼저 버튼 상호작용을
         # 확인합니다. 이 조회가 Discord의 3초 응답 제한을 넘으면 버튼이
         # 실패한 것처럼 보이고 Unknown interaction 오류가 발생합니다.
@@ -1190,13 +1221,14 @@ class TeamModeView(discord.ui.View):
                 ephemeral=True
             )
             return
-        setup_view = CaptainSetupView(
-            self.recruit_view,
-            player_ids,
-            profiles
-        )
-        self.recruit_view._captain_setup_view = setup_view
+        setup_view = None
         try:
+            setup_view = CaptainSetupView(
+                self.recruit_view,
+                player_ids,
+                profiles
+            )
+            self.recruit_view._captain_setup_view = setup_view
             setup_view.message = await interaction.edit_original_response(
                 content=(
                     "🎖️ 드래프트를 이끌 캡틴 2명을 선택한 뒤 시작을 눌러주세요.\n"
@@ -1204,8 +1236,9 @@ class TeamModeView(discord.ui.View):
                 ),
                 view=setup_view
             )
-        except discord.HTTPException:
-            self.recruit_view._captain_setup_view = None
+        except Exception:
+            if self.recruit_view._captain_setup_view is setup_view:
+                self.recruit_view._captain_setup_view = None
             self.recruit_view.team_generating = False
             logger.exception(
                 "캡틴 드래프트 선택창 전송 실패 | 방=%s",
@@ -1240,6 +1273,7 @@ class TeamModeView(discord.ui.View):
         # synchronous reads so Discord's 3-second interaction deadline cannot
         # expire while preparing either the 10-player or 20-player auction.
         self.recruit_view.team_generating = True
+        self.recruit_view._team_generation_started_at = time.monotonic()
         setup_view = None
         setup_ready = False
         try:
@@ -1453,6 +1487,7 @@ class AuctionSetupView(discord.ui.View):
 
         self.recruit_view._draft_was_closed = self.recruit_view.recruit_closed
         self.recruit_view.recruit_closed = True
+        self.recruit_view._team_generation_started_at = time.monotonic()
         for item in self.recruit_view.children:
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
@@ -2346,6 +2381,7 @@ class CaptainSetupView(discord.ui.View):
         self.lock_acquired = True
         self.recruit_view._captain_setup_view = None
         self.recruit_view.team_generating = True
+        self.recruit_view._team_generation_started_at = time.monotonic()
         self.recruit_view._draft_was_closed = self.recruit_view.recruit_closed
         self.recruit_view.recruit_closed = True
         for item in self.recruit_view.children:
@@ -2962,6 +2998,7 @@ class JoinView(discord.ui.View):
 
         # 팀 생성 중복 실행 방지
         self.team_generating = False
+        self._team_generation_started_at = None
         self._captain_setup_view = None
         self._auction_setup_view = None
 
@@ -4172,15 +4209,76 @@ class JoinView(discord.ui.View):
                 interaction
             )
             return
-        
-        if self.team_generating:
+
+        if self.room.current_teams is not None:
             await interaction.response.send_message(
-                "⏳ 이미 팀 생성 중입니다.",
+                "❌ 이미 팀이 생성되어 있습니다. 현재 내전을 종료하거나 모집 초기화 후 팀을 다시 편성해주세요.",
                 ephemeral=True
             )
             return
+        
+        if self.team_generating:
+            active_setup = self._captain_setup_view
+            if (
+                active_setup is not None
+                and not active_setup.is_finished()
+                and not active_setup.started
+            ):
+                # Reopen a fresh ephemeral copy if the first setup response
+                # was dismissed or did not render on the admin's client.
+                setup_view = CaptainSetupView(
+                    self,
+                    list(self.room.players.keys()),
+                    active_setup.profiles
+                )
+                setup_view.selected_captains = list(
+                    active_setup.selected_captains
+                )
+                self._captain_setup_view = setup_view
+                await interaction.response.send_message(
+                    "🎖️ 캡틴 드래프트 선택창을 다시 열었습니다. 캡틴 2명을 선택해주세요.",
+                    view=setup_view,
+                    ephemeral=True
+                )
+                return
+
+            active_auction = self._auction_setup_view
+            if (
+                active_auction is not None
+                and not active_auction.is_finished()
+            ):
+                await interaction.response.send_message(
+                    "🔨 경매 준비창이 이미 열려 있습니다. 이전 안내 메시지를 확인해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            started_at = self._team_generation_started_at
+            stale = (
+                not self.room.team_generation_lock.locked()
+                and (
+                    started_at is None
+                    or time.monotonic() - started_at > 15
+                )
+            )
+            if not stale:
+                await interaction.response.send_message(
+                    "⏳ 팀 편성 요청을 처리 중입니다. 잠시 뒤 다시 눌러주세요.",
+                    ephemeral=True
+                )
+                return
+
+            logger.warning(
+                "정지된 팀 편성 상태를 버튼 재시도로 해제 | 방=%s",
+                self.room.room_id
+            )
+            self.team_generating = False
+            self.team_generation_user = None
+            self._captain_setup_view = None
+            self._auction_setup_view = None
 
         self.team_generating = True
+        self._team_generation_started_at = time.monotonic()
         self.team_generation_user = (
             interaction.user.id
         )
@@ -4220,6 +4318,7 @@ class JoinView(discord.ui.View):
 
         finally:
             self.team_generating = False
+            self._team_generation_started_at = None
             self.team_generation_user = None
 
     async def restore_recruitment_controls(self):
