@@ -1527,7 +1527,8 @@ class AuctionSetupView(discord.ui.View):
         auction_view.message = message
         auction_view.lock_acquired = True
         self.lock_acquired = False
-        auction_view.start_lot_timer()
+        # Keep the backend timeout aligned with the deadline already shown in the embed.
+        auction_view.start_lot_timer(reset_deadline=False)
         if interaction.message is not None:
             try:
                 await interaction.message.edit(
@@ -1667,11 +1668,20 @@ class AuctionBidButton(discord.ui.Button):
         super().__init__(label=label, style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction):
-        await self.auction_view.place_bid(
-            interaction,
-            self.side,
-            expected_lot=self.lot_index
-        )
+        try:
+            await self.auction_view.place_bid(
+                interaction,
+                self.side,
+                expected_lot=self.lot_index
+            )
+        except Exception:
+            logger.exception(
+                "경매 입찰 버튼 처리 실패 | 방=%s | 팀=%s | 대상=%s",
+                self.auction_view.room.room_id,
+                self.side,
+                self.lot_index
+            )
+            await self.auction_view._report_interaction_failure(interaction)
 
 
 class AuctionRetryButton(discord.ui.Button):
@@ -1684,7 +1694,14 @@ class AuctionRetryButton(discord.ui.Button):
         )
 
     async def callback(self, interaction):
-        await self.auction_view.retry_unsold_players(interaction)
+        try:
+            await self.auction_view.retry_unsold_players(interaction)
+        except Exception:
+            logger.exception(
+                "경매 재입찰 버튼 처리 실패 | 방=%s",
+                self.auction_view.room.room_id
+            )
+            await self.auction_view._report_interaction_failure(interaction)
 
 
 class AuctionView(discord.ui.View):
@@ -1730,6 +1747,7 @@ class AuctionView(discord.ui.View):
         self.current_bidder = None
         self._auction_lock = asyncio.Lock()
         self._timer_task = None
+        self._lot_deadline = time.time() + AUCTION_LOT_SECONDS
         self._finished = False
         self.lock_acquired = False
         self.message = None
@@ -1787,6 +1805,7 @@ class AuctionView(discord.ui.View):
                 f"대상 **{self.lot_index + 1}/{len(self.lots)}**\n"
                 f"{self._player_label(current_player)}\n\n"
                 f"{bidding_text}\n"
+                f"⏳ 남은 입찰 시간: <t:{int(self._lot_deadline)}:R>\n"
                 f"입찰 시간은 {AUCTION_LOT_SECONDS}초이며, 입찰할 때마다 초기화됩니다."
             )
         else:
@@ -1839,20 +1858,33 @@ class AuctionView(discord.ui.View):
         )
         return embed
 
-    def start_lot_timer(self):
+    def start_lot_timer(self, reset_deadline=True):
         old_task = self._timer_task
         current_task = asyncio.current_task()
         if old_task is not None and old_task is not current_task:
             old_task.cancel()
         if self.lot_index < len(self.lots) and not self._finished:
+            if reset_deadline:
+                self._lot_deadline = time.time() + AUCTION_LOT_SECONDS
             token = self._lot_token
             self._timer_task = asyncio.create_task(
                 self._close_lot_after_timeout(token)
             )
 
+    async def _report_interaction_failure(self, interaction):
+        """Log callback errors and explain the failure if Discord still accepts a reply."""
+        try:
+            await send_ephemeral_response(
+                interaction,
+                "❌ 버튼 처리 중 오류가 발생했습니다. 잠시 후 최신 경매 메시지에서 다시 눌러주세요."
+            )
+        except (discord.HTTPException, discord.InteractionResponded):
+            # Discord may have already expired or acknowledged this interaction.
+            pass
+
     async def _close_lot_after_timeout(self, expected_lot):
         try:
-            await asyncio.sleep(AUCTION_LOT_SECONDS)
+            await asyncio.sleep(max(0, self._lot_deadline - time.time()))
             async with self._auction_lock:
                 if self._finished or expected_lot != self._lot_token:
                     return
@@ -1972,13 +2004,13 @@ class AuctionView(discord.ui.View):
                 self.current_bid = 0
                 self.current_bidder = None
                 self._refresh_controls()
+                self.start_lot_timer()
                 await self._publish_current_state(
                     content=(
                         "🔁 본 경매가 끝났습니다. 유찰 선수 "
                         f"{len(self.lots)}명을 후순위로 다시 올립니다."
                     )
                 )
-                self.start_lot_timer()
                 return
             if self.unsold_players:
                 self._refresh_controls()
@@ -1993,10 +2025,10 @@ class AuctionView(discord.ui.View):
             return
 
         self._refresh_controls()
+        self.start_lot_timer()
         await self._publish_current_state(
             content=f"✅ {award_note} · <@{player_id}>"
         )
-        self.start_lot_timer()
 
     async def retry_unsold_players(self, interaction):
         if not is_admin(interaction):
@@ -2024,13 +2056,13 @@ class AuctionView(discord.ui.View):
             self.current_bid = 0
             self.current_bidder = None
             self._refresh_controls()
+            self.start_lot_timer()
             await self._publish_current_state(
                 content=(
                     f"🔁 후순위 입찰 {self.auction_round - 1}회차를 시작합니다. "
                     f"유찰 선수 {len(self.lots)}명입니다."
                 )
             )
-            self.start_lot_timer()
         await interaction.followup.send(
             "✅ 유찰 선수 후순위 입찰을 다시 시작했습니다.",
             ephemeral=True
@@ -2268,19 +2300,23 @@ class AuctionView(discord.ui.View):
                 pass
 
     async def cancel_button(self, interaction):
-        if not is_admin(interaction):
-            await send_admin_only_message(interaction)
-            return
-        await interaction.response.defer(ephemeral=True)
-        async with self._auction_lock:
-            if self._finished:
-                await interaction.followup.send(
-                    "이미 종료된 경매입니다.",
-                    ephemeral=True
-                )
+        try:
+            if not is_admin(interaction):
+                await send_admin_only_message(interaction)
                 return
-            await self.abort("관리자가 경매를 취소했습니다.")
-        await interaction.followup.send("✅ 경매를 취소했습니다.", ephemeral=True)
+            await interaction.response.defer(ephemeral=True)
+            async with self._auction_lock:
+                if self._finished:
+                    await interaction.followup.send(
+                        "이미 종료된 경매입니다.",
+                        ephemeral=True
+                    )
+                    return
+                await self.abort("관리자가 경매를 취소했습니다.")
+            await interaction.followup.send("✅ 경매를 취소했습니다.", ephemeral=True)
+        except Exception:
+            logger.exception("경매 취소 버튼 처리 실패 | 방=%s", self.room.room_id)
+            await self._report_interaction_failure(interaction)
 
     async def on_timeout(self):
         async with self._auction_lock:
