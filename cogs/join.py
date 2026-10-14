@@ -1788,7 +1788,7 @@ class Join(commands.Cog):
             if recruit_view is not None and recruit_view.message is not None:
                 try:
                     await recruit_view.message.edit(
-                        embed=recruit_view.create_embed(),
+                        embeds=recruit_view.create_embeds(),
                         view=recruit_view
                     )
                 except discord.HTTPException:
@@ -1851,7 +1851,7 @@ class Join(commands.Cog):
                 )
                 self.save_rooms_state()
                 view.message = await interaction.edit_original_response(
-                    embed=view.create_embed(),
+                    embeds=view.create_embeds(),
                     view=view
                 )
                 return
@@ -1912,7 +1912,7 @@ class Join(commands.Cog):
                     pass
 
             message = await interaction.edit_original_response(
-                embed=old_view.create_embed(),
+                embeds=old_view.create_embeds(),
                 view=old_view
             )
             old_view.message = message
@@ -1924,7 +1924,7 @@ class Join(commands.Cog):
         room.current_recruit_view = view
 
         view.message = await interaction.edit_original_response(
-            embed=view.create_embed(),
+            embeds=view.create_embeds(),
             view=view
         )
 
