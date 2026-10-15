@@ -1805,7 +1805,7 @@ class AuctionView(discord.ui.View):
                 f"대상 **{self.lot_index + 1}/{len(self.lots)}**\n"
                 f"{self._player_label(current_player)}\n\n"
                 f"{bidding_text}\n"
-                f"⏳ 남은 입찰 시간: <t:{int(self._lot_deadline)}:R>\n"
+                f"🟢 **남은 입찰 시간** · <t:{int(self._lot_deadline)}:R>\n"
                 f"입찰 시간은 {AUCTION_LOT_SECONDS}초이며, 입찰할 때마다 초기화됩니다."
             )
         else:
@@ -1831,6 +1831,11 @@ class AuctionView(discord.ui.View):
                 "경매 포인트는 시즌 레이팅과 별도로 사용됩니다.\n"
                 f"캡틴은 팀에 자동 포함되며, 예산은 나머지 4명 영입에 사용합니다. "
                 f"현재 {len(self.teams)}팀 · {len(self.player_ids)}명 경매입니다."
+            ),
+            color=(
+                discord.Color.green()
+                if self.lot_index < len(self.lots) and not self._finished
+                else discord.Color.dark_grey()
             )
         )
         for side, label in self.side_labels:
