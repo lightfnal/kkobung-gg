@@ -25,6 +25,7 @@ from services.team_balancer import (
     create_team_signature,
     POSITIONS
 )
+from services.champion_service import ChampionService
 from services.tournament_service import (
     claim_fixture,
     create_auction_bracket,
@@ -535,6 +536,9 @@ class MatchControlView(discord.ui.View):
         )
         self.room.current_match_control_view = self
         self.teams_reference = self.room.current_teams
+        self.unrecorded_lineck = bool(
+            getattr(self.room, "match_recording_disabled", False)
+        )
         self.team_message = None
         self.players_snapshot = copy.deepcopy(
             getattr(self.room, "players", {})
@@ -933,11 +937,17 @@ class MatchControlView(discord.ui.View):
             if self.champion_record_view is not None:
                 await self.champion_record_view.move_to_bottom()
 
-            await interaction.followup.send(
-                "✅ 승리팀 결과를 등록했습니다.\n"
-                "챔피언 입력 안내는 아래 경기 결과 메시지를 확인해주세요.",
-                ephemeral=True
-            )
+            if self.unrecorded_lineck:
+                await interaction.followup.send(
+                    "✅ 라인CK 경기 결과를 처리했습니다. 이 경기는 내전 사이트, 전적, 레이팅, 시즌 점수 및 챔피언 기록에 저장되지 않습니다.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "✅ 승리팀 결과를 등록했습니다.\n"
+                    "챔피언 입력 안내는 아래 경기 결과 메시지를 확인해주세요.",
+                    ephemeral=True
+                )
 
     @discord.ui.button(
         label="🔴 레드팀 승리",
@@ -1085,6 +1095,7 @@ class TeamModeView(discord.ui.View):
         self.room = recruit_view.room
         self.balanced_button.disabled = self.room.player_limit != MAX_PLAYERS
         self.captain_button.disabled = self.room.player_limit != MAX_PLAYERS
+        self.line_ck_button.disabled = self.room.player_limit != MAX_PLAYERS
 
     async def interaction_check(self, interaction):
         if not is_admin(interaction):
@@ -1342,6 +1353,1230 @@ class TeamModeView(discord.ui.View):
                 if self.recruit_view._auction_setup_view is setup_view:
                     self.recruit_view._auction_setup_view = None
                 self.recruit_view.team_generating = False
+
+    @discord.ui.button(
+        label="랜덤 라인CK",
+        emoji="🎲",
+        style=discord.ButtonStyle.success
+    )
+    async def line_ck_button(self, interaction, button):
+        room = self.room
+        player_ids = [str(user_id) for user_id in room.players]
+        if room.player_limit != MAX_PLAYERS or len(player_ids) != MAX_PLAYERS:
+            await interaction.response.send_message(
+                f"❌ 랜덤 라인CK는 참가자 {MAX_PLAYERS}명이 모두 모인 10인 내전에서만 시작할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+        if self.recruit_view.team_generating or room.team_generation_lock.locked():
+            await interaction.response.send_message(
+                "⏳ 이미 팀 편성 또는 드래프트가 진행 중입니다.",
+                ephemeral=True
+            )
+            return
+        if (
+            room.current_teams is not None
+            or room.match_in_progress
+            or room.match_transaction_active
+            or room.pending_match_token is not None
+            or room.mvp_vote_in_progress
+            or room.tournament_id is not None
+            or room.series_game > 0
+            or room.single_draft_mode_active
+        ):
+            await interaction.response.send_message(
+                "❌ 진행 중인 경기·시리즈·대회가 없는 모집 상태에서만 라인CK를 시작할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        self.recruit_view.team_generating = True
+        self.recruit_view._team_generation_started_at = time.monotonic()
+        lock_acquired = False
+        setup_view = None
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            await asyncio.wait_for(room.team_generation_lock.acquire(), timeout=0.5)
+            lock_acquired = True
+        except asyncio.TimeoutError:
+            self.recruit_view.team_generating = False
+            self.recruit_view._team_generation_started_at = None
+            await interaction.followup.send(
+                "⏳ 다른 팀 편성 작업이 시작됐습니다. 잠시 뒤 다시 시도해주세요.",
+                ephemeral=True
+            )
+            return
+        except Exception:
+            self.recruit_view.team_generating = False
+            self.recruit_view._team_generation_started_at = None
+            logger.exception("라인CK 시작 응답 실패 | 방=%s", room.room_id)
+            return
+
+        try:
+            if {str(user_id) for user_id in room.players} != set(player_ids):
+                if lock_acquired and room.team_generation_lock.locked():
+                    room.team_generation_lock.release()
+                    lock_acquired = False
+                self.recruit_view.team_generating = False
+                self.recruit_view._team_generation_started_at = None
+                await interaction.followup.send(
+                    "❌ 참가자 명단이 바뀌었습니다. 명단을 확인한 뒤 다시 시작해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            try:
+                champion_lookup = await asyncio.to_thread(
+                    ChampionService._load_cache
+                )
+                champion_pool = list({
+                    champion["champion_key"]: champion
+                    for champion in champion_lookup.values()
+                }.values())
+                if len(champion_pool) < MAX_PLAYERS:
+                    raise ValueError("챔피언 목록이 부족합니다.")
+            except Exception:
+                logger.exception("라인CK 챔피언 목록 조회 실패 | 방=%s", room.room_id)
+                if lock_acquired and room.team_generation_lock.locked():
+                    room.team_generation_lock.release()
+                    lock_acquired = False
+                self.recruit_view.team_generating = False
+                self.recruit_view._team_generation_started_at = None
+                await interaction.followup.send(
+                    "❌ 무작위 챔피언 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+                    ephemeral=True
+                )
+                return
+
+            random.shuffle(player_ids)
+            lane_players = {position: [] for position in POSITIONS}
+            for index, user_id in enumerate(player_ids):
+                lane_players[POSITIONS[index % len(POSITIONS)]].append(user_id)
+            for pair in lane_players.values():
+                random.shuffle(pair)
+
+            assigned_champions = dict(zip(
+                player_ids,
+                random.sample(champion_pool, MAX_PLAYERS)
+            ))
+            setup_view = LineCKSetupView(
+                self.recruit_view,
+                player_ids,
+                lane_players,
+                assigned_champions,
+                champion_pool
+            )
+            setup_view.lock_acquired = True
+            lock_acquired = False
+            self.recruit_view._line_ck_setup_view = setup_view
+            self.recruit_view._line_ck_draft_view = None
+            self.recruit_view._line_ck_reroll_view = None
+            self.recruit_view._line_ck_phase = "setup"
+            self.recruit_view._line_ck_previous_recruit_closed = setup_view.previous_recruit_closed
+            setup_view.message = await interaction.edit_original_response(
+                content=(
+                    "🎲 라인과 챔피언을 무작위로 정했습니다.\n"
+                    "캡틴 2명을 선택한 뒤 드래프트를 시작하세요. "
+                    "각 라인의 두 참가자는 서로 다른 팀으로 배정됩니다."
+                ),
+                view=setup_view
+            )
+        except Exception:
+            logger.exception("라인CK 캡틴 준비창 생성 실패 | 방=%s", room.room_id)
+            if setup_view is not None:
+                self.recruit_view._line_ck_setup_view = None
+                setup_view.stop()
+                setup_view._release_room_lock()
+            if lock_acquired and room.team_generation_lock.locked():
+                room.team_generation_lock.release()
+            self.recruit_view.team_generating = False
+            self.recruit_view._team_generation_started_at = None
+            try:
+                await interaction.followup.send(
+                    "❌ 라인CK 준비창을 만들지 못했습니다. 모집창에서 다시 시도해주세요.",
+                    ephemeral=True
+                )
+            except discord.HTTPException:
+                pass
+
+
+class LineCKSetupView(discord.ui.View):
+    """관리자가 캡틴을 골라 라인CK 드래프트를 여는 비공개 준비창."""
+
+    captain_count = 2
+
+    def __init__(
+        self,
+        recruit_view,
+        player_ids,
+        lane_players,
+        assigned_champions,
+        champion_pool
+    ):
+        super().__init__(timeout=180)
+        self.recruit_view = recruit_view
+        self.join_cog = recruit_view.join_cog
+        self.room = recruit_view.room
+        self.player_ids = list(player_ids)
+        self.lane_players = {
+            position: list(pair)
+            for position, pair in lane_players.items()
+        }
+        self.assigned_champions = assigned_champions
+        self.champion_pool = champion_pool
+        self.selected_captains = []
+        self.message = None
+        self.started = False
+        self.lock_acquired = False
+        self.previous_recruit_closed = recruit_view.recruit_closed
+        self.add_item(CaptainSelection(self))
+
+    def _release_room_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
+
+    async def _abort(self, interaction, reason):
+        self.stop()
+        self._release_room_lock()
+        if self.recruit_view._line_ck_setup_view is self:
+            self.recruit_view._line_ck_setup_view = None
+        if self.recruit_view._line_ck_phase in ("setup", "draft"):
+            self.recruit_view._line_ck_phase = None
+            self.recruit_view._line_ck_draft_view = None
+        self.recruit_view.team_generating = False
+        self.recruit_view._team_generation_started_at = None
+        self.recruit_view.recruit_closed = self.previous_recruit_closed
+        await self.recruit_view.restore_recruitment_controls()
+        try:
+            await interaction.edit_original_response(
+                content=reason,
+                view=None
+            )
+        except discord.HTTPException:
+            pass
+
+    @discord.ui.button(
+        label="캡틴 드래프트 시작",
+        emoji="🎖️",
+        style=discord.ButtonStyle.success,
+        row=1
+    )
+    async def start_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if not self.join_cog.activate_room(self.room):
+            await interaction.response.send_message(
+                "❌ 연결된 내전 방을 찾지 못했습니다.", ephemeral=True
+            )
+            return
+        if (
+            self.recruit_view._line_ck_setup_view is not self
+            or self.started
+        ):
+            await interaction.response.send_message(
+                "⏳ 이 라인CK 준비창은 이미 종료되었거나 만료되었습니다.",
+                ephemeral=True
+            )
+            return
+        if len(self.selected_captains) != 2:
+            await interaction.response.send_message(
+                "❌ 먼저 캡틴 2명을 선택해주세요.", ephemeral=True
+            )
+            return
+        if {str(user_id) for user_id in self.room.players} != set(self.player_ids):
+            await interaction.response.defer(ephemeral=True)
+            await self._abort(
+                interaction,
+                "❌ 참가자 명단이 바뀌어 라인CK 준비를 취소했습니다."
+            )
+            return
+        if (
+            self.room.current_teams is not None
+            or self.room.match_in_progress
+            or self.room.match_transaction_active
+            or self.room.mvp_vote_in_progress
+        ):
+            await interaction.response.send_message(
+                "❌ 이미 팀이 생성됐거나 경기가 진행 중입니다.",
+                ephemeral=True
+            )
+            return
+        if not self.lock_acquired or not self.room.team_generation_lock.locked():
+            await interaction.response.send_message(
+                "❌ 팀 생성 잠금이 풀렸습니다. 라인CK를 다시 시작해주세요.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        self.started = True
+        self.stop()
+        self.recruit_view._line_ck_setup_view = None
+        self.recruit_view._draft_was_closed = self.previous_recruit_closed
+        self.recruit_view.recruit_closed = True
+        for item in self.recruit_view.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = item.custom_id not in (
+                    "inhouse_list",
+                    "inhouse_reset"
+                )
+        if self.recruit_view.message is not None:
+            try:
+                await self.recruit_view.message.edit(
+                    embeds=self.recruit_view.create_embeds(),
+                    view=self.recruit_view
+                )
+            except discord.HTTPException:
+                logger.exception("라인CK 드래프트 시작 후 모집창 잠금 실패")
+
+        first_side = random.choice(("red", "blue"))
+        draft_view = LineCKDraftView(
+            self,
+            red_captain=self.selected_captains[0],
+            blue_captain=self.selected_captains[1],
+            first_side=first_side
+        )
+        self.recruit_view._line_ck_draft_view = draft_view
+        self.recruit_view._line_ck_phase = "draft"
+        try:
+            message, _ = await self.join_cog.send_output_message(
+                room=self.room,
+                fallback_channel=interaction.channel,
+                embed=draft_view.create_embed(),
+                view=draft_view
+            )
+        except Exception:
+            logger.exception("라인CK 캡틴 드래프트 메시지 전송 실패")
+            message = None
+        if message is None:
+            self.started = False
+            await self._abort(
+                interaction,
+                "❌ 드래프트 메시지를 채널에 올리지 못했습니다. 채널 권한을 확인한 뒤 다시 시도해주세요."
+            )
+            return
+
+        draft_view.message = message
+        draft_view.lock_acquired = True
+        self.lock_acquired = False
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    content=(
+                        "✅ 라인CK 캡틴 드래프트가 시작됐습니다.\n"
+                        "캡틴이 선택을 마치면 이 비공개 창에 라인·챔피언 재추첨 버튼이 표시됩니다."
+                    ),
+                    view=None
+                )
+            except discord.HTTPException:
+                logger.exception("라인CK 비공개 준비창 갱신 실패")
+        await interaction.followup.send(
+            f"✅ 라인CK 드래프트를 시작했습니다. 진행 메시지: {message.jump_url}",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="취소",
+        emoji="⏹️",
+        style=discord.ButtonStyle.danger,
+        row=1
+    )
+    async def cancel_button(self, interaction, button):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if self.recruit_view._line_ck_setup_view is not self:
+            await interaction.response.send_message(
+                "❌ 이전 준비창입니다. 현재 `/라인복구` 창에서 진행해주세요.",
+                ephemeral=True
+            )
+            return
+        if self.started:
+            await interaction.response.send_message(
+                "⏳ 드래프트가 이미 시작됐습니다.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self._abort(interaction, "⏹️ 라인CK 준비를 취소했습니다.")
+
+    async def on_timeout(self):
+        if self.started or not self.lock_acquired:
+            return
+        self.stop()
+        self._release_room_lock()
+        if self.recruit_view._line_ck_setup_view is self:
+            self.recruit_view._line_ck_setup_view = None
+        if self.recruit_view._line_ck_phase == "setup":
+            self.recruit_view._line_ck_phase = None
+        self.recruit_view.team_generating = False
+        self.recruit_view._team_generation_started_at = None
+        self.recruit_view.recruit_closed = self.previous_recruit_closed
+        await self.recruit_view.restore_recruitment_controls()
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    content="⌛ 캡틴을 선택하지 않아 라인CK 준비창이 만료됐습니다.",
+                    view=None
+                )
+            except discord.HTTPException:
+                pass
+
+
+class LineCKDraftPlayerSelect(discord.ui.Select):
+    def __init__(self, draft_view):
+        self.draft_view = draft_view
+        options = []
+        for position in draft_view.free_positions:
+            for user_id in draft_view.lane_players[position]:
+                player = draft_view._player_data(
+                    draft_view.room.players,
+                    user_id
+                )
+                nickname = str(player.get("nickname") or user_id)
+                options.append(discord.SelectOption(
+                    label=f"{nickname} · {draft_view.position_label(position)}"[:100],
+                    value=user_id,
+                    description=f"{draft_view.position_label(position)} 라인 후보"
+                ))
+        current_side = draft_view.current_side
+        captain = draft_view.captains[current_side]
+        super().__init__(
+            placeholder=(
+                f"{'레드' if current_side == 'red' else '블루'} 캡틴 <@{captain}> 차례 — 한 명 선택"
+            )[:150],
+            min_values=1,
+            max_values=1,
+            options=options,
+            disabled=not options,
+            row=0
+        )
+
+    async def callback(self, interaction):
+        await self.draft_view.pick_player(
+            interaction,
+            self.values[0],
+            self.draft_view.turn_index
+        )
+
+
+class LineCKDraftView(discord.ui.View):
+    """라인 쌍을 유지하며 두 캡틴이 번갈아 선수를 선택합니다."""
+
+    def __init__(self, setup_view, red_captain, blue_captain, first_side):
+        super().__init__(timeout=600)
+        self.setup_view = setup_view
+        self.recruit_view = setup_view.recruit_view
+        self.join_cog = setup_view.join_cog
+        self.room = setup_view.room
+        self.player_ids = list(setup_view.player_ids)
+        self.lane_players = copy.deepcopy(setup_view.lane_players)
+        self.assigned_champions = setup_view.assigned_champions
+        self.champion_pool = setup_view.champion_pool
+        self.captains = {
+            "red": str(red_captain),
+            "blue": str(blue_captain),
+        }
+        self.first_side = first_side
+        self.current_side = first_side
+        self.turn_index = 0
+        self.teams = {"red": {}, "blue": {}}
+        self.free_positions = []
+        self._draft_lock = asyncio.Lock()
+        self._finishing = False
+        self.lock_acquired = False
+        self.message = None
+        self.previous_recruit_closed = setup_view.previous_recruit_closed
+        self._assign_captain_lanes()
+        self._refresh_controls()
+
+    @staticmethod
+    def position_label(position):
+        return {
+            "TOP": "탑",
+            "JUNGLE": "정글",
+            "MID": "미드",
+            "ADC": "원딜",
+            "SUPPORT": "서포터",
+        }.get(position, position)
+
+    @staticmethod
+    def _player_data(players, user_id):
+        if user_id in players:
+            return players[user_id] or {}
+        for key, value in players.items():
+            if str(key) == str(user_id):
+                return value or {}
+        return {}
+
+    def _assign_captain_lanes(self):
+        for position, pair in self.lane_players.items():
+            red_captain = self.captains["red"]
+            blue_captain = self.captains["blue"]
+            if red_captain in pair and blue_captain in pair:
+                self.teams["red"][position] = red_captain
+                self.teams["blue"][position] = blue_captain
+            elif red_captain in pair:
+                partner = next(user_id for user_id in pair if user_id != red_captain)
+                self.teams["red"][position] = red_captain
+                self.teams["blue"][position] = partner
+            elif blue_captain in pair:
+                partner = next(user_id for user_id in pair if user_id != blue_captain)
+                self.teams["blue"][position] = blue_captain
+                self.teams["red"][position] = partner
+            else:
+                self.free_positions.append(position)
+
+    def _release_room_lock(self):
+        if self.lock_acquired:
+            if self.room.team_generation_lock.locked():
+                self.room.team_generation_lock.release()
+            self.lock_acquired = False
+
+    def _refresh_controls(self):
+        self.clear_items()
+        if self.free_positions:
+            self.add_item(LineCKDraftPlayerSelect(self))
+            cancel = discord.ui.Button(
+                label="드래프트 취소",
+                emoji="⏹️",
+                style=discord.ButtonStyle.danger,
+                row=1
+            )
+            cancel.callback = self.cancel_button
+            self.add_item(cancel)
+
+    def create_embed(self):
+        captain_id = self.captains[self.current_side]
+        current_team = "🔴 레드팀" if self.current_side == "red" else "🔵 블루팀"
+        description = (
+            f"라인은 무작위로 정해졌습니다. 각 라인의 두 명은 서로 다른 팀에 배정됩니다.\n"
+            f"현재 선택: **{current_team} 캡틴 <@{captain_id}>**\n"
+            f"선픽 팀은 무작위로 정했습니다. 각 차례에 한 명을 고르면 같은 라인의 다른 한 명은 상대 팀에 배정됩니다."
+        )
+        if self.free_positions:
+            candidates = []
+            for position in self.free_positions:
+                names = " / ".join(
+                    f"<@{user_id}>" for user_id in self.lane_players[position]
+                )
+                candidates.append(f"**{self.position_label(position)}**: {names}")
+            description += "\n\n**선택 가능한 라인**\n" + "\n".join(candidates)
+
+        embed = discord.Embed(
+            title=f"🎖️ {self.room.room_name} · 라인CK 캡틴 드래프트",
+            description=description,
+            color=discord.Color.blurple()
+        )
+        for side, heading in (("red", "🔴 레드팀"), ("blue", "🔵 블루팀")):
+            lines = []
+            for position in POSITIONS:
+                user_id = self.teams[side].get(position)
+                lines.append(
+                    f"**{self.position_label(position)}** · "
+                    + (f"<@{user_id}>" if user_id else "선택 대기")
+                )
+            embed.add_field(name=heading, value="\n".join(lines), inline=True)
+        embed.set_footer(text="캡틴 차례마다 라인 후보 한 명을 선택하세요. 상대 팀은 같은 라인의 남은 참가자로 자동 배정됩니다.")
+        return embed
+
+    async def pick_player(self, interaction, user_id, expected_turn):
+        await interaction.response.defer()
+        async with self._draft_lock:
+            if self._finishing or self.is_finished():
+                await interaction.followup.send(
+                    "❌ 이 드래프트는 이미 종료되었습니다.", ephemeral=True
+                )
+                return
+            if expected_turn != self.turn_index:
+                await interaction.followup.send(
+                    "🔄 선택 차례가 바뀌었습니다. 최신 드래프트 메시지에서 골라주세요.",
+                    ephemeral=True
+                )
+                return
+            expected_captain = self.captains[self.current_side]
+            if str(interaction.user.id) != expected_captain and not is_admin(interaction):
+                await interaction.followup.send(
+                    f"❌ 지금은 <@{expected_captain}> 캡틴의 선택 차례입니다.",
+                    ephemeral=True
+                )
+                return
+            if {str(value) for value in self.room.players} != set(self.player_ids):
+                await interaction.followup.send(
+                    "❌ 참가자 명단이 바뀌어 드래프트를 취소합니다.", ephemeral=True
+                )
+                await self.abort("참가자 명단이 바뀌어 라인CK 드래프트를 취소했습니다.")
+                return
+
+            position = next((
+                role for role in self.free_positions
+                if user_id in self.lane_players[role]
+            ), None)
+            if position is None:
+                await interaction.followup.send(
+                    "❌ 선택한 참가자는 현재 선택 가능한 라인에 없습니다.",
+                    ephemeral=True
+                )
+                return
+            partner = next(
+                player_id for player_id in self.lane_players[position]
+                if player_id != user_id
+            )
+            other_side = "blue" if self.current_side == "red" else "red"
+            self.teams[self.current_side][position] = user_id
+            self.teams[other_side][position] = partner
+            self.free_positions.remove(position)
+
+            if not self.free_positions:
+                self._finishing = True
+                await self.finish_draft(interaction)
+                return
+
+            self.current_side = other_side
+            self.turn_index += 1
+            self._refresh_controls()
+            try:
+                await self.message.edit(embed=self.create_embed(), view=self)
+            except Exception:
+                logger.exception("라인CK 드래프트 메시지 수정 실패 | 방=%s", self.room.room_id)
+                await self.abort("드래프트 화면 갱신에 실패해 라인CK를 취소했습니다.")
+
+    async def finish_draft(self, interaction):
+        self.join_cog.activate_room(self.room)
+        self.room.current_teams = self.teams
+        self.room.match_recording_disabled = True
+        self.room.current_balance_prediction = None
+        self.join_cog.current_teams = self.teams
+        self.join_cog.last_team_signature = None
+        try:
+            self.join_cog.save_rooms_state()
+            match_view = MatchControlView(self.join_cog)
+            embed = LineCKRerollView.create_result_embed(
+                self.room,
+                self.teams,
+                self.assigned_champions
+            )
+            add_match_button_instructions(embed)
+            await self.message.edit(embed=embed, view=match_view)
+            result_message = self.message
+            match_view.team_message = result_message
+        except Exception:
+            logger.exception("라인CK 캡틴 드래프트 결과 게시 실패 | 방=%s", self.room.room_id)
+            self.room.current_teams = None
+            self.room.match_recording_disabled = False
+            self.join_cog.current_teams = None
+            if getattr(self.room, "current_match_control_view", None) is locals().get("match_view"):
+                self.room.current_match_control_view = None
+            try:
+                self.join_cog.save_rooms_state()
+            except Exception:
+                logger.exception("라인CK 결과 실패 후 팀 상태 롤백 저장 실패")
+            await self.abort("라인CK 결과를 게시하지 못해 드래프트를 취소했습니다.")
+            await interaction.followup.send(
+                "❌ 최종 결과를 게시하지 못했습니다. 채널 권한을 확인해주세요.",
+                ephemeral=True
+            )
+            return
+
+        self.stop()
+        self._release_room_lock()
+        self.recruit_view.team_generating = False
+        self.recruit_view._team_generation_started_at = None
+        self.recruit_view.recruit_closed = True
+        for item in self.recruit_view.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = item.custom_id not in (
+                    "inhouse_list",
+                    "inhouse_reset"
+                )
+        if self.recruit_view.message is not None:
+            try:
+                await self.recruit_view.message.edit(
+                    embeds=self.recruit_view.create_embeds(),
+                    view=self.recruit_view
+                )
+            except discord.HTTPException:
+                logger.exception("라인CK 완료 후 모집창 갱신 실패")
+
+        reroll_view = LineCKRerollView(
+            self.join_cog,
+            self.room,
+            result_message,
+            self.teams,
+            self.assigned_champions,
+            self.champion_pool
+        )
+        self.recruit_view._line_ck_phase = "result"
+        self.recruit_view._line_ck_draft_view = None
+        self.recruit_view._line_ck_reroll_view = reroll_view
+        try:
+            await self.setup_view.message.edit(
+                content=(
+                    "✅ 라인CK 드래프트가 완료됐습니다.\n"
+                    "아래 비공개 버튼으로 라인 또는 챔피언을 다시 뽑을 수 있습니다."
+                ),
+                view=reroll_view
+            )
+        except discord.HTTPException:
+            logger.exception("라인CK 관리자 재추첨 도구 표시 실패 | 방=%s", self.room.room_id)
+        await interaction.followup.send(
+            "✅ 라인CK 드래프트가 완료됐습니다.", ephemeral=True
+        )
+
+    async def cancel_button(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        await interaction.response.defer(ephemeral=True)
+        async with self._draft_lock:
+            if self._finishing or self.is_finished():
+                await interaction.followup.send(
+                    "이미 종료된 드래프트입니다.", ephemeral=True
+                )
+                return
+            await self.abort("관리자가 라인CK 드래프트를 취소했습니다.")
+        await interaction.followup.send("✅ 드래프트를 취소했습니다.", ephemeral=True)
+
+    async def abort(self, reason):
+        self.stop()
+        self._release_room_lock()
+        if self.recruit_view._line_ck_draft_view is self:
+            self.recruit_view._line_ck_draft_view = None
+        if self.recruit_view._line_ck_phase == "draft":
+            self.recruit_view._line_ck_phase = None
+        self.recruit_view.team_generating = False
+        self.recruit_view._team_generation_started_at = None
+        self.recruit_view.recruit_closed = self.previous_recruit_closed
+        await self.recruit_view.restore_recruitment_controls()
+        if self.message is not None:
+            try:
+                await self.message.edit(content=f"⏹️ {reason}", embed=None, view=None)
+            except discord.HTTPException:
+                pass
+        if self.setup_view.message is not None:
+            try:
+                await self.setup_view.message.edit(content=f"⏹️ {reason}", view=None)
+            except discord.HTTPException:
+                pass
+
+    async def on_timeout(self):
+        async with self._draft_lock:
+            if not self._finishing and not self.is_finished():
+                await self.abort("10분 동안 선택이 없어 라인CK 드래프트를 취소했습니다.")
+
+
+class LineCKPlayerSelect(discord.ui.Select):
+    def __init__(self, reroll_view):
+        self.reroll_view = reroll_view
+        players = getattr(reroll_view.room, "players", {})
+        options = [
+            discord.SelectOption(
+                label=str(
+                    reroll_view._player_data(players, user_id).get("nickname")
+                    or user_id
+                )[:100],
+                value=user_id
+            )
+            for user_id in reroll_view.assigned_champions
+        ]
+        super().__init__(
+            placeholder="챔피언을 다시 뽑을 참가자 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0
+        )
+
+    async def callback(self, interaction):
+        self.reroll_view.selected_player_id = self.values[0]
+        player = self.reroll_view._player_data(
+            self.reroll_view.room.players,
+            self.values[0]
+        )
+        nickname = player.get("nickname") or self.values[0]
+        await interaction.response.send_message(
+            f"✅ {nickname}님의 챔피언을 다시 뽑을 대상으로 선택했습니다.",
+            ephemeral=True
+        )
+
+
+class LineCKRerollView(discord.ui.View):
+    """라인CK 결과에 표시된 챔피언만 다시 뽑는 진행자 전용 도구."""
+
+    def __init__(
+        self,
+        join_cog,
+        room,
+        result_message,
+        teams,
+        assigned_champions,
+        champion_pool
+    ):
+        super().__init__(timeout=600)
+        self.join_cog = join_cog
+        self.room = room
+        self.result_message = result_message
+        self.teams = teams
+        self.assigned_champions = assigned_champions
+        self.champion_pool = champion_pool
+        self.selected_player_id = None
+        self.initial_series_game = room.series_game
+        self.initial_series_score = dict(room.series_score)
+        self.player_select = LineCKPlayerSelect(self)
+        self.add_item(self.player_select)
+
+    @staticmethod
+    def _player_data(players, user_id):
+        if user_id in players:
+            return players[user_id] or {}
+        for key, value in players.items():
+            if str(key) == str(user_id):
+                return value or {}
+        return {}
+
+    @classmethod
+    def create_result_embed(cls, room, teams, assigned_champions):
+        embed = discord.Embed(
+            title=f"🎲 {room.room_name} · 랜덤 라인CK 결과",
+            description=(
+                "라인은 무작위로 정하고, 팀은 캡틴 드래프트로 구성했습니다.\n"
+                "이 라인CK 경기는 내전 사이트 전적·레이팅·시즌 점수·챔피언 기록에 저장되지 않습니다.\n"
+                "챔피언 보유 여부는 확인하지 않습니다. 진행자는 비공개 창에서 라인 배정이나 챔피언을 다시 뽑을 수 있습니다."
+            ),
+            color=discord.Color.green()
+        )
+        labels = {
+            "TOP": "탑",
+            "JUNGLE": "정글",
+            "MID": "미드",
+            "ADC": "원딜",
+            "SUPPORT": "서포터",
+        }
+        for side, heading in (("red", "🔴 레드팀"), ("blue", "🔵 블루팀")):
+            lines = []
+            for position in POSITIONS:
+                user_id = str(teams[side][position])
+                champion = assigned_champions[user_id]
+                lines.append(
+                    f"**{labels.get(position, position)}** · <@{user_id}> — "
+                    f"**{champion['champion_name']}**"
+                )
+            embed.add_field(name=heading, value="\n".join(lines), inline=True)
+        embed.set_footer(text="같은 라인끼리 서로 다른 팀에 배정됩니다.")
+        return embed
+
+    async def interaction_check(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return False
+        if not self.join_cog.activate_room(self.room):
+            await interaction.response.send_message(
+                "❌ 연결된 내전 방을 찾지 못했습니다.", ephemeral=True
+            )
+            return False
+        if self.room.current_teams is not self.teams:
+            await interaction.response.send_message(
+                "❌ 이 라인CK 결과는 더 이상 현재 경기와 일치하지 않습니다.",
+                ephemeral=True
+            )
+            return False
+        if (
+            self.room.match_in_progress
+            or self.room.match_transaction_active
+            or self.room.mvp_vote_in_progress
+            or self.room.series_game != self.initial_series_game
+            or self.room.series_score != self.initial_series_score
+        ):
+            await interaction.response.send_message(
+                "❌ 경기가 시작되었거나 결과가 기록된 뒤에는 라인이나 챔피언을 변경할 수 없습니다.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def _publish_updated_result(self, interaction):
+        try:
+            await self.result_message.edit(
+                embed=self.create_result_embed(
+                    self.room,
+                    self.teams,
+                    self.assigned_champions
+                )
+            )
+        except Exception:
+            logger.exception("라인CK 결과 카드 수정 실패 | 방=%s", self.room.room_id)
+            await send_ephemeral_response(
+                interaction,
+                "❌ 결과 카드 수정에 실패했습니다. 잠시 후 다시 눌러주세요."
+            )
+            return False
+        return True
+
+    @discord.ui.button(
+        label="선택한 한 명 다시 뽑기",
+        emoji="🎲",
+        style=discord.ButtonStyle.primary,
+        row=1
+    )
+    async def reroll_one_button(self, interaction, button):
+        user_id = self.selected_player_id
+        if user_id is None:
+            await interaction.response.send_message(
+                "먼저 목록에서 참가자 한 명을 선택해주세요.", ephemeral=True
+            )
+            return
+        assigned_keys = {
+            champion["champion_key"]
+            for champion in self.assigned_champions.values()
+        }
+        choices = [
+            champion for champion in self.champion_pool
+            if champion["champion_key"] not in assigned_keys
+        ]
+        if not choices:
+            await interaction.response.send_message(
+                "❌ 다시 배정할 수 있는 챔피언이 없습니다.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        previous = self.assigned_champions[user_id]
+        self.assigned_champions[user_id] = random.choice(choices)
+        if await self._publish_updated_result(interaction):
+            player = self._player_data(self.room.players, user_id)
+            await interaction.followup.send(
+                f"✅ {player.get('nickname') or user_id}님의 챔피언을 다시 뽑았습니다.",
+                ephemeral=True
+            )
+        else:
+            self.assigned_champions[user_id] = previous
+
+    @discord.ui.button(
+        label="전체 챔피언 다시 뽑기",
+        emoji="🔄",
+        style=discord.ButtonStyle.secondary,
+        row=1
+    )
+    async def reroll_all_button(self, interaction, button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        previous = dict(self.assigned_champions)
+        shuffled = random.sample(self.champion_pool, len(self.assigned_champions))
+        self.assigned_champions.clear()
+        self.assigned_champions.update(zip(previous, shuffled))
+        if await self._publish_updated_result(interaction):
+            await interaction.followup.send(
+                "✅ 라인과 팀은 그대로 두고 10명의 챔피언을 모두 다시 뽑았습니다.",
+                ephemeral=True
+            )
+        else:
+            self.assigned_champions.clear()
+            self.assigned_champions.update(previous)
+
+    @discord.ui.button(
+        label="라인 배정 다시 뽑기",
+        emoji="🧭",
+        style=discord.ButtonStyle.success,
+        row=2
+    )
+    async def reroll_lanes_button(self, interaction, button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        previous_teams = copy.deepcopy(self.teams)
+        red_players = list(self.teams["red"].values())
+        blue_players = list(self.teams["blue"].values())
+
+        # 캡틴이 뽑은 팀은 그대로 두고, 팀마다 라인만 다시 섞습니다.
+        # 따라서 각 라인에는 계속 레드 한 명, 블루 한 명이 배정됩니다.
+        for _ in range(10):
+            random.shuffle(red_players)
+            random.shuffle(blue_players)
+            new_red = dict(zip(POSITIONS, red_players))
+            new_blue = dict(zip(POSITIONS, blue_players))
+
+            if (
+                new_red != previous_teams["red"]
+                or new_blue != previous_teams["blue"]
+            ):
+                break
+
+        try:
+            # 팀 객체는 유지해 경기 버튼이 기존 팀 참조를 계속 사용하게 합니다.
+            self.teams["red"].clear()
+            self.teams["red"].update(new_red)
+            self.teams["blue"].clear()
+            self.teams["blue"].update(new_blue)
+            self.room.current_balance_prediction = None
+            self.join_cog.current_teams = self.teams
+            self.join_cog.last_team_signature = None
+            self.join_cog.save_rooms_state()
+        except Exception:
+            logger.exception("라인CK 라인 재배정 저장 실패 | 방=%s", self.room.room_id)
+            self.teams["red"].clear()
+            self.teams["red"].update(previous_teams["red"])
+            self.teams["blue"].clear()
+            self.teams["blue"].update(previous_teams["blue"])
+            try:
+                self.join_cog.save_rooms_state()
+            except Exception:
+                logger.exception("라인CK 라인 재배정 롤백 저장 실패 | 방=%s", self.room.room_id)
+            await interaction.followup.send(
+                "❌ 라인 재배정 저장에 실패해 기존 배정을 유지했습니다.",
+                ephemeral=True
+            )
+            return
+
+        if await self._publish_updated_result(interaction):
+            await interaction.followup.send(
+                "✅ 캡틴이 정한 팀은 유지하고, 각 팀의 라인만 다시 무작위 배정했습니다. 챔피언도 참가자별로 유지했습니다.",
+                ephemeral=True
+            )
+        else:
+            self.teams["red"].clear()
+            self.teams["red"].update(previous_teams["red"])
+            self.teams["blue"].clear()
+            self.teams["blue"].update(previous_teams["blue"])
+            self.join_cog.current_teams = self.teams
+            try:
+                self.join_cog.save_rooms_state()
+            except Exception:
+                logger.exception("라인CK 결과 카드 실패 후 롤백 저장 실패 | 방=%s", self.room.room_id)
+
+class LineCKRecoveryView(discord.ui.View):
+    """관리자/내전 진행자가 끊긴 라인CK 창을 다시 열거나 안전하게 해제합니다."""
+
+    def __init__(self, recruit_view):
+        super().__init__(timeout=300)
+        self.recruit_view = recruit_view
+        phase = recruit_view._line_ck_phase
+        self.reopen_button.disabled = phase not in ("setup", "draft", "result")
+        self.unlock_button.disabled = phase not in ("setup", "draft")
+
+    async def interaction_check(self, interaction):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return False
+        if not self.recruit_view.join_cog.activate_room(self.recruit_view.room):
+            await interaction.response.send_message(
+                "❌ 연결된 내전 방을 찾지 못했습니다.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(
+        label="준비/드래프트/결과 창 다시 열기",
+        emoji="🔄",
+        style=discord.ButtonStyle.primary,
+        row=0
+    )
+    async def reopen_button(self, interaction, button):
+        recruit = self.recruit_view
+        phase = recruit._line_ck_phase
+        if phase == "setup":
+            old = recruit._line_ck_setup_view
+            if (
+                old is None or old.started or old.is_finished()
+                or not old.lock_acquired
+                or not recruit.room.team_generation_lock.locked()
+                or recruit.room.current_teams is not None
+            ):
+                await interaction.response.send_message(
+                    "❌ 준비 상태가 유효하지 않습니다. 잠금 해제 후 다시 시작해주세요.",
+                    ephemeral=True
+                )
+                return
+            fresh = LineCKSetupView(
+                recruit,
+                old.player_ids,
+                old.lane_players,
+                old.assigned_champions,
+                old.champion_pool
+            )
+            fresh.selected_captains = list(old.selected_captains)
+            fresh.lock_acquired = old.lock_acquired
+            old.lock_acquired = False  # move lock ownership; do not release it
+            old.stop()
+            recruit._line_ck_setup_view = fresh
+            await interaction.response.send_message(
+                "🛠️ 기존 라인·챔피언·선택한 캡틴을 유지한 준비창을 다시 열었습니다.",
+                view=fresh,
+                ephemeral=True
+            )
+            try:
+                fresh.message = await interaction.original_response()
+            except discord.HTTPException:
+                logger.exception("라인CK 복구 준비창 메시지 참조 저장 실패 | 방=%s", recruit.room.room_id)
+            return
+
+        if phase == "draft":
+            draft = recruit._line_ck_draft_view
+            if (
+                draft is None or draft.is_finished() or draft._finishing
+                or not draft.lock_acquired
+                or not recruit.room.team_generation_lock.locked()
+            ):
+                await interaction.response.send_message(
+                    "❌ 진행 중인 드래프트 창이 없습니다. 잠금 해제 후 다시 시작해주세요.",
+                    ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                message = draft.message
+                if message is not None:
+                    try:
+                        await message.edit(embed=draft.create_embed(), view=draft)
+                    except discord.HTTPException:
+                        logger.exception("기존 라인CK 드래프트 메시지 복구 실패, 새 메시지 게시 시도 | 방=%s", recruit.room.room_id)
+                        message = None
+                if message is None:
+                    message, _ = await recruit.join_cog.send_output_message(
+                        room=recruit.room,
+                        fallback_channel=interaction.channel,
+                        embed=draft.create_embed(),
+                        view=draft
+                    )
+                    if message is None:
+                        raise RuntimeError("드래프트 메시지 전송 결과가 없습니다.")
+                    draft.message = message
+                await interaction.followup.send(
+                    f"✅ 현재 선택 차례를 유지한 드래프트 창을 복구했습니다. {message.jump_url}",
+                    ephemeral=True
+                )
+            except Exception:
+                logger.exception("라인CK 드래프트 창 복구 실패 | 방=%s", recruit.room.room_id)
+                await interaction.followup.send(
+                    "❌ 드래프트 창을 복구하지 못했습니다. 채널의 메시지 보내기/임베드 권한을 확인하거나 잠금 해제를 선택해주세요.",
+                    ephemeral=True
+                )
+            return
+
+        if phase == "result":
+            reroll = recruit._line_ck_reroll_view
+            if (
+                reroll is None or recruit.room.current_teams is not reroll.teams
+                or reroll.room.match_in_progress
+                or reroll.room.match_transaction_active
+                or reroll.room.mvp_vote_in_progress
+            ):
+                await interaction.response.send_message(
+                    "❌ 다시 열 수 있는 라인CK 결과 관리창이 없습니다.",
+                    ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            result_message = reroll.result_message
+            try:
+                result_embed = LineCKRerollView.create_result_embed(
+                    reroll.room,
+                    reroll.teams,
+                    reroll.assigned_champions
+                )
+                add_match_button_instructions(result_embed)
+                match_view = getattr(reroll.room, "current_match_control_view", None)
+                if match_view is None:
+                    match_view = MatchControlView(reroll.join_cog)
+                if result_message is not None:
+                    try:
+                        await result_message.edit(embed=result_embed, view=match_view)
+                    except discord.HTTPException:
+                        logger.exception("라인CK 결과 카드 복구 중 기존 카드 수정 실패 | 방=%s", reroll.room.room_id)
+                        result_message = None
+                if result_message is None:
+                    result_message, _ = await reroll.join_cog.send_output_message(
+                        room=reroll.room,
+                        fallback_channel=interaction.channel,
+                        embed=result_embed,
+                        view=match_view
+                    )
+                    if result_message is None:
+                        raise RuntimeError("결과 카드를 다시 게시하지 못했습니다.")
+                match_view.team_message = result_message
+            except Exception:
+                logger.exception("라인CK 결과 카드 복구 실패 | 방=%s", reroll.room.room_id)
+                await interaction.followup.send(
+                    "❌ 결과 카드를 복구하지 못했습니다. 채널의 메시지 보내기/임베드 권한을 확인해주세요.",
+                    ephemeral=True
+                )
+                return
+            reroll.stop()
+            fresh = LineCKRerollView(
+                reroll.join_cog,
+                reroll.room,
+                result_message,
+                reroll.teams,
+                reroll.assigned_champions,
+                reroll.champion_pool
+            )
+            recruit._line_ck_reroll_view = fresh
+            await interaction.followup.send(
+                "🛠️ 결과 카드와 라인CK 관리창을 다시 열었습니다.",
+                view=fresh,
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            "현재 복구할 라인CK 창이 없습니다.", ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="준비/드래프트 취소 및 잠금 해제",
+        emoji="🔓",
+        style=discord.ButtonStyle.danger,
+        row=1
+    )
+    async def unlock_button(self, interaction, button):
+        recruit = self.recruit_view
+        room = recruit.room
+        phase = recruit._line_ck_phase
+        if phase not in ("setup", "draft"):
+            await interaction.response.send_message(
+                "❌ 해제할 준비 또는 드래프트 잠금이 없습니다.", ephemeral=True
+            )
+            return
+        if (
+            room.current_teams is not None or room.match_in_progress
+            or room.match_transaction_active or room.mvp_vote_in_progress
+        ):
+            await interaction.response.send_message(
+                "❌ 이미 결과가 생성됐거나 경기가 진행 중이어서 잠금을 강제로 해제할 수 없습니다.",
+                ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if phase == "draft" and recruit._line_ck_draft_view is not None:
+            await recruit._line_ck_draft_view.abort(
+                "관리자가 복구 메뉴에서 라인CK 드래프트를 취소하고 잠금을 해제했습니다."
+            )
+        else:
+            setup = recruit._line_ck_setup_view
+            if setup is not None:
+                setup.stop()
+                setup._release_room_lock()
+                if setup.message is not None:
+                    try:
+                        await setup.message.edit(
+                            content="🔓 관리자가 복구 메뉴에서 라인CK 준비를 취소했습니다.",
+                            view=None
+                        )
+                    except discord.HTTPException:
+                        logger.exception("라인CK 준비창 해제 안내 수정 실패 | 방=%s", room.room_id)
+            elif room.team_generation_lock.locked():
+                # Only release an orphaned lock when LineCK's own phase marker
+                # proves it belongs to this flow.
+                room.team_generation_lock.release()
+            recruit._line_ck_setup_view = None
+            recruit._line_ck_draft_view = None
+            recruit._line_ck_phase = None
+            recruit.team_generating = False
+            recruit._team_generation_started_at = None
+            recruit.recruit_closed = recruit._line_ck_previous_recruit_closed
+            await recruit.restore_recruitment_controls()
+        await interaction.followup.send(
+            "✅ 라인CK 준비를 취소하고 팀 편성 잠금을 해제했습니다. 모집창에서 다시 시작할 수 있습니다.",
+            ephemeral=True
+        )
+
 
 class CaptainSelection(discord.ui.Select):
     def __init__(self, setup_view):
@@ -2330,6 +3565,9 @@ class AuctionView(discord.ui.View):
 
 
 class CaptainSetupView(discord.ui.View):
+    # CaptainSelection reads this shared setting for the select placeholder.
+    captain_count = 2
+
     def __init__(self, recruit_view, player_ids, profiles):
         super().__init__(timeout=180)
         self.recruit_view = recruit_view
@@ -3042,6 +4280,13 @@ class JoinView(discord.ui.View):
         self._team_generation_started_at = None
         self._captain_setup_view = None
         self._auction_setup_view = None
+        # LineCK state is kept separately so operators can recover a lost UI
+        # without releasing another team-generation workflow's lock.
+        self._line_ck_phase = None
+        self._line_ck_setup_view = None
+        self._line_ck_draft_view = None
+        self._line_ck_reroll_view = None
+        self._line_ck_previous_recruit_closed = False
 
         if len(self.join_cog.players) < self.room.player_limit:
             self.make_teams_button.disabled = True
@@ -4528,6 +5773,12 @@ class JoinView(discord.ui.View):
                         fixture_no
                     )
             room.reset_game(keep_recruit_view=True)
+            self._line_ck_phase = None
+            self._line_ck_setup_view = None
+            self._line_ck_draft_view = None
+            self._line_ck_reroll_view = None
+            self.team_generating = False
+            self._team_generation_started_at = None
 
             self.join_cog.save_rooms_state()
 
