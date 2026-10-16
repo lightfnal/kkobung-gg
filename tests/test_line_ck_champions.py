@@ -3,6 +3,8 @@ import unittest
 from services.line_ck_champions import (
     annotate_champion_pools,
     assign_line_ck_champions,
+    can_assign_standard_line_ck_roster,
+    LINE_CK_CHAMPION_IDS,
 )
 
 
@@ -55,6 +57,15 @@ class LineCKChampionPoolTests(unittest.TestCase):
                 {"top-a": "TOP", "top-b": "TOP"},
                 only_one_top,
             )
+
+    def test_default_pool_can_fill_ten_unique_champions(self):
+        self.assertTrue(can_assign_standard_line_ck_roster(LINE_CK_CHAMPION_IDS))
+
+    def test_pool_that_cannot_fill_ten_unique_champions_is_rejected(self):
+        pools = {position: {f"{position}-1", f"{position}-2"}
+                 for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")}
+        pools["SUPPORT"] = set()
+        self.assertFalse(can_assign_standard_line_ck_roster(pools))
 
 
 if __name__ == "__main__":
