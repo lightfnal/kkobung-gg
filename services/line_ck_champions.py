@@ -58,13 +58,17 @@ LINE_CK_CHAMPION_IDS = {
 
 def annotate_champion_pools(champions):
     """Data Dragon 챔피언에 라인CK 후보 포지션을 붙여 반환합니다."""
+    # 목록은 DB에서 읽어 관리자가 슬래시 명령으로 바꿀 수 있게 합니다.
+    from storage.sqlite_db import get_line_ck_champion_ids
+
+    champion_pools = get_line_ck_champion_ids() or LINE_CK_CHAMPION_IDS
     annotated = []
     for champion in champions:
         record = dict(champion)
         key = record.get("champion_key")
         record["line_ck_positions"] = tuple(
             position
-            for position, champion_ids in LINE_CK_CHAMPION_IDS.items()
+            for position, champion_ids in champion_pools.items()
             if key in champion_ids
         )
         if record["line_ck_positions"]:
@@ -83,7 +87,7 @@ def assign_line_ck_champions(player_positions, champions, rng=random):
             for player_id, assigned_position in player_positions.items()
             if assigned_position == position
         ]
-        for position in LINE_CK_CHAMPION_IDS
+        for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
     }
 
     # 후보가 적은 라인부터 뽑아 포지션 간 공용 후보가 먼저 소진되는 것을 줄입니다.
@@ -115,4 +119,28 @@ def assign_line_ck_champions(player_positions, champions, rng=random):
     if len(result) != len(player_positions):
         raise ValueError("지원하지 않는 포지션이 포함되어 있습니다.")
     return result
+
+
+def can_assign_standard_line_ck_roster(champion_pools):
+    """기본 10명 구성(각 포지션 2명)에 서로 다른 챔피언을 줄 수 있는지 확인합니다."""
+    slots = [
+        position
+        for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+        for _ in range(2)
+    ]
+    champion_owner = {}
+
+    def place(slot_index, visited):
+        position = slots[slot_index]
+        for champion_key in champion_pools.get(position, set()):
+            if champion_key in visited:
+                continue
+            visited.add(champion_key)
+            previous_slot = champion_owner.get(champion_key)
+            if previous_slot is None or place(previous_slot, visited):
+                champion_owner[champion_key] = slot_index
+                return True
+        return False
+
+    return all(place(slot_index, set()) for slot_index in range(len(slots)))
 
