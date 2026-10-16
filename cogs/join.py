@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 from utils.database import load_players
 
-from views.join_view import JoinView
+from views.join_view import JoinView, LineCKRecoveryView
 
 
 def normalize_series_state(series_score, series_game):
@@ -1804,6 +1804,45 @@ class Join(commands.Cog):
 
 
     
+    @discord.app_commands.command(
+        name="라인복구",
+        description="관리자/내전진행자 전용 라인CK 창 복구 및 잠금 해제"
+    )
+    async def lineck_recovery(
+        self,
+        interaction: discord.Interaction
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+        if not await self.require_room(interaction):
+            return
+        room = self.active_room
+        self.activate_room(room)
+        recruit_view = room.current_recruit_view
+        if recruit_view is None:
+            await interaction.response.send_message(
+                "❌ 연결된 모집창이 없습니다. 먼저 `/내전모집`으로 모집창을 생성해주세요.",
+                ephemeral=True
+            )
+            return
+        phase = recruit_view._line_ck_phase
+        labels = {
+            "setup": "캡틴 선택 준비 중",
+            "draft": "캡틴 드래프트 진행 중",
+            "result": "라인CK 결과 관리 가능",
+        }
+        status = (
+            f"현재 상태: **{labels.get(phase, phase)}**"
+            if phase is not None
+            else "현재 진행 중인 라인CK 상태가 없습니다."
+        )
+        await interaction.response.send_message(
+            f"🛠️ 라인CK 복구 패널\n{status}\n\n준비/결과 창이 보이지 않으면 다시 열고, 준비 또는 드래프트가 멈춘 경우에만 잠금을 해제하세요.",
+            view=LineCKRecoveryView(recruit_view),
+            ephemeral=True
+        )
+
     @discord.app_commands.command(
         name="내전모집",
         description="버튼이 있는 내전 참가 모집창을 생성합니다."

@@ -376,6 +376,101 @@ class Match(commands.Cog):
                 finally:
                     room.match_result_finalizing = False
 
+    async def _process_unrecorded_lineck_result(
+        self,
+        interaction,
+        winner,
+        room,
+        join_cog
+    ):
+        """Close one LineCK game without creating any official match records."""
+        if winner not in ("red", "blue"):
+            await interaction.followup.send(
+                "❌ 승리 팀 값이 올바르지 않습니다.", ephemeral=True
+            )
+            return
+        teams = room.current_teams
+        if not isinstance(teams, dict) or not all(
+            isinstance(teams.get(side), dict) for side in ("red", "blue")
+        ):
+            await interaction.followup.send(
+                "❌ 라인CK 팀 구성을 확인할 수 없어 결과를 처리하지 않았습니다.",
+                ephemeral=True
+            )
+            return
+
+        winner_name = "🔴 레드팀" if winner == "red" else "🔵 블루팀"
+        all_player_ids = [
+            str(user_id)
+            for side in ("red", "blue")
+            for user_id in teams[side].values()
+        ]
+        recruit_view = room.current_recruit_view
+
+        # Do not create a match row or update rating, season, champion,
+        # same-team/opponent, or tournament records for LineCK games.
+        room.match_in_progress = False
+        room.current_teams = None
+        room.current_balance_prediction = None
+        room.match_recording_disabled = False
+        room.series_score = {"red": 0, "blue": 0}
+        room.series_game = 0
+        room.current_match_control_view = None
+        room.ended_series_snapshot = None
+        room.last_team_signature = None
+        room.tournament_id = None
+        room.tournament_fixture_no = None
+        join_cog.current_teams = None
+        join_cog.last_team_signature = None
+
+        if recruit_view is not None:
+            recruit_view.recruit_closed = False
+            recruit_view.team_generating = False
+            recruit_view._team_generation_started_at = None
+            recruit_view._line_ck_phase = None
+            recruit_view._line_ck_setup_view = None
+            recruit_view._line_ck_draft_view = None
+            recruit_view._line_ck_reroll_view = None
+
+        try:
+            join_cog.activate_room(room)
+            join_cog.save_rooms_state()
+        except Exception:
+            # The mode flag in the last saved state remains true, so a retry
+            # after restart still cannot create an official record.
+            logger.exception("라인CK 비기록 결과 상태 저장 실패 | 방=%s", room.room_id)
+
+        if recruit_view is not None:
+            try:
+                await recruit_view.restore_recruitment_controls()
+            except Exception:
+                logger.exception("라인CK 결과 후 모집창 복구 실패 | 방=%s", room.room_id)
+
+        result_content = (
+            f"🎲 **{room.room_name} · 라인CK 경기 종료**\n"
+            f"승리팀: **{winner_name}**\n\n"
+            "이 경기는 내전 사이트 전적, 개인 전적, 레이팅, 시즌 점수, 챔피언 기록에 저장하지 않았습니다.\n"
+            "참가자 명단은 유지했습니다. 다시 라인CK를 하려면 모집창에서 팀 생성을 눌러주세요."
+        )
+        try:
+            await join_cog.send_output_message(
+                room=room,
+                fallback_channel=interaction.channel,
+                content=result_content
+            )
+        except Exception:
+            logger.exception("라인CK 비기록 결과 안내 전송 실패 | 방=%s", room.room_id)
+
+        if interaction.guild is not None and room.waiting_voice_channel_id:
+            try:
+                await join_cog.move_members_to_voice_channel(
+                    guild=interaction.guild,
+                    user_ids=all_player_ids,
+                    channel_id=room.waiting_voice_channel_id
+                )
+            except Exception:
+                logger.exception("라인CK 종료 후 대기 음성채널 이동 실패 | 방=%s", room.room_id)
+
     async def _process_match_result_locked(
         self,
         interaction: discord.Interaction,
@@ -395,11 +490,30 @@ class Match(commands.Cog):
             return
 
         logger.info(
-            "경기 결과 처리 시작 | 방=%s | 경기 진행=%s | 팀 구성=%s",
+            "경기 결과 처리 시작 | 방=%s | 경기 진행=%s | 팀 구성=%s | 기록 제외=%s",
             room.room_id,
             join_cog.match_in_progress,
-            join_cog.current_teams is not None
+            join_cog.current_teams is not None,
+            getattr(room, "match_recording_disabled", False)
         )
+
+        if getattr(room, "match_recording_disabled", False):
+            if room.current_teams is None:
+                await interaction.followup.send(
+                    "❌ 라인CK 팀 구성이 없습니다.", ephemeral=True
+                )
+                return
+            if not room.match_in_progress:
+                await interaction.followup.send(
+                    "❌ 현재 진행 중인 라인CK 경기가 없습니다.", ephemeral=True
+                )
+                return
+            return await self._process_unrecorded_lineck_result(
+                interaction,
+                winner,
+                room,
+                join_cog
+            )
 
         active_season = get_active_season()
 
