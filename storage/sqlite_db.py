@@ -299,6 +299,42 @@ if hidden_mmr_was_missing:
 
 conn.commit()
 
+# 라인CK 포지션별 챔피언 후보와 기본 풀 적용 여부를 저장합니다.
+# 기본 후보는 최초 실행 때만 복사하므로, 관리자가 삭제한 챔피언이
+# 봇 재시작 뒤 다시 나타나지 않습니다.
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS line_ck_champion_pool (
+    position TEXT NOT NULL,
+    champion_key TEXT NOT NULL,
+    PRIMARY KEY (position, champion_key)
+)
+""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL
+)
+""")
+pool_seeded = conn.execute(
+    "SELECT setting_value FROM app_settings WHERE setting_key = ?",
+    ("line_ck_champion_pool_seeded",)
+).fetchone()
+if pool_seeded is None:
+    # 지연 import로 모듈 간 순환 참조를 피합니다.
+    from services.line_ck_champions import LINE_CK_CHAMPION_IDS
+
+    for position, champion_ids in LINE_CK_CHAMPION_IDS.items():
+        conn.executemany(
+            "INSERT OR IGNORE INTO line_ck_champion_pool "
+            "(position, champion_key) VALUES (?, ?)",
+            [(position, champion_key) for champion_key in sorted(champion_ids)]
+        )
+    conn.execute(
+        "INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)",
+        ("line_ck_champion_pool_seeded", "1")
+    )
+conn.commit()
+
 existing_columns = {
     row["name"]
     for row in conn.execute(
@@ -2914,3 +2950,37 @@ def finalize_pending_position_ratings(limit=100):
         if finalize_match_position_ratings_if_ready(row["match_id"]):
             finalized_count += 1
     return finalized_count
+
+
+def get_line_ck_champion_ids():
+    """저장된 라인CK 포지션별 챔피언 ID를 반환합니다."""
+    rows = conn.execute(
+        "SELECT position, champion_key FROM line_ck_champion_pool "
+        "ORDER BY position, champion_key"
+    ).fetchall()
+    pools = {}
+    for row in rows:
+        pools.setdefault(row["position"], set()).add(row["champion_key"])
+    return pools
+
+
+def add_line_ck_champion(position, champion_key):
+    """라인CK 후보 풀에 챔피언을 추가합니다. 이미 있으면 False입니다."""
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO line_ck_champion_pool "
+        "(position, champion_key) VALUES (?, ?)",
+        (str(position).upper(), str(champion_key))
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def remove_line_ck_champion(position, champion_key):
+    """라인CK 후보 풀에서 챔피언을 삭제합니다. 없으면 False입니다."""
+    cursor = conn.execute(
+        "DELETE FROM line_ck_champion_pool "
+        "WHERE position = ? AND champion_key = ?",
+        (str(position).upper(), str(champion_key))
+    )
+    conn.commit()
+    return cursor.rowcount > 0
