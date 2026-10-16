@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import time
+from types import SimpleNamespace
 import discord
 
 from config import (
@@ -1129,6 +1130,135 @@ class TeamModeView(discord.ui.View):
         return True
 
     @discord.ui.button(
+        label="라인CK 혼자 테스트",
+        emoji="🧪",
+        style=discord.ButtonStyle.secondary,
+        row=1
+    )
+    async def line_ck_solo_test_button(self, interaction, button):
+        await self._start_line_ck_solo_test(interaction)
+
+    async def _start_line_ck_solo_test(self, interaction):
+        """가상 참가자 10명으로 실제 방 데이터와 분리해 라인CK를 시험합니다."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            champion_lookup = await asyncio.to_thread(
+                ChampionService._load_cache
+            )
+            champion_pool = list({
+                champion["champion_key"]: champion
+                for champion in champion_lookup.values()
+            }.values())
+            champion_pool = annotate_champion_pools(champion_pool)
+            player_ids = [
+                str(990000000000001000 + index)
+                for index in range(1, MAX_PLAYERS + 1)
+            ]
+            lane_players = {position: [] for position in POSITIONS}
+            shuffled_players = list(player_ids)
+            random.shuffle(shuffled_players)
+            for index, user_id in enumerate(shuffled_players):
+                lane_players[POSITIONS[index % len(POSITIONS)]].append(user_id)
+            for pair in lane_players.values():
+                random.shuffle(pair)
+            player_positions = {
+                user_id: position
+                for position, users in lane_players.items()
+                for user_id in users
+            }
+            assigned_champions = assign_line_ck_champions(
+                player_positions,
+                champion_pool
+            )
+        except Exception:
+            logger.exception("라인CK 혼자 테스트 준비 실패")
+            await interaction.followup.send(
+                "❌ 테스트 참가자나 라인별 챔피언을 준비하지 못했습니다. 잠시 뒤 다시 시도해주세요.",
+                ephemeral=True
+            )
+            return
+
+        room = SimpleNamespace(
+            room_id=f"lineck-test-{interaction.user.id}",
+            room_name="라인CK 관리자 테스트",
+            player_limit=MAX_PLAYERS,
+            players={
+                user_id: {"nickname": f"테스트 참가자 {index}"}
+                for index, user_id in enumerate(player_ids, start=1)
+            },
+            team_generation_lock=asyncio.Lock(),
+            current_teams=None,
+            match_recording_disabled=False,
+            current_balance_prediction=None,
+            match_in_progress=False,
+            match_transaction_active=False,
+            pending_match_token=None,
+            mvp_vote_in_progress=False,
+            tournament_id=None,
+            series_game=0,
+            series_score={"red": 0, "blue": 0},
+            single_draft_mode_active=False,
+            is_line_ck_test_mode=True,
+        )
+
+        async def no_op_restore():
+            return None
+
+        test_join_cog = SimpleNamespace(
+            activate_room=lambda target_room: True,
+            save_rooms_state=lambda: None,
+            current_teams=None,
+            last_team_signature=None,
+        )
+        test_recruit_view = SimpleNamespace(
+            join_cog=test_join_cog,
+            room=room,
+            recruit_closed=False,
+            team_generating=False,
+            _team_generation_started_at=None,
+            _line_ck_setup_view=None,
+            _line_ck_draft_view=None,
+            _line_ck_reroll_view=None,
+            _line_ck_phase=None,
+            _line_ck_previous_recruit_closed=False,
+            message=None,
+            children=[],
+            restore_recruitment_controls=no_op_restore,
+        )
+        setup_view = LineCKSetupView(
+            test_recruit_view,
+            player_ids,
+            lane_players,
+            assigned_champions,
+            champion_pool,
+            test_mode=True,
+        )
+        setup_view.lock_acquired = True  # 테스트 가상 방에만 적용되는 해제 표식
+        test_recruit_view._line_ck_setup_view = setup_view
+        test_recruit_view._line_ck_phase = "setup"
+        lane_names = {
+            "TOP": "탑", "JUNGLE": "정글", "MID": "미드",
+            "ADC": "원딜", "SUPPORT": "서포터",
+        }
+        assignments = []
+        for position in POSITIONS:
+            players = []
+            for user_id in lane_players[position]:
+                player = room.players[user_id]["nickname"]
+                champion = assigned_champions[user_id]["champion_name"]
+                players.append(f"{player} ({champion})")
+            assignments.append(f"**{lane_names[position]}**: " + " / ".join(players))
+        setup_view.message = await interaction.edit_original_response(
+            content=(
+                "🧪 **관리자 전용 라인CK 테스트**\n"
+                "가상 참가자 10명으로 진행합니다. 실제 모집 명단·팀·전적에는 반영되지 않습니다.\n"
+                + "\n".join(assignments)
+                + "\n\n캡틴 2명을 선택하고 드래프트를 진행하세요."
+            ),
+            view=setup_view
+        )
+
+    @discord.ui.button(
         label="자동 밸런스 편성",
         emoji="⚖️",
         style=discord.ButtonStyle.primary
@@ -1530,7 +1660,8 @@ class LineCKSetupView(discord.ui.View):
         player_ids,
         lane_players,
         assigned_champions,
-        champion_pool
+        champion_pool,
+        test_mode=False,
     ):
         super().__init__(timeout=180)
         self.recruit_view = recruit_view
@@ -1543,6 +1674,7 @@ class LineCKSetupView(discord.ui.View):
         }
         self.assigned_champions = assigned_champions
         self.champion_pool = champion_pool
+        self.test_mode = test_mode
         self.selected_captains = []
         self.message = None
         self.started = False
@@ -1612,7 +1744,7 @@ class LineCKSetupView(discord.ui.View):
                 "❌ 참가자 명단이 바뀌어 라인CK 준비를 취소했습니다."
             )
             return
-        if (
+        if not self.test_mode and (
             self.room.current_teams is not None
             or self.room.match_in_progress
             or self.room.match_transaction_active
@@ -1623,14 +1755,17 @@ class LineCKSetupView(discord.ui.View):
                 ephemeral=True
             )
             return
-        if not self.lock_acquired or not self.room.team_generation_lock.locked():
+        if not self.test_mode and (
+            not self.lock_acquired or not self.room.team_generation_lock.locked()
+        ):
             await interaction.response.send_message(
                 "❌ 팀 생성 잠금이 풀렸습니다. 라인CK를 다시 시작해주세요.",
                 ephemeral=True
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not self.test_mode:
+            await interaction.response.defer(ephemeral=True, thinking=True)
         self.started = True
         self.stop()
         self.recruit_view._line_ck_setup_view = None
@@ -1661,12 +1796,20 @@ class LineCKSetupView(discord.ui.View):
         self.recruit_view._line_ck_draft_view = draft_view
         self.recruit_view._line_ck_phase = "draft"
         try:
-            message, _ = await self.join_cog.send_output_message(
-                room=self.room,
-                fallback_channel=interaction.channel,
-                embed=draft_view.create_embed(),
-                view=draft_view
-            )
+            if self.test_mode:
+                await interaction.response.edit_message(
+                    content="🧪 가상 참가자로 진행 중인 관리자 전용 테스트입니다.",
+                    embed=draft_view.create_embed(),
+                    view=draft_view
+                )
+                message = await interaction.original_response()
+            else:
+                message, _ = await self.join_cog.send_output_message(
+                    room=self.room,
+                    fallback_channel=interaction.channel,
+                    embed=draft_view.create_embed(),
+                    view=draft_view
+                )
         except Exception:
             logger.exception("라인CK 캡틴 드래프트 메시지 전송 실패")
             message = None
@@ -1681,7 +1824,7 @@ class LineCKSetupView(discord.ui.View):
         draft_view.message = message
         draft_view.lock_acquired = True
         self.lock_acquired = False
-        if self.message is not None:
+        if self.message is not None and not self.test_mode:
             try:
                 await self.message.edit(
                     content=(
@@ -1692,10 +1835,12 @@ class LineCKSetupView(discord.ui.View):
                 )
             except discord.HTTPException:
                 logger.exception("라인CK 비공개 준비창 갱신 실패")
-        await interaction.followup.send(
-            f"✅ 라인CK 드래프트를 시작했습니다. 진행 메시지: {message.jump_url}",
-            ephemeral=True
+        confirmation = (
+            "🧪 가상 참가자 라인CK 드래프트를 시작했습니다. 이 테스트 화면에서 직접 후보를 선택하세요."
+            if self.test_mode else
+            f"✅ 라인CK 드래프트를 시작했습니다. 진행 메시지: {message.jump_url}"
         )
+        await interaction.followup.send(confirmation, ephemeral=True)
 
     @discord.ui.button(
         label="취소",
@@ -1762,9 +1907,14 @@ class LineCKDraftPlayerSelect(discord.ui.Select):
                 ))
         current_side = draft_view.current_side
         captain = draft_view.captains[current_side]
+        captain_name = draft_view._player_data(
+            draft_view.room.players,
+            captain
+        ).get("nickname") or captain
         super().__init__(
             placeholder=(
-                f"{'레드' if current_side == 'red' else '블루'} 캡틴 <@{captain}> 차례 — 한 명 선택"
+                f"{'레드' if current_side == 'red' else '블루'} 캡틴 "
+                f"{captain_name if draft_view.test_mode else f'<@{captain}>'} 차례 — 한 명 선택"
             )[:150],
             min_values=1,
             max_values=1,
@@ -1794,6 +1944,7 @@ class LineCKDraftView(discord.ui.View):
         self.lane_players = copy.deepcopy(setup_view.lane_players)
         self.assigned_champions = setup_view.assigned_champions
         self.champion_pool = setup_view.champion_pool
+        self.test_mode = setup_view.test_mode
         self.captains = {
             "red": str(red_captain),
             "blue": str(blue_captain),
@@ -1869,17 +2020,30 @@ class LineCKDraftView(discord.ui.View):
 
     def create_embed(self):
         captain_id = self.captains[self.current_side]
+        captain_name = self._player_data(
+            self.room.players,
+            captain_id
+        ).get("nickname") or captain_id
+        captain_display = (
+            str(captain_name) if self.test_mode else f"<@{captain_id}>"
+        )
         current_team = "🔴 레드팀" if self.current_side == "red" else "🔵 블루팀"
         description = (
             f"라인은 무작위로 정해졌습니다. 각 라인의 두 명은 서로 다른 팀에 배정됩니다.\n"
-            f"현재 선택: **{current_team} 캡틴 <@{captain_id}>**\n"
+            f"현재 선택: **{current_team} 캡틴 {captain_display}**\n"
             f"선픽 팀은 무작위로 정했습니다. 각 차례에 한 명을 고르면 같은 라인의 다른 한 명은 상대 팀에 배정됩니다."
         )
+        if self.test_mode:
+            description += "\n🧪 이 화면은 관리자 전용 테스트이며 실제 참가 명단이나 기록에 반영되지 않습니다."
         if self.free_positions:
             candidates = []
             for position in self.free_positions:
                 names = " / ".join(
-                    f"<@{user_id}>" for user_id in self.lane_players[position]
+                    (
+                        str(self._player_data(self.room.players, user_id).get("nickname") or user_id)
+                        if self.test_mode else f"<@{user_id}>"
+                    )
+                    for user_id in self.lane_players[position]
                 )
                 candidates.append(f"**{self.position_label(position)}**: {names}")
             description += "\n\n**선택 가능한 라인**\n" + "\n".join(candidates)
@@ -1893,9 +2057,15 @@ class LineCKDraftView(discord.ui.View):
             lines = []
             for position in POSITIONS:
                 user_id = self.teams[side].get(position)
+                user_display = "선택 대기"
+                if user_id:
+                    user_display = (
+                        str(self._player_data(self.room.players, user_id).get("nickname") or user_id)
+                        if self.test_mode else f"<@{user_id}>"
+                    )
                 lines.append(
                     f"**{self.position_label(position)}** · "
-                    + (f"<@{user_id}>" if user_id else "선택 대기")
+                    + user_display
                 )
             embed.add_field(name=heading, value="\n".join(lines), inline=True)
         embed.set_footer(text="캡틴 차례마다 라인 후보 한 명을 선택하세요. 상대 팀은 같은 라인의 남은 참가자로 자동 배정됩니다.")
@@ -1922,7 +2092,10 @@ class LineCKDraftView(discord.ui.View):
                     ephemeral=True
                 )
                 return
-            if {str(value) for value in self.room.players} != set(self.player_ids):
+            if (
+                not self.test_mode
+                and {str(value) for value in self.room.players} != set(self.player_ids)
+            ):
                 await interaction.followup.send(
                     "❌ 참가자 명단이 바뀌어 드래프트를 취소합니다.", ephemeral=True
                 )
@@ -1963,6 +2136,43 @@ class LineCKDraftView(discord.ui.View):
                 await self.abort("드래프트 화면 갱신에 실패해 라인CK를 취소했습니다.")
 
     async def finish_draft(self, interaction):
+        if self.test_mode:
+            self.room.current_teams = self.teams
+            result_view = LineCKRerollView(
+                self.join_cog,
+                self.room,
+                self.message,
+                self.teams,
+                self.assigned_champions,
+                self.champion_pool
+            )
+            self.recruit_view._line_ck_phase = "result"
+            self.recruit_view._line_ck_draft_view = None
+            self.recruit_view._line_ck_reroll_view = result_view
+            self.stop()
+            self._release_room_lock()
+            try:
+                await self.message.edit(
+                    content=(
+                        "🧪 **관리자 전용 라인CK 테스트 완료**\n"
+                        "가상 결과입니다. 실제 모집 명단·팀·전적·시즌 데이터에는 반영되지 않았습니다.\n"
+                        "아래 버튼으로 챔피언 재추첨과 라인 재배정을 시험할 수 있습니다."
+                    ),
+                    embed=LineCKRerollView.create_result_embed(
+                        self.room,
+                        self.teams,
+                        self.assigned_champions
+                    ),
+                    view=result_view
+                )
+            except discord.HTTPException:
+                logger.exception("라인CK 혼자 테스트 결과 표시 실패")
+                await interaction.followup.send(
+                    "❌ 테스트 결과 화면을 갱신하지 못했습니다.",
+                    ephemeral=True
+                )
+            return
+
         self.join_cog.activate_room(self.room)
         self.room.current_teams = self.teams
         self.room.match_recording_disabled = True
@@ -2157,14 +2367,23 @@ class LineCKRerollView(discord.ui.View):
 
     @classmethod
     def create_result_embed(cls, room, teams, assigned_champions):
+        test_mode = bool(getattr(room, "is_line_ck_test_mode", False))
+        description = (
+            "라인은 무작위로 정하고, 팀은 캡틴 드래프트로 구성했습니다.\n"
+            "챔피언은 각자 배정된 라인 후보군에서 중복 없이 무작위로 뽑았습니다.\n"
+        )
+        if test_mode:
+            description += "🧪 관리자 테스트용 가상 결과입니다. 실제 데이터에 반영되지 않습니다.\n"
+        else:
+            description += (
+                "이 라인CK 경기는 내전 사이트 전적·레이팅·시즌 점수·챔피언 기록에 저장되지 않습니다.\n"
+            )
+        description += (
+            "챔피언 보유 여부는 확인하지 않습니다. 진행자는 비공개 창에서 라인 배정이나 챔피언을 다시 뽑을 수 있습니다."
+        )
         embed = discord.Embed(
             title=f"🎲 {room.room_name} · 랜덤 라인CK 결과",
-            description=(
-                "라인은 무작위로 정하고, 팀은 캡틴 드래프트로 구성했습니다.\n"
-                "챔피언은 각자 배정된 라인 후보군에서 중복 없이 무작위로 뽑았습니다.\n"
-                "이 라인CK 경기는 내전 사이트 전적·레이팅·시즌 점수·챔피언 기록에 저장되지 않습니다.\n"
-                "챔피언 보유 여부는 확인하지 않습니다. 진행자는 비공개 창에서 라인 배정이나 챔피언을 다시 뽑을 수 있습니다."
-            ),
+            description=description,
             color=discord.Color.green()
         )
         labels = {
@@ -2179,8 +2398,13 @@ class LineCKRerollView(discord.ui.View):
             for position in POSITIONS:
                 user_id = str(teams[side][position])
                 champion = assigned_champions[user_id]
+                player = cls._player_data(room.players, user_id)
+                player_display = (
+                    player.get("nickname") or user_id
+                    if test_mode else f"<@{user_id}>"
+                )
                 lines.append(
-                    f"**{labels.get(position, position)}** · <@{user_id}> — "
+                    f"**{labels.get(position, position)}** · {player_display} — "
                     f"**{champion['champion_name']}**"
                 )
             embed.add_field(name=heading, value="\n".join(lines), inline=True)
@@ -2413,6 +2637,16 @@ class LineCKRecoveryView(discord.ui.View):
             )
             return False
         return True
+
+    @discord.ui.button(
+        label="가상 참가자로 혼자 테스트",
+        emoji="🧪",
+        style=discord.ButtonStyle.secondary,
+        row=2
+    )
+    async def solo_test_button(self, interaction, button):
+        tester = TeamModeView(self.recruit_view)
+        await tester._start_line_ck_solo_test(interaction)
 
     @discord.ui.button(
         label="준비/드래프트/결과 창 다시 열기",
