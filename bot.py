@@ -101,6 +101,7 @@ EXTENSIONS = (
     "cogs.register",
     "cogs.champion_record",
     "cogs.tournament",
+    "cogs.line_ck_settings",
 )
 
 
