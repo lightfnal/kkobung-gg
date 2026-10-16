@@ -26,6 +26,10 @@ from services.team_balancer import (
     POSITIONS
 )
 from services.champion_service import ChampionService
+from services.line_ck_champions import (
+    annotate_champion_pools,
+    assign_line_ck_champions,
+)
 from services.tournament_service import (
     claim_fixture,
     create_auction_bracket,
@@ -63,6 +67,15 @@ async def send_ephemeral_response(interaction, content):
         await interaction.followup.send(content, ephemeral=True)
     else:
         await interaction.response.send_message(content, ephemeral=True)
+
+
+def line_ck_positions_for_teams(teams):
+    """레드/블루 팀의 포지션 배치에서 참가자별 라인을 만듭니다."""
+    return {
+        str(user_id): position
+        for side in ("red", "blue")
+        for position, user_id in teams[side].items()
+    }
 
 
 def add_match_button_instructions(embed):
@@ -1433,6 +1446,7 @@ class TeamModeView(discord.ui.View):
                     champion["champion_key"]: champion
                     for champion in champion_lookup.values()
                 }.values())
+                champion_pool = annotate_champion_pools(champion_pool)
                 if len(champion_pool) < MAX_PLAYERS:
                     raise ValueError("챔피언 목록이 부족합니다.")
             except Exception:
@@ -1455,10 +1469,15 @@ class TeamModeView(discord.ui.View):
             for pair in lane_players.values():
                 random.shuffle(pair)
 
-            assigned_champions = dict(zip(
-                player_ids,
-                random.sample(champion_pool, MAX_PLAYERS)
-            ))
+            player_positions = {
+                user_id: position
+                for position, users in lane_players.items()
+                for user_id in users
+            }
+            assigned_champions = assign_line_ck_champions(
+                player_positions,
+                champion_pool
+            )
             setup_view = LineCKSetupView(
                 self.recruit_view,
                 player_ids,
@@ -2142,6 +2161,7 @@ class LineCKRerollView(discord.ui.View):
             title=f"🎲 {room.room_name} · 랜덤 라인CK 결과",
             description=(
                 "라인은 무작위로 정하고, 팀은 캡틴 드래프트로 구성했습니다.\n"
+                "챔피언은 각자 배정된 라인 후보군에서 중복 없이 무작위로 뽑았습니다.\n"
                 "이 라인CK 경기는 내전 사이트 전적·레이팅·시즌 점수·챔피언 기록에 저장되지 않습니다.\n"
                 "챔피언 보유 여부는 확인하지 않습니다. 진행자는 비공개 창에서 라인 배정이나 챔피언을 다시 뽑을 수 있습니다."
             ),
@@ -2231,13 +2251,16 @@ class LineCKRerollView(discord.ui.View):
             champion["champion_key"]
             for champion in self.assigned_champions.values()
         }
+        position = line_ck_positions_for_teams(self.teams).get(str(user_id))
         choices = [
             champion for champion in self.champion_pool
-            if champion["champion_key"] not in assigned_keys
+            if position in champion.get("line_ck_positions", ())
+            and champion["champion_key"] not in assigned_keys
         ]
         if not choices:
             await interaction.response.send_message(
-                "❌ 다시 배정할 수 있는 챔피언이 없습니다.", ephemeral=True
+                "❌ 해당 라인에서 다시 배정할 수 있는 챔피언이 없습니다.",
+                ephemeral=True
             )
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -2261,12 +2284,22 @@ class LineCKRerollView(discord.ui.View):
     async def reroll_all_button(self, interaction, button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         previous = dict(self.assigned_champions)
-        shuffled = random.sample(self.champion_pool, len(self.assigned_champions))
+        try:
+            updated = assign_line_ck_champions(
+                line_ck_positions_for_teams(self.teams),
+                self.champion_pool
+            )
+        except ValueError:
+            await interaction.followup.send(
+                "❌ 라인별 챔피언을 다시 배정하지 못했습니다. 기존 배정은 유지했습니다.",
+                ephemeral=True
+            )
+            return
         self.assigned_champions.clear()
-        self.assigned_champions.update(zip(previous, shuffled))
+        self.assigned_champions.update(updated)
         if await self._publish_updated_result(interaction):
             await interaction.followup.send(
-                "✅ 라인과 팀은 그대로 두고 10명의 챔피언을 모두 다시 뽑았습니다.",
+                "✅ 라인과 팀은 그대로 두고, 각 라인에 맞춰 챔피언을 모두 다시 뽑았습니다.",
                 ephemeral=True
             )
         else:
@@ -2282,6 +2315,7 @@ class LineCKRerollView(discord.ui.View):
     async def reroll_lanes_button(self, interaction, button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         previous_teams = copy.deepcopy(self.teams)
+        previous_champions = dict(self.assigned_champions)
         red_players = list(self.teams["red"].values())
         blue_players = list(self.teams["blue"].values())
 
@@ -2300,11 +2334,25 @@ class LineCKRerollView(discord.ui.View):
                 break
 
         try:
+            updated_champions = assign_line_ck_champions(
+                line_ck_positions_for_teams({"red": new_red, "blue": new_blue}),
+                self.champion_pool
+            )
+        except ValueError:
+            await interaction.followup.send(
+                "❌ 새 라인에 맞는 챔피언을 배정하지 못했습니다. 기존 결과를 유지했습니다.",
+                ephemeral=True
+            )
+            return
+
+        try:
             # 팀 객체는 유지해 경기 버튼이 기존 팀 참조를 계속 사용하게 합니다.
             self.teams["red"].clear()
             self.teams["red"].update(new_red)
             self.teams["blue"].clear()
             self.teams["blue"].update(new_blue)
+            self.assigned_champions.clear()
+            self.assigned_champions.update(updated_champions)
             self.room.current_balance_prediction = None
             self.join_cog.current_teams = self.teams
             self.join_cog.last_team_signature = None
@@ -2315,6 +2363,8 @@ class LineCKRerollView(discord.ui.View):
             self.teams["red"].update(previous_teams["red"])
             self.teams["blue"].clear()
             self.teams["blue"].update(previous_teams["blue"])
+            self.assigned_champions.clear()
+            self.assigned_champions.update(previous_champions)
             try:
                 self.join_cog.save_rooms_state()
             except Exception:
@@ -2327,7 +2377,7 @@ class LineCKRerollView(discord.ui.View):
 
         if await self._publish_updated_result(interaction):
             await interaction.followup.send(
-                "✅ 캡틴이 정한 팀은 유지하고, 각 팀의 라인만 다시 무작위 배정했습니다. 챔피언도 참가자별로 유지했습니다.",
+                "✅ 캡틴이 정한 팀은 유지하고, 라인과 그 라인에 맞는 챔피언을 다시 배정했습니다.",
                 ephemeral=True
             )
         else:
@@ -2335,6 +2385,8 @@ class LineCKRerollView(discord.ui.View):
             self.teams["red"].update(previous_teams["red"])
             self.teams["blue"].clear()
             self.teams["blue"].update(previous_teams["blue"])
+            self.assigned_champions.clear()
+            self.assigned_champions.update(previous_champions)
             self.join_cog.current_teams = self.teams
             try:
                 self.join_cog.save_rooms_state()
