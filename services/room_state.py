@@ -66,6 +66,10 @@ class InhouseRoom:
 
     match_in_progress: bool = False
 
+    # 현재 팀이 라인CK에서 만들어진 비기록 경기인지 표시합니다.
+    # 경기 중 재시작해도 승패 처리에서 전적 경로를 건너뜁니다.
+    match_recording_disabled: bool = False
+
     series_score: dict = field(
         default_factory=lambda: {
             "red": 0,
@@ -197,6 +201,7 @@ class InhouseRoom:
         self.tournament_id = None
         self.tournament_fixture_no = None
         self.match_in_progress = False
+        self.match_recording_disabled = False
 
         self.series_score = {
             "red": 0,
@@ -263,6 +268,7 @@ class InhouseRoom:
             "match_in_progress": (
                 self.match_in_progress
             ),
+            "match_recording_disabled": self.match_recording_disabled,
             "series_score": self.series_score,
             "series_game": self.series_game,
             "single_draft_mode_active": self.single_draft_mode_active,
@@ -385,6 +391,9 @@ class InhouseRoom:
                 "match_in_progress",
                 False
             )
+        )
+        room.match_recording_disabled = bool(
+            data.get("match_recording_disabled", False)
         )
 
         series_score = data.get("series_score", {})
