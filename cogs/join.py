@@ -1806,7 +1806,7 @@ class Join(commands.Cog):
     
     @discord.app_commands.command(
         name="라인복구",
-        description="관리자/내전진행자 전용 라인CK 창 복구 및 잠금 해제"
+        description="관리자/내전진행자/멤버 역할 전용 라인CK 창 복구 및 잠금 해제"
     )
     async def lineck_recovery(
         self,
