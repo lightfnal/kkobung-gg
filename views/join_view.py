@@ -1250,7 +1250,7 @@ class TeamModeView(discord.ui.View):
             assignments.append(f"**{lane_names[position]}**: " + " / ".join(players))
         setup_view.message = await interaction.edit_original_response(
             content=(
-                "🧪 **관리자 전용 라인CK 테스트**\n"
+                "🧪 **내전 진행자 전용 라인CK 테스트**\n"
                 "가상 참가자 10명으로 진행합니다. 실제 모집 명단·팀·전적에는 반영되지 않습니다.\n"
                 + "\n".join(assignments)
                 + "\n\n캡틴 2명을 선택하고 드래프트를 진행하세요."
@@ -1798,7 +1798,7 @@ class LineCKSetupView(discord.ui.View):
         try:
             if self.test_mode:
                 await interaction.response.edit_message(
-                    content="🧪 가상 참가자로 진행 중인 관리자 전용 테스트입니다.",
+                    content="🧪 가상 참가자로 진행 중인 내전 진행자 전용 테스트입니다.",
                     embed=draft_view.create_embed(),
                     view=draft_view
                 )
@@ -2034,7 +2034,7 @@ class LineCKDraftView(discord.ui.View):
             f"선픽 팀은 무작위로 정했습니다. 각 차례에 한 명을 고르면 같은 라인의 다른 한 명은 상대 팀에 배정됩니다."
         )
         if self.test_mode:
-            description += "\n🧪 이 화면은 관리자 전용 테스트이며 실제 참가 명단이나 기록에 반영되지 않습니다."
+            description += "\n🧪 이 화면은 내전 진행자 전용 테스트이며 실제 참가 명단이나 기록에 반영되지 않습니다."
         if self.free_positions:
             candidates = []
             for position in self.free_positions:
@@ -2154,7 +2154,7 @@ class LineCKDraftView(discord.ui.View):
             try:
                 await self.message.edit(
                     content=(
-                        "🧪 **관리자 전용 라인CK 테스트 완료**\n"
+                        "🧪 **내전 진행자 전용 라인CK 테스트 완료**\n"
                         "가상 결과입니다. 실제 모집 명단·팀·전적·시즌 데이터에는 반영되지 않았습니다.\n"
                         "아래 버튼으로 챔피언 재추첨과 라인 재배정을 시험할 수 있습니다."
                     ),
