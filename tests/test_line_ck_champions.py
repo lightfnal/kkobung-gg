@@ -67,6 +67,25 @@ class LineCKChampionPoolTests(unittest.TestCase):
         pools["SUPPORT"] = set()
         self.assertFalse(can_assign_standard_line_ck_roster(pools))
 
+    def test_assignment_finds_a_valid_match_when_random_greedy_pick_would_fail(self):
+        champions = [
+            {"champion_key": "shared-a", "line_ck_positions": ("TOP", "JUNGLE")},
+            {"champion_key": "shared-b", "line_ck_positions": ("TOP", "JUNGLE")},
+            {"champion_key": "top-only", "line_ck_positions": ("TOP",)},
+            {"champion_key": "jungle-only", "line_ck_positions": ("JUNGLE",)},
+        ]
+        positions = {
+            "top-1": "TOP", "top-2": "TOP",
+            "jungle-1": "JUNGLE", "jungle-2": "JUNGLE",
+        }
+
+        assigned = assign_line_ck_champions(positions, champions)
+
+        self.assertEqual(
+            len({champion["champion_key"] for champion in assigned.values()}),
+            4,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
