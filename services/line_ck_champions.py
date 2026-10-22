@@ -78,47 +78,60 @@ def annotate_champion_pools(champions):
 
 def assign_line_ck_champions(player_positions, champions, rng=random):
     """참가자의 배정 라인에 속하는 챔피언을 중복 없이 골라 반환합니다."""
-    result = {}
-    used_champion_keys = set()
+    supported_positions = {"TOP", "JUNGLE", "MID", "ADC", "SUPPORT"}
+    if any(position not in supported_positions for position in player_positions.values()):
+        raise ValueError("지원하지 않는 포지션이 포함되어 있습니다.")
 
-    players_by_position = {
+    champion_by_key = {
+        champion.get("champion_key"): champion
+        for champion in champions
+        if champion.get("champion_key")
+    }
+    choices_by_position = {
         position: [
-            str(player_id)
-            for player_id, assigned_position in player_positions.items()
-            if assigned_position == position
+            key for key, champion in champion_by_key.items()
+            if position in champion.get("line_ck_positions", ())
         ]
-        for position in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+        for position in supported_positions
     }
 
-    # 후보가 적은 라인부터 뽑아 포지션 간 공용 후보가 먼저 소진되는 것을 줄입니다.
-    positions = sorted(
-        players_by_position,
-        key=lambda position: sum(
-            position in champion.get("line_ck_positions", ())
-            for champion in champions
-        )
-    )
-    for position in positions:
-        player_ids = players_by_position[position]
-        if not player_ids:
-            continue
-        choices = [
-            champion for champion in champions
-            if position in champion.get("line_ck_positions", ())
-            and champion.get("champion_key") not in used_champion_keys
-        ]
-        if len(choices) < len(player_ids):
+    # 한 라인의 공용 후보가 먼저 소진되더라도 배정에 실패하지 않도록
+    # 10개 자리 전체에 대해 중복 없는 완전 매칭을 찾습니다.
+    slots = [
+        (str(player_id), position)
+        for player_id, position in player_positions.items()
+    ]
+    rng.shuffle(slots)
+    slots.sort(key=lambda slot: len(choices_by_position[slot[1]]))
+    champion_owner = {}
+    slot_champion = {}
+
+    def place(slot_index, visited):
+        player_id, position = slots[slot_index]
+        choices = list(choices_by_position[position])
+        rng.shuffle(choices)
+        for champion_key in choices:
+            if champion_key in visited:
+                continue
+            visited.add(champion_key)
+            previous_slot = champion_owner.get(champion_key)
+            if previous_slot is None or place(previous_slot, visited):
+                champion_owner[champion_key] = slot_index
+                slot_champion[slot_index] = champion_key
+                return True
+        return False
+
+    for slot_index in range(len(slots)):
+        if not place(slot_index, set()):
+            position = slots[slot_index][1]
             raise ValueError(
                 f"{position} 라인에 중복 없이 배정할 챔피언이 부족합니다."
             )
-        selected = rng.sample(choices, len(player_ids))
-        for player_id, champion in zip(player_ids, selected):
-            result[player_id] = champion
-            used_champion_keys.add(champion["champion_key"])
 
-    if len(result) != len(player_positions):
-        raise ValueError("지원하지 않는 포지션이 포함되어 있습니다.")
-    return result
+    return {
+        player_id: champion_by_key[slot_champion[slot_index]]
+        for slot_index, (player_id, _position) in enumerate(slots)
+    }
 
 
 def can_assign_standard_line_ck_roster(champion_pools):
