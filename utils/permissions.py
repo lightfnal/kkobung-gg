@@ -3,7 +3,7 @@ import discord
 from config import ADMIN_IDS
 
 
-MATCH_OPERATOR_ROLE_NAME = "내전진행자"
+MATCH_OPERATOR_ROLE_NAMES = frozenset({"내전진행자", "멤버"})
 
 
 def is_admin(
@@ -43,7 +43,7 @@ def is_admin(
 def is_match_operator(
     interaction: discord.Interaction
 ) -> bool:
-    """관리자 또는 내전진행자 역할인지 확인합니다."""
+    """관리자 또는 내전 진행 권한 역할인지 확인합니다."""
 
     if is_admin(interaction):
         return True
@@ -59,7 +59,7 @@ def is_match_operator(
 
     return any(
         getattr(role, "name", None)
-        == MATCH_OPERATOR_ROLE_NAME
+        in MATCH_OPERATOR_ROLE_NAMES
         for role in roles
     )
 
@@ -85,7 +85,7 @@ async def send_match_operator_only_message(
     interaction: discord.Interaction
 ):
     message = (
-        "❌ 관리자 또는 `내전진행자` 역할만 "
+        "❌ 관리자 또는 `내전진행자`/`멤버` 역할만 "
         "사용할 수 있습니다."
     )
 
