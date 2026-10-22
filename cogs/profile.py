@@ -54,7 +54,8 @@ def normalize_highest_tier(value):
         "GOLD": "골드", "골드": "골드",
         "PLAT": "플래티넘", "PLATINUM": "플래티넘",
         "플레": "플래티넘", "플래티넘": "플래티넘",
-        "EMERALD": "에메랄드", "에메랄드": "에메랄드",
+        "EMERALD": "에메랄드", "에메": "에메랄드",
+        "에메랄드": "에메랄드",
         "DIA": "다이아", "DIAMOND": "다이아",
         "다이아": "다이아", "다이아몬드": "다이아",
         "M1": "M1", "M3": "M3", "M5": "M5", "M7": "M7", "M9": "M9",
@@ -425,7 +426,7 @@ class Profile(commands.Cog):
         if tier is None:
             await interaction.followup.send(
                 "❌ 최고 티어를 확인할 수 없습니다. "
-                "브론즈/실버/골드/플레/다이아/M1/M3/M5/M7/M9/GM/C 중 "
+                "브론즈/실버/골드/플레/에메/다이아/M1/M3/M5/M7/M9/GM/C 중 "
                 "하나를 입력해주세요. 마스터 LP도 입력할 수 있습니다. "
                 "예: 마스터 300점은 M3입니다.",
                 ephemeral=True
