@@ -6,6 +6,10 @@ from discord.ext import commands
 
 from services.player_service import PlayerService
 from services.riot_service import RiotService
+from views.register_view import (
+    RegistrationJoinView,
+    is_joinable_recruitment_room
+)
 
 from utils.mmr import get_initial_hidden_mmr
 from utils.positions import display_position, normalize_position
@@ -818,25 +822,65 @@ class Profile(commands.Cog):
             )
 
         result_view = None
+        announcement_url = None
         if announcement_channel_id is not None and interaction.guild is not None:
-            result_message += (
-                "\n\n📣 내전 참가를 원하시면 아래 버튼에서 모집 중인 방을 확인하세요."
+            announcement_url = (
+                f"https://discord.com/channels/"
+                f"{interaction.guild.id}/{announcement_channel_id}"
             )
-            result_view = discord.ui.View(timeout=None)
-            result_view.add_item(discord.ui.Button(
-                label="내전홍보 채널 바로가기",
-                emoji="📣",
-                style=discord.ButtonStyle.link,
-                url=(
-                    f"https://discord.com/channels/"
-                    f"{interaction.guild.id}/{announcement_channel_id}"
-                )
-            ))
+
+        existing_room = join_cog.room_manager.find_player_room(user_id)
+        if existing_room is not None:
+            result_message += (
+                f"\n\nℹ️ 이미 **{existing_room.room_name}**에서 "
+                "참가 또는 대기 중이라 새 내전에 추가하지 않았습니다."
+            )
+            if announcement_url:
+                result_view = discord.ui.View(timeout=None)
+                result_view.add_item(discord.ui.Button(
+                    label="모집 안내 채널",
+                    emoji="📣",
+                    style=discord.ButtonStyle.link,
+                    url=announcement_url
+                ))
         elif interaction.guild is not None:
-            result_message += (
-                "\n\n📣 내전 참가를 원하시면 서버의 내전홍보 채널에서 "
-                "모집 중인 방을 확인해주세요."
-            )
+            open_rooms = [
+                room
+                for room in join_cog.room_manager.get_rooms()
+                if is_joinable_recruitment_room(
+                    room,
+                    interaction.guild.id
+                )
+            ]
+
+            if open_rooms:
+                registration_summary = result_message
+                result_message += (
+                    "\n\n🎮 **모집 중인 내전방**\n"
+                    "참가할 방을 선택하고 아래 버튼을 눌러주세요. "
+                    "정원이 찬 방은 대기자로 등록됩니다."
+                )
+                result_view = RegistrationJoinView(
+                    join_cog=join_cog,
+                    guild_id=interaction.guild.id,
+                    rooms=open_rooms,
+                    registration_message=registration_summary,
+                    announcement_url=announcement_url
+                )
+            else:
+                result_message += (
+                    "\n\n📣 현재 모집 중인 내전이 없습니다. "
+                    "모집이 열리면 모집창에서 참가해주세요."
+                )
+                if announcement_url:
+                    result_message += " 아래 버튼에서 모집 안내를 확인할 수 있습니다."
+                    result_view = discord.ui.View(timeout=None)
+                    result_view.add_item(discord.ui.Button(
+                        label="모집 안내 채널",
+                        emoji="📣",
+                        style=discord.ButtonStyle.link,
+                        url=announcement_url
+                    ))
 
         await interaction.followup.send(
             result_message,

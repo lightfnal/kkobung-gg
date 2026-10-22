@@ -29,7 +29,7 @@ class Register(commands.Cog):
                 "• 부 포지션 (탑/정글/미드/원딜/서폿)\n\n"
                 "마스터 LP 기준: 100=M1, 300=M3, 500=M5, "
                 "마스터 300점은 M3로 자동 구분됩니다.\n\n"
-                "등록이 완료되면 내전 모집에 참가할 수 있습니다.\n\n"
+                "등록이 완료되면 모집 중인 내전방을 바로 선택해 참가할 수 있습니다.\n\n"
                 "📌 도움말\n"
                 "1. 닉네임은 복사하지 않고 직접 입력 해주셔야 합니다.\n"
                 "2. 최고티어 반드시 작성해주시고 마스터는 M1 M3 M5 M7 M9 기준으로 "
@@ -38,8 +38,7 @@ class Register(commands.Cog):
                 "1. 위장 티어 적발 시 무통보 추방 될 수 있습니다.\n"
                 "2. 내전 진행 중 픽창과 인게임에서 솔랭(개인)픽은 지양 하며 "
                 "팀 게임 위주로 플레이 및 소통 부탁드립니다.\n"
-                "3. 프로필 등록 후 내전 참가를 원하시면 내전모집1~3 "
-                "채널을 확인해주세요."
+                "3. 프로필 등록이 끝나면 모집 중인 내전방을 선택해 참가해주세요."
             )
         )
 
@@ -51,3 +50,5 @@ class Register(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Register(bot))
+    # Persistent registration messages keep their button callbacks after a restart.
+    bot.add_view(RegisterView(bot))
