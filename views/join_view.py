@@ -4550,6 +4550,114 @@ class CaptainDraftView(discord.ui.View):
             if not self.is_finished():
                 await self.abort("30분 동안 선택이 없어 드래프트가 종료되었습니다.")
 
+class ParticipantRemovalView(discord.ui.View):
+    """진행자가 모집 중 참가자를 별명으로 선택해 제거합니다."""
+
+    def __init__(self, recruit_view, participant_ids):
+        super().__init__(timeout=120)
+        self.recruit_view = recruit_view
+        self.room = recruit_view.room
+
+        options = []
+        for user_id in participant_ids[:25]:
+            player = self.room.players.get(user_id, {})
+            nickname = str(player.get("nickname") or f"참가자 {user_id}")
+            options.append(
+                discord.SelectOption(
+                    label=nickname[:100],
+                    value=str(user_id),
+                    description=f"Discord ID: {user_id}"[:100]
+                )
+            )
+
+        self.add_item(ParticipantRemovalSelect(self, options))
+
+    async def on_timeout(self):
+        self.stop()
+
+
+class ParticipantRemovalSelect(discord.ui.Select):
+    def __init__(self, removal_view, options):
+        self.removal_view = removal_view
+        super().__init__(
+            placeholder="삭제할 참가자를 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="inhouse_remove_participant_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        recruit_view = self.removal_view.recruit_view
+        room = self.removal_view.room
+
+        if not is_admin(interaction):
+            await interaction.response.send_message(
+                "🔒 관리자 또는 내전 진행자만 참가자를 삭제할 수 있습니다.",
+                ephemeral=True
+            )
+            return
+
+        user_id = self.values[0]
+        removed_name = None
+
+        async with room.operation_lock:
+            if (
+                recruit_view.team_generating
+                or room.team_generation_lock.locked()
+                or room.current_teams is not None
+                or room.match_in_progress
+                or room.mvp_vote_in_progress
+                or room.match_transaction_active
+                or room.single_draft_mode_active
+            ):
+                await interaction.response.edit_message(
+                    content=(
+                        "❌ 팀 편성 또는 경기 진행이 시작되어 참가자를 "
+                        "삭제할 수 없습니다."
+                    ),
+                    view=None
+                )
+                return
+
+            player = room.players.get(user_id)
+            if player is None:
+                await interaction.response.edit_message(
+                    content=(
+                        "❌ 참가자 명단이 변경되었습니다. 모집창의 "
+                        "[참가자 삭제] 버튼을 다시 눌러주세요."
+                    ),
+                    view=None
+                )
+                return
+
+            removed_name = str(player.get("nickname") or user_id)
+            del room.players[user_id]
+
+            recruit_view.make_teams_button.disabled = (
+                len(room.players) < room.player_limit
+            )
+            recruit_view.join_cog.save_rooms_state()
+
+            if recruit_view.message is not None:
+                try:
+                    await recruit_view.message.edit(
+                        embeds=recruit_view.create_embeds(),
+                        view=recruit_view
+                    )
+                except discord.HTTPException:
+                    logger.exception(
+                        "참가자 삭제 후 모집창 갱신 실패 | 방=%s",
+                        room.room_id
+                    )
+
+        await interaction.response.edit_message(
+            content=f"✅ **{removed_name}**님을 참가자 명단에서 삭제했습니다.",
+            view=None
+        )
+        self.removal_view.stop()
+
+
 class JoinView(discord.ui.View):
 
     def __init__(self, join_cog):
@@ -5095,6 +5203,56 @@ class JoinView(discord.ui.View):
                 + "\n".join(participant_list)
                 + waiting_text
             )
+        )
+
+    @discord.ui.button(
+        label="참가자 삭제",
+        emoji="🗑️",
+        style=discord.ButtonStyle.danger,
+        custom_id="inhouse_remove_participant",
+        row=2
+    )
+    async def remove_participant_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        if not is_admin(interaction):
+            await send_admin_only_message(interaction)
+            return
+
+        room = self.join_cog.active_room
+        async with room.operation_lock:
+            if (
+                self.team_generating
+                or room.team_generation_lock.locked()
+                or room.current_teams is not None
+                or room.match_in_progress
+                or room.mvp_vote_in_progress
+                or room.match_transaction_active
+                or room.single_draft_mode_active
+            ):
+                await interaction.response.send_message(
+                    "❌ 팀 편성 또는 경기 진행이 시작되어 참가자를 삭제할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+            participant_ids = list(room.players.keys())
+
+        if not participant_ids:
+            await interaction.response.send_message(
+                "📋 현재 삭제할 참가자가 없습니다.",
+                ephemeral=True
+            )
+            return
+
+        removal_view = ParticipantRemovalView(self, participant_ids)
+        await interaction.response.send_message(
+            "🗑️ 삭제할 참가자를 선택해주세요.\n"
+            "선택하면 해당 참가자가 명단에서 삭제됩니다.",
+            view=removal_view,
+            ephemeral=True
         )
 
     @discord.ui.button(
@@ -5904,6 +6062,7 @@ class JoinView(discord.ui.View):
                     continue
                 item.disabled = item.custom_id not in (
                     "inhouse_list",
+                    "inhouse_remove_participant",
                     "inhouse_reset",
                     "inhouse_close"
                 )
@@ -5996,6 +6155,7 @@ class JoinView(discord.ui.View):
                     if isinstance(item, discord.ui.Button):
                         if item.custom_id not in [
                             "inhouse_list",
+                            "inhouse_remove_participant",
                             "inhouse_reset",
                             "inhouse_close"
                         ]:
