@@ -455,12 +455,16 @@ class AdminPlayer(commands.Cog):
 
     @discord.app_commands.command(
         name="참가자삭제",
-        description="관리자가 내전 참가자 명단에서 유저를 제거합니다."
+        description="내전 참가자를 Discord ID 또는 서버 별명으로 제거합니다."
+    )
+    @discord.app_commands.rename(target="대상")
+    @discord.app_commands.describe(
+        target="참가자의 Discord ID 또는 서버 별명을 입력하세요."
     )
     async def remove_participant(
         self,
         interaction: discord.Interaction,
-        discord_id: str
+        target: str
     ):
         if not (
             is_admin(interaction)
@@ -505,19 +509,53 @@ class AdminPlayer(commands.Cog):
                 ephemeral=True
             )
 
-            user_id = discord_id.strip()
+            target_value = target.strip()
 
-            if user_id not in room.players:
+            # Discord mention format is accepted as well as a plain ID.
+            user_id = target_value
+            if user_id.startswith("<@") and user_id.endswith(">"):
+                user_id = user_id[2:-1]
+                if user_id.startswith("!"):
+                    user_id = user_id[1:]
+
+            # Prefer an exact Discord ID match. Otherwise compare the
+            # server display nickname stored in the active room.
+            if user_id in room.players:
+                matched_ids = [user_id]
+            else:
+                normalized_target = target_value.casefold()
+                matched_ids = [
+                    participant_id
+                    for participant_id, player in room.players.items()
+                    if str(player.get("nickname") or "").strip().casefold()
+                    == normalized_target
+                ]
+
+            if not matched_ids:
                 await interaction.followup.send(
-                    "❌ 해당 ID의 유저는 현재 참가 중이 아닙니다.",
+                    "❌ 해당 Discord ID 또는 별명과 일치하는 참가자를 "
+                    "찾지 못했습니다. 현재 참가자 명단의 별명을 그대로 "
+                    "입력해주세요.",
                     ephemeral=True
                 )
                 return
 
-            player_name = room.players[user_id].get(
-                "nickname",
-                "알 수 없음"
-            )
+            if len(matched_ids) > 1:
+                candidates = [
+                    f"• {room.players[participant_id].get('nickname') or '이름 없음'} "
+                    f"(ID: `{participant_id}`)"
+                    for participant_id in matched_ids
+                ]
+                await interaction.followup.send(
+                    "❌ 같은 별명을 가진 참가자가 여러 명입니다. "
+                    "잘못 삭제되지 않도록 Discord ID로 다시 입력해주세요.\n"
+                    + "\n".join(candidates),
+                    ephemeral=True
+                )
+                return
+
+            user_id = matched_ids[0]
+            player_name = room.players[user_id].get("nickname") or user_id
 
             del room.players[user_id]
 
