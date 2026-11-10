@@ -4761,7 +4761,7 @@ class JoinView(discord.ui.View):
             10,
             max(0, int((player_count / player_limit) * 10 + 0.5))
         )
-        progress_bar = "🟨" * filled_segments + "▫️" * (10 - filled_segments)
+        progress_bar = "🟨" * filled_segments + "◯" * (10 - filled_segments)
         open_slots = max(0, player_limit - player_count)
         slot_label = f"{open_slots}자리 남음" if open_slots else "정원 마감"
 
@@ -4891,16 +4891,15 @@ class JoinView(discord.ui.View):
             )
 
         score = self.room.series_score
-        score_summary = (
-            f"완료 {self.room.series_game}세트  ·  "
-            f"🔴 {score.get('red', 0)} : {score.get('blue', 0)} 🔵"
-        )
         if getattr(self.room, "single_draft_mode_active", False):
-            footer = f"연속 단판 · 참가 명단 고정  |  {score_summary}"
+            footer = "연속 단판 · 참가 명단 고정"
         elif self.recruit_closed:
-            footer = f"모집 종료  |  {score_summary}"
+            footer = "모집 종료"
         else:
-            footer = f"참가 또는 취소 버튼을 이용하세요  |  {score_summary}"
+            footer = (
+                f"BO5 {self.room.series_game}세트  ·  "
+                f"🔴 {score.get('red', 0)} : {score.get('blue', 0)} 🔵"
+            )
         embed.set_footer(text=footer)
 
         return embed
