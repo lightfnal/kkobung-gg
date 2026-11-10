@@ -4761,7 +4761,8 @@ class JoinView(discord.ui.View):
             10,
             max(0, int((player_count / player_limit) * 10 + 0.5))
         )
-        progress_bar = "🟨" * filled_segments + "◯" * (10 - filled_segments)
+        # 이모지 원형 대신 가로형 빈 칸을 써서 모바일에서도 막대처럼 읽히게 합니다.
+        progress_bar = "🟨" * filled_segments + "▱" * (10 - filled_segments)
         open_slots = max(0, player_limit - player_count)
         slot_label = f"{open_slots}자리 남음" if open_slots else "정원 마감"
 
