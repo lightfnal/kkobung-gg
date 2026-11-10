@@ -4706,65 +4706,80 @@ class JoinView(discord.ui.View):
         return True
 
     def create_embed(self):
-        """현재 참가자 정보를 모집 메시지로 만듭니다."""
+        """모바일에서도 모집 현황이 먼저 보이도록 모집 카드를 만듭니다."""
 
         players = self.join_cog.players
         waiting_players = self.room.waiting_players
+        player_count = len(players)
+        waiting_count = len(waiting_players)
+        player_limit = max(1, int(self.room.player_limit or 10))
 
         self.make_teams_button.disabled = (
-            len(players) < self.room.player_limit
+            player_count < player_limit
         )
 
         if getattr(self.room, "single_draft_mode_active", False):
-            title = "🔄 연속 단판 · 10명 고정"
+            status = "🔄 연속 단판 · 참가자 고정"
             if self.room.current_teams is None:
-                description = (
+                phase_description = (
                     "같은 10명으로 다음 판 팀을 편성할 수 있습니다.\n"
                     "`🎲 팀 생성`을 눌러 자동 밸런스, 경매, 캡틴 드래프트 중 선택하세요.\n"
                     "현재 단판 팀을 유지해 BO5로 이어가려면 `/단판bo5전환`을 실행하세요."
                 )
             else:
-                description = (
+                phase_description = (
                     "현재 경기는 단판입니다. 결과가 등록되면 같은 10명으로 "
                     "다음 팀을 다시 편성할 수 있습니다."
                 )
+        elif self.room.match_in_progress:
+            status = "🎮 경기 진행 중"
+            phase_description = "경기가 진행 중입니다. 참가자 명단과 결과 안내를 확인해주세요."
+        elif self.team_generating or self.room.team_generation_lock.locked():
+            status = "⚙️ 팀 편성 중"
+            phase_description = "참가자 명단을 확정하고 있습니다. 잠시 기다려주세요."
+        elif self.room.current_teams is not None:
+            status = "✅ 팀 편성 완료 · 시작 대기"
+            phase_description = "팀 편성이 완료되었습니다. 경기 시작 안내를 기다려주세요."
         elif self.recruit_closed:
-            title = "🔒 내전 모집 종료"
-            description = (
-                "모집이 종료되었습니다.\n\n"
-                f"👥 현재 참가자: **{len(players)}/{self.room.player_limit}명**\n"
-                f"🕒 현재 대기자: "
-                f"**{len(waiting_players)}/{MAX_WAITING_PLAYERS}명**"
-            )
+            status = "🔒 모집 종료"
+            phase_description = "모집이 종료되었습니다."
         else:
-            title = "🎮 내전 참가 모집"
-            description = (
-                "아래 버튼을 눌러 내전에 참가하세요.\n\n"
-                f"👥 현재 참가자: **{len(players)}/{self.room.player_limit}명**\n"
-                f"🕒 현재 대기자: "
-                f"**{len(waiting_players)}/{MAX_WAITING_PLAYERS}명**"
-            )
-
-        description = (
-            f"{format_room_status(self.room)}\n\n"
-            f"{description}"
-        )
+            status = "🟡 참가 모집 중"
+            phase_description = "참가 버튼을 눌러 내전에 신청해주세요."
 
         if self.room.recruit_start_mode == "when_full":
-            start_notice = f"🚀 **시작 안내:** {self.room.player_limit}명 모이면 바로 시작"
+            start_notice = f"🚀 {player_limit}명 모집 시 바로 시작"
         elif self.room.recruit_start_mode == "scheduled":
             start_notice = (
-                "⏰ **시작 예정:** "
+                "⏰ 시작 예정 · "
                 f"{self.room.recruit_start_time or '시간 미정'}"
             )
         else:
-            start_notice = "🗓️ **시작 안내:** 아직 미정"
+            start_notice = "🗓️ 시작 일정은 진행자가 안내합니다"
 
-        description = f"{description}\n\n{start_notice}"
+        filled_segments = min(
+            10,
+            max(0, int((player_count / player_limit) * 10 + 0.5))
+        )
+        progress_bar = "🟨" * filled_segments + "▫️" * (10 - filled_segments)
+        open_slots = max(0, player_limit - player_count)
+        slot_label = f"{open_slots}자리 남음" if open_slots else "정원 마감"
+
+        title = f"⚔️ {self.room.room_name} · 내전 모집"
+        description = (
+            f"**{status}** · 방 `{self.room.room_id}`\n"
+            f"{phase_description}\n\n"
+            f"👥 참가 **{player_count}/{player_limit}명**  ·  "
+            f"🕒 대기 **{waiting_count}/{MAX_WAITING_PLAYERS}명**\n"
+            f"{progress_bar}\n"
+            f"**{slot_label}**\n\n"
+            f"{start_notice}"
+        )
 
         embed = discord.Embed(
             title=title,
-            description=description
+            description=description,
+            color=discord.Color.from_rgb(198, 155, 78)
         )
 
         if players:
@@ -4790,7 +4805,7 @@ class JoinView(discord.ui.View):
 
             position_short = {
                 "TOP": "TOP",
-                "JUNGLE": "JUN",
+                "JUNGLE": "JG",
                 "MID": "MID",
                 "ADC": "ADC",
                 "SUPPORT": "SUP"
@@ -4828,62 +4843,72 @@ class JoinView(discord.ui.View):
                     sub = "-"
 
                 participant_list.append(
-                    f"**{index}.** "
-                    f"<@{user_id}> · "
-                    f"**{tier}** · "
-                    f"⭐{rating} · "
-                    f"`{main}/{sub}`"
+                    f"**{index:02d}** <@{user_id}> · `{tier}` · "
+                    f"⭐ {rating} · `{main}/{sub}`"
                 )
 
-            embed.add_field(
-                name="📋 참가자 명단",
-                value="\n".join(participant_list),
-                inline=False
-            )
+            # 20인 경매 모집에서도 각 필드의 Discord 글자 제한을 넘지 않게
+            # 참가자 목록을 10명 단위로 나눠 표시합니다.
+            for offset in range(0, len(participant_list), 10):
+                chunk = participant_list[offset:offset + 10]
+                start_number = offset + 1
+                end_number = offset + len(chunk)
+                field_name = (
+                    "👥 참가자"
+                    if len(participant_list) <= 10
+                    else f"👥 참가자 {start_number}–{end_number}"
+                )
+                embed.add_field(
+                    name=field_name,
+                    value="\n".join(chunk),
+                    inline=False
+                )
         else:
             embed.add_field(
-                name="📋 참가자 명단",
-                value="아직 참가자가 없습니다.",
+                name="👥 참가자",
+                value="아직 신청한 사람이 없습니다.\n참가 버튼으로 신청할 수 있어요.",
                 inline=False
             )
 
         if waiting_players:
             waiting_list = [
-                f"**{index}.** <@{user_id}>"
+                f"**{index:02d}** <@{user_id}>"
                 for index, user_id in enumerate(
                     waiting_players,
                     start=1
                 )
             ]
             embed.add_field(
-                name="🕒 대기자 명단",
+                name=f"🕒 대기자 · {waiting_count}명",
                 value="\n".join(waiting_list),
                 inline=False
             )
         else:
             embed.add_field(
-                name="🕒 대기자 명단",
-                value="아직 대기자가 없습니다.",
+                name="🕒 대기자 · 0명",
+                value="대기 중인 참가자가 없습니다.",
                 inline=False
             )
 
+        score = self.room.series_score
+        score_summary = (
+            f"완료 {self.room.series_game}세트  ·  "
+            f"🔴 {score.get('red', 0)} : {score.get('blue', 0)} 🔵"
+        )
         if getattr(self.room, "single_draft_mode_active", False):
-            embed.set_footer(text="연속 단판 모드 · 참가 명단은 고정되어 있습니다.")
+            footer = f"연속 단판 · 참가 명단 고정  |  {score_summary}"
         elif self.recruit_closed:
-            embed.set_footer(
-                text="모집이 종료되었습니다."
-            )
+            footer = f"모집 종료  |  {score_summary}"
         else:
-            embed.set_footer(
-                text="참가 또는 참가취소 버튼을 눌러주세요."
-            )
+            footer = f"참가 또는 취소 버튼을 이용하세요  |  {score_summary}"
+        embed.set_footer(text=footer)
 
         return embed
 
     def create_embeds(self):
         """모집 카드와 참가 안내 카드를 한 메시지에 함께 표시합니다."""
         guide = discord.Embed(
-            title="📢 참가자 안내",
+            title="🧭 참가 안내",
             description=(
                 "**1. 모집 대기**\n"
                 "인원 모집 시간 동안 게임이나 개인 작업을 하며 기다려주세요. "
@@ -4892,7 +4917,7 @@ class JoinView(discord.ui.View):
                 "10명 모집 후 멘션을 받았는데 잠수 중이거나 참가하기 어려운 경우, "
                 "5분 안에 응답이 없으면 다음 대기자에게 순번이 넘어갑니다."
             ),
-            color=discord.Color.orange()
+            color=discord.Color.from_rgb(198, 155, 78)
         )
         return [self.create_embed(), guide]
 
