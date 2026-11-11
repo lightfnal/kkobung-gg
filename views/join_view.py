@@ -4761,20 +4761,21 @@ class JoinView(discord.ui.View):
             10,
             max(0, int((player_count / player_limit) * 10 + 0.5))
         )
-        # 이모지 원형 대신 가로형 빈 칸을 써서 모바일에서도 막대처럼 읽히게 합니다.
-        progress_bar = "🟨" * filled_segments + "▱" * (10 - filled_segments)
+        progress_bar = "🟨" * filled_segments + "⬛" * (10 - filled_segments)
         open_slots = max(0, player_limit - player_count)
         slot_label = f"{open_slots}자리 남음" if open_slots else "정원 마감"
 
         title = f"⚔️ {self.room.room_name} · 내전 모집"
         description = (
-            f"**{status}** · 방 `{self.room.room_id}`\n"
+            f"**{status}** · 방 {self.room.room_id}\n"
             f"{phase_description}\n\n"
-            f"👥 참가 **{player_count}/{player_limit}명**  ·  "
-            f"🕒 대기 **{waiting_count}/{MAX_WAITING_PLAYERS}명**\n"
+            f"👥 참가 **{player_count} / {player_limit}명**  ·  "
+            f"🕒 대기 **{waiting_count} / {MAX_WAITING_PLAYERS}명**\n"
             f"{progress_bar}\n"
             f"**{slot_label}**\n\n"
-            f"{start_notice}"
+            "────────────────────\n\n"
+            f"{start_notice}\n\n"
+            "────────────────────"
         )
 
         embed = discord.Embed(
@@ -4844,8 +4845,8 @@ class JoinView(discord.ui.View):
                     sub = "-"
 
                 participant_list.append(
-                    f"**{index:02d}** <@{user_id}> · `{tier}` · "
-                    f"⭐ {rating} · `{main}/{sub}`"
+                    f"**{index:02d}** <@{user_id}>  `{tier}`  "
+                    f"⭐ {rating}  {main} / {sub}"
                 )
 
             # 20인 경매 모집에서도 각 필드의 Discord 글자 제한을 넘지 않게
@@ -4867,7 +4868,7 @@ class JoinView(discord.ui.View):
         else:
             embed.add_field(
                 name="👥 참가자",
-                value="아직 신청한 사람이 없습니다.\n참가 버튼으로 신청할 수 있어요.",
+                value="아직 신청한 사람이 없습니다.",
                 inline=False
             )
 
@@ -4892,15 +4893,16 @@ class JoinView(discord.ui.View):
             )
 
         score = self.room.series_score
+        score_summary = (
+            f"완료 {self.room.series_game}세트 · "
+            f"🔴{score.get('red', 0)}:{score.get('blue', 0)}🔵"
+        )
         if getattr(self.room, "single_draft_mode_active", False):
-            footer = "연속 단판 · 참가 명단 고정"
+            footer = f"연속 단판 · 명단 고정 · {score_summary}"
         elif self.recruit_closed:
-            footer = "모집 종료"
+            footer = f"모집 종료 · {score_summary}"
         else:
-            footer = (
-                f"BO5 {self.room.series_game}세트  ·  "
-                f"🔴 {score.get('red', 0)} : {score.get('blue', 0)} 🔵"
-            )
+            footer = f"참가 또는 취소 버튼을 이용하세요 · {score_summary}"
         embed.set_footer(text=footer)
 
         return embed
